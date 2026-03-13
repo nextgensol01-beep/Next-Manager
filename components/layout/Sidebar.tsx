@@ -1,0 +1,140 @@
+"use client";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
+import {
+  LayoutDashboard, Users, UserCircle, Calendar, ArrowLeftRight,
+  Receipt, BarChart2, FileText, ClipboardCheck, Trash2, Mail, X,
+} from "lucide-react";
+import { cachedFetch } from "@/lib/cache";
+
+const navItems = [
+  { href: "/dashboard",                     label: "Dashboard",           icon: LayoutDashboard },
+  { href: "/dashboard/clients",             label: "Clients",             icon: Users },
+  { href: "/dashboard/contacts",            label: "Contacts",            icon: UserCircle },
+  { href: "/dashboard/financial-year",      label: "Financial Year",      icon: Calendar },
+  { href: "/dashboard/credit-transactions", label: "Credit Transactions", icon: ArrowLeftRight },
+  { href: "/dashboard/annual-return",       label: "EPR Annual Return",   icon: ClipboardCheck },
+  { href: "/dashboard/billing",             label: "Billing & Payments",  icon: Receipt },
+  { href: "/dashboard/reports",             label: "Reports",             icon: BarChart2 },
+  { href: "/dashboard/quotation",           label: "Quotation Generator", icon: FileText },
+];
+
+interface Props { open: boolean; onClose: () => void; }
+
+export default function Sidebar({ open, onClose }: Props) {
+  const pathname = usePathname();
+  const [trashCount, setTrashCount] = useState(0);
+  const [emailCount, setEmailCount] = useState(0);
+  const [drawerVisible, setDrawerVisible]   = useState(false);
+  const [drawerRendered, setDrawerRendered] = useState(false);
+
+  useEffect(() => { onClose(); }, [pathname]);
+
+  useEffect(() => {
+    if (open) {
+      setDrawerRendered(true);
+      requestAnimationFrame(() => requestAnimationFrame(() => setDrawerVisible(true)));
+    } else {
+      setDrawerVisible(false);
+      const t = setTimeout(() => setDrawerRendered(false), 260);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    cachedFetch<unknown[]>("/api/trash?type=all")
+      .then((d) => { if (Array.isArray(d)) setTrashCount(d.length); }).catch(() => {});
+    cachedFetch<unknown[]>("/api/email-log")
+      .then((d) => { if (Array.isArray(d)) setEmailCount(d.length); }).catch(() => {});
+  }, [pathname]);
+
+  const content = (
+    <aside className="sidebar-panel w-[260px] flex-shrink-0 flex flex-col h-full overflow-y-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between p-5 border-b sidebar-divider">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 bg-brand-600 rounded-xl flex items-center justify-center shadow-lg shadow-brand-600/30 flex-shrink-0">
+            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+            </svg>
+          </div>
+          <div>
+            <p className="sidebar-text-primary font-bold text-sm leading-tight">Nextgen Solutions</p>
+            <p className="sidebar-text-faint text-xs">EPR Consultancy</p>
+          </div>
+        </div>
+        <button onClick={onClose} className="lg:hidden p-1.5 rounded-lg sidebar-text-muted transition-all duration-150 active:scale-90 hover:bg-[var(--sidebar-hover-bg)]">
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 p-4 space-y-0.5">
+        <p className="sidebar-text-faint text-[10px] font-semibold uppercase tracking-widest px-4 mb-2">Navigation</p>
+        {navItems.map(({ href, label, icon: Icon }) => {
+          const isActive = href === "/dashboard" ? pathname === href : pathname.startsWith(href);
+          return (
+            <Link key={href} href={href} className={cn("sidebar-link", isActive && "active")}>
+              <Icon className="w-4 h-4 flex-shrink-0" />
+              {label}
+            </Link>
+          );
+        })}
+
+        <div className="pt-4 pb-1">
+          <p className="sidebar-text-faint text-[10px] font-semibold uppercase tracking-widest px-4">System</p>
+        </div>
+
+        <Link href="/dashboard/email-history" className={cn("sidebar-link", pathname.startsWith("/dashboard/email-history") && "active")}>
+          <Mail className="w-4 h-4 flex-shrink-0" />
+          <span className="flex-1">Email History</span>
+          {emailCount > 0 && <span className="sidebar-badge-blue">{emailCount}</span>}
+        </Link>
+
+        <Link href="/dashboard/trash" className={cn("sidebar-link", pathname.startsWith("/dashboard/trash") && "active")}>
+          <Trash2 className="w-4 h-4 flex-shrink-0" />
+          <span className="flex-1">Recycle Bin</span>
+          {trashCount > 0 && <span className="sidebar-badge-red">{trashCount}</span>}
+        </Link>
+      </nav>
+
+      <div className="border-t sidebar-divider p-4">
+        <p className="sidebar-text-faint text-xs text-center">v2.0.0 · Internal Use Only</p>
+      </div>
+    </aside>
+  );
+
+  return (
+    <>
+      {/* Desktop: always visible */}
+      <div className="hidden lg:flex h-screen flex-shrink-0">{content}</div>
+
+      {/* Mobile: animated slide-in drawer */}
+      {drawerRendered && (
+        <>
+          <div
+            className="fixed inset-0 z-40 lg:hidden"
+            style={{
+              backgroundColor: drawerVisible ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0)",
+              backdropFilter: drawerVisible ? "blur(2px)" : "none",
+              transition: "background-color 0.25s, backdrop-filter 0.25s",
+            }}
+            onClick={onClose}
+          />
+          <div
+            className="fixed inset-y-0 left-0 z-50 flex lg:hidden h-full"
+            style={{
+              transform: drawerVisible ? "translateX(0)" : "translateX(-100%)",
+              transition: "transform 0.26s cubic-bezier(0.32, 0.72, 0, 1)",
+              boxShadow: drawerVisible ? "4px 0 32px rgba(0,0,0,0.25)" : "none",
+            }}
+          >
+            {content}
+          </div>
+        </>
+      )}
+    </>
+  );
+}

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Payment Reminder — {{clientName}}</title>
+</head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif;">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:32px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,0.10);">
+
+  <!-- HEADER -->
+  <tr>
+    <td style="background:linear-gradient(135deg,#1e40af 0%,#2563eb 60%,#3b82f6 100%);padding:0;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:32px 36px 28px;">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td>
+                  <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">Nextgen Solutions</div>
+                  <div style="font-size:12px;color:rgba(255,255,255,0.7);margin-top:3px;">EPR Consultancy Services</div>
+                </td>
+                <td align="right">
+                  <table cellpadding="0" cellspacing="0">
+                    <tr><td style="background:rgba(255,255,255,0.15);border-radius:8px;padding:8px 16px;text-align:center;">
+                      <div style="font-size:10px;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:1px;font-weight:600;">Payment</div>
+                      <div style="font-size:18px;font-weight:800;color:#fff;">Reminder</div>
+                    </td></tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <!-- Orange accent bar -->
+        <tr><td style="background:linear-gradient(90deg,#f59e0b,#fbbf24);height:4px;"></td></tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- GREETING -->
+  <tr>
+    <td style="padding:32px 36px 0;">
+      <p style="margin:0;font-size:15px;color:#374151;">Dear <strong style="color:#0f172a;">{{clientName}}</strong>,</p>
+      <p style="margin:12px 0 0;font-size:14px;color:#6b7280;line-height:1.7;">
+        We hope you are doing well. This is a friendly reminder regarding your outstanding payment for
+        EPR compliance services for <strong style="color:#1e40af;">FY {{financialYear}}</strong>.
+      </p>
+    </td>
+  </tr>
+
+  <!-- AMOUNT DUE HIGHLIGHT -->
+  <tr>
+    <td style="padding:24px 36px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border-radius:12px;border:1px solid #bfdbfe;">
+        <tr>
+          <td style="padding:20px 24px;" align="center">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#3b82f6;margin-bottom:6px;">Amount Due</div>
+            <div style="font-size:36px;font-weight:900;color:#1e3a8a;letter-spacing:-1px;">₹{{pendingAmount}}</div>
+            <div style="font-size:12px;color:#6b7280;margin-top:4px;">Financial Year {{financialYear}}</div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- BILLING BREAKDOWN -->
+  <tr>
+    <td style="padding:24px 36px 0;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#9ca3af;margin-bottom:12px;">Billing Summary</div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        {{breakdownRows}}
+        <!-- Divider -->
+        <tr><td colspan="2" style="padding:4px 0;"><hr style="border:none;border-top:1px solid #e5e7eb;margin:4px 0;" /></td></tr>
+        <!-- Total Billed -->
+        <tr>
+          <td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;">Total Billed</td>
+          <td style="padding:8px 12px;font-size:13px;color:#0f172a;font-weight:700;text-align:right;">₹{{totalAmount}}</td>
+        </tr>
+        <!-- Paid -->
+        <tr style="background:#f0fdf4;border-radius:6px;">
+          <td style="padding:8px 12px;font-size:13px;color:#15803d;">Amount Paid</td>
+          <td style="padding:8px 12px;font-size:13px;color:#15803d;font-weight:700;text-align:right;">₹{{totalPaid}}</td>
+        </tr>
+        <!-- Pending -->
+        <tr style="background:#fef2f2;">
+          <td style="padding:10px 12px;font-size:14px;color:#dc2626;font-weight:700;">Pending Amount</td>
+          <td style="padding:10px 12px;font-size:15px;color:#dc2626;font-weight:800;text-align:right;">₹{{pendingAmount}}</td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- CTA MESSAGE -->
+  <tr>
+    <td style="padding:24px 36px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border-left:4px solid #f59e0b;border-radius:0 8px 8px 0;">
+        <tr><td style="padding:14px 16px;">
+          <p style="margin:0;font-size:13px;color:#92400e;line-height:1.6;">
+            Kindly arrange the payment at your earliest convenience. If you have already made the payment, please ignore this reminder or send us the transaction details.
+          </p>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- SIGN OFF -->
+  <tr>
+    <td style="padding:28px 36px 0;">
+      <p style="margin:0;font-size:14px;color:#374151;line-height:1.7;">
+        Thank you for your continued trust in us.<br/>
+        For any queries, feel free to reach out to our team.
+      </p>
+      <p style="margin:16px 0 0;font-size:14px;color:#374151;">
+        Warm regards,<br/>
+        <strong style="color:#1e40af;">Team Nextgen Solutions</strong><br/>
+        <span style="font-size:12px;color:#9ca3af;">EPR Consultancy Services</span>
+      </p>
+    </td>
+  </tr>
+
+  <!-- FOOTER -->
+  <tr>
+    <td style="padding:24px 36px 20px;">
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin-bottom:20px;" />
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td>
+            <div style="font-size:11px;color:#9ca3af;">Nextgen Solutions | EPR Consultancy</div>
+            <div style="font-size:10px;color:#d1d5db;margin-top:2px;">This is an automated reminder generated by Nextgen ERP</div>
+          </td>
+          <td align="right">
+            <div style="display:inline-block;background:#eff6ff;border-radius:6px;padding:4px 10px;">
+              <span style="font-size:10px;font-weight:700;color:#2563eb;">FY {{financialYear}}</span>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
+
+</body>
+</html>
+
+<!--
+VARIABLES: {{clientName}} {{financialYear}} {{pendingAmount}} {{totalAmount}} {{totalPaid}} {{breakdownRows}}
+breakdownRows = <tr> rows for each charge line (govt, consultancy, etc.)
+-->

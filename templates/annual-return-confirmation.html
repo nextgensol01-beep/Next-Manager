@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>EPR Annual Return Filed — {{clientName}}</title>
+</head>
+<body style="margin:0;padding:0;background:#f0fdf4;font-family:'Segoe UI',Arial,sans-serif;">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;padding:32px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,0.10);">
+
+  <!-- HEADER TOP ACCENT -->
+  <tr>
+    <td style="background:linear-gradient(90deg,#34d399,#6ee7b7);height:4px;padding:0;"></td>
+  </tr>
+
+  <!-- HEADER -->
+  <tr>
+    <td style="background:linear-gradient(135deg,#065f46 0%,#059669 60%,#10b981 100%);padding:28px 36px 24px;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="vertical-align:middle;">
+            <div style="font-size:22px;font-weight:900;color:#ffffff;letter-spacing:-0.5px;line-height:1;">Nextgen Solutions</div>
+            <div style="font-size:12px;color:rgba(255,255,255,0.65);margin-top:4px;">EPR Consultancy Services</div>
+          </td>
+          <td style="vertical-align:middle;text-align:right;">
+            <table cellpadding="0" cellspacing="0" style="display:inline-table;">
+              <tr>
+                <td style="background:rgba(255,255,255,0.15);border-radius:10px;padding:10px 18px;text-align:center;">
+                  <div style="font-size:22px;line-height:1;">&#10003;</div>
+                  <div style="font-size:11px;color:rgba(255,255,255,0.9);font-weight:700;margin-top:3px;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Return Filed</div>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- HEADER BOTTOM ACCENT -->
+  <tr>
+    <td style="background:linear-gradient(90deg,#34d399,#6ee7b7);height:4px;padding:0;"></td>
+  </tr>
+
+  <!-- GREETING -->
+  <tr>
+    <td style="padding:32px 36px 0;">
+      <p style="margin:0;font-size:15px;color:#374151;line-height:1.6;">Dear <strong style="color:#0f172a;">{{clientName}}</strong>,</p>
+      <p style="margin:12px 0 0;font-size:14px;color:#6b7280;line-height:1.7;">
+        We are pleased to inform you that your <strong style="color:#065f46;">EPR Annual Return</strong> for
+        <strong style="color:#065f46;">FY {{financialYear}}</strong> has been successfully filed and verified on the CPCB portal.
+      </p>
+    </td>
+  </tr>
+
+  <!-- SUCCESS CARD -->
+  <tr>
+    <td style="padding:20px 36px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;border:1px solid #a7f3d0;border-radius:12px;">
+        <tr>
+          <td style="padding:16px 20px;">
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="vertical-align:middle;padding-right:14px;">
+                  <div style="width:36px;height:36px;background:#059669;border-radius:50%;text-align:center;line-height:36px;font-size:20px;color:#ffffff;font-weight:900;">&#10003;</div>
+                </td>
+                <td style="vertical-align:middle;">
+                  <div style="font-size:16px;font-weight:800;color:#065f46;">Return Successfully Filed</div>
+                  <div style="font-size:12px;color:#6b7280;margin-top:2px;">Status: <strong style="color:#059669;">Verified</strong></div>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- FILING DETAILS TABLE -->
+  <tr>
+    <td style="padding:24px 36px 0;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.9px;color:#9ca3af;margin-bottom:10px;">Filing Details</div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+        <tr>
+          <td style="padding:11px 16px;font-size:12px;font-weight:600;color:#9ca3af;border-bottom:1px solid #f3f4f6;background:#f9fafb;width:42%;">Client</td>
+          <td style="padding:11px 16px;font-size:13px;font-weight:700;color:#111827;border-bottom:1px solid #f3f4f6;background:#f9fafb;">{{clientName}}</td>
+        </tr>
+        <tr>
+          <td style="padding:11px 16px;font-size:12px;font-weight:600;color:#9ca3af;border-bottom:1px solid #f3f4f6;">Financial Year</td>
+          <td style="padding:11px 16px;font-size:13px;font-weight:700;color:#1e40af;border-bottom:1px solid #f3f4f6;">FY {{financialYear}}</td>
+        </tr>
+        <tr>
+          <td style="padding:11px 16px;font-size:12px;font-weight:600;color:#9ca3af;border-bottom:1px solid #f3f4f6;background:#f9fafb;">Filing Date</td>
+          <td style="padding:11px 16px;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;background:#f9fafb;">{{filingDate}}</td>
+        </tr>
+        <tr>
+          <td style="padding:11px 16px;font-size:12px;font-weight:600;color:#9ca3af;border-bottom:1px solid #f3f4f6;">Acknowledgement No.</td>
+          <td style="padding:11px 16px;font-size:13px;font-family:monospace;color:#065f46;font-weight:700;border-bottom:1px solid #f3f4f6;">{{acknowledgeNumber}}</td>
+        </tr>
+        <tr>
+          <td style="padding:11px 16px;font-size:12px;font-weight:600;color:#9ca3af;background:#f9fafb;">Status</td>
+          <td style="padding:11px 16px;background:#f9fafb;">
+            <table cellpadding="0" cellspacing="0" style="display:inline-table;">
+              <tr>
+                <td style="background:#d1fae5;border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700;color:#065f46;white-space:nowrap;">&#10003; Verified</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- ATTACHMENTS NOTE -->
+  <tr>
+    <td style="padding:20px 36px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-left:4px solid #3b82f6;border-radius:0 8px 8px 0;background:#eff6ff;">
+        <tr>
+          <td style="padding:14px 16px;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#1d4ed8;margin-bottom:4px;">&#128206; Attachments</div>
+            <p style="margin:0;font-size:12px;color:#1e40af;line-height:1.6;">Please find the filing screenshots and acknowledgement documents attached to this email for your records.</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- REMARKS (conditional) -->
+  {{remarksBlock}}
+
+  <!-- SIGN OFF -->
+  <tr>
+    <td style="padding:28px 36px 0;">
+      <p style="margin:0;font-size:14px;color:#374151;line-height:1.7;">
+        Please retain this confirmation and the attached documents for your compliance records.
+        Feel free to reach out if you have any questions.
+      </p>
+      <p style="margin:20px 0 0;font-size:14px;color:#374151;line-height:1.7;">
+        Best regards,<br/>
+        <strong style="color:#065f46;font-size:15px;">Team Nextgen Solutions</strong><br/>
+        <span style="font-size:12px;color:#9ca3af;">EPR Consultancy Services</span>
+      </p>
+    </td>
+  </tr>
+
+  <!-- FOOTER -->
+  <tr>
+    <td style="padding:24px 36px 20px;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding-top:20px;border-top:1px solid #e5e7eb;">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="vertical-align:middle;">
+                  <div style="font-size:11px;color:#9ca3af;">Nextgen Solutions | EPR Consultancy</div>
+                  <div style="font-size:10px;color:#d1d5db;margin-top:2px;">Auto-generated draft from Nextgen ERP — please attach screenshots before sending.</div>
+                </td>
+                <td style="vertical-align:middle;text-align:right;">
+                  <table cellpadding="0" cellspacing="0" style="display:inline-table;">
+                    <tr>
+                      <td style="background:#d1fae5;border-radius:6px;padding:4px 10px;font-size:10px;font-weight:700;color:#065f46;white-space:nowrap;">FY {{financialYear}}</td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
+
+</body>
+</html>
