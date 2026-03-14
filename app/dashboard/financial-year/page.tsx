@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useRef, useCallback } from "react";
+import React, { useRef, useState } from "react";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
 import Modal from "@/components/ui/Modal";
@@ -8,8 +8,9 @@ import { CategoryBreakdown } from "@/components/ui/CategoryBreakdown";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import TableWrapper from "@/components/ui/TableWrapper";
 import EmptyState from "@/components/ui/EmptyState";
+import FYTabBar from "@/components/ui/FYTabBar";
 import { FINANCIAL_YEARS, CURRENT_FY } from "@/lib/utils";
-import { Plus, Pencil, Trash2, BarChart2, ChevronDown } from "lucide-react";
+import { Plus, Pencil, Trash2, BarChart2, ChevronDown, Search, X } from "lucide-react";
 import { useCache, invalidate } from "@/lib/useCache";
 import { createPortal } from "react-dom";
 
@@ -34,10 +35,10 @@ const emptyForm = {
 };
 
 // Shared cell style — right-aligned numeric, no extra classes that fight each other
-const TH = ({ children, right, width }: { children?: React.ReactNode; right?: boolean; width?: string }) => (
+const TH = ({ children, right, width, first, last }: { children?: React.ReactNode; right?: boolean; width?: string; first?: boolean; last?: boolean }) => (
   <th
     style={{ width, textAlign: right ? "right" : "left" }}
-    className="bg-[var(--color-table-head)] text-[var(--color-text-muted)] text-xs font-semibold uppercase tracking-wide px-4 py-3 whitespace-nowrap"
+    className={`bg-[var(--color-table-head)] text-[var(--color-text-muted)] text-xs font-semibold uppercase tracking-wide px-4 py-3 whitespace-nowrap ${first ? "rounded-tl-2xl" : ""} ${last ? "rounded-tr-2xl" : ""}`}
   >
     {children}
   </th>
@@ -151,6 +152,7 @@ export default function FinancialYearPage() {
   const [breakdownRec, setBreakdownRec] = useState<FYRecord | null>(null);
   const [expandedFY, setExpandedFY] = useState<string | null>(null);
   const [deletingId, setDeletingId]     = useState<string | null>(null);
+  const [search, setSearch]             = useState("");
 
   const { data: records, loading: recLoading, refetch: refetchRecords } =
     useCache<FYRecord[]>(`/api/financial-year?fy=${fy}`, { initialData: [] });
@@ -158,6 +160,16 @@ export default function FinancialYearPage() {
 
   const getCategory   = (id: string) => clients.find((c) => c.clientId === id)?.category || "";
   const getClientName = (id: string) => clients.find((c) => c.clientId === id)?.companyName || id;
+
+  const filteredRecords = records.filter((rec) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      getClientName(rec.clientId).toLowerCase().includes(q) ||
+      rec.clientId.toLowerCase().includes(q) ||
+      getCategory(rec.clientId).toLowerCase().includes(q)
+    );
+  });
 
   const openAdd = () => { setEditRecord(null); setForm({ ...emptyForm, financialYear: fy }); setModalOpen(true); };
   const openEdit = (rec: FYRecord) => {
@@ -220,14 +232,25 @@ export default function FinancialYearPage() {
         <button className="btn-primary" onClick={openAdd}><Plus className="w-4 h-4" /> Add Record</button>
       </PageHeader>
 
-      <div className="bg-card rounded-2xl p-4 mb-4 shadow-sm border border-base flex items-center gap-3 flex-wrap">
-        <span className="text-sm font-medium text-muted">Financial Year:</span>
-        {FINANCIAL_YEARS.map((y) => (
-          <button key={y} onClick={() => setFy(y)}
-            className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${fy === y ? "bg-brand-600 text-white" : "bg-surface text-muted hover:bg-hover"}`}>
-            {y}
-          </button>
-        ))}
+      <FYTabBar value={fy} onChange={setFy} />
+
+      {/* Search */}
+      <div className="bg-card border border-base rounded-2xl p-3 mb-4 shadow-sm transition-colors">
+        <div className="flex items-center gap-2 bg-surface rounded-xl px-3">
+          <Search className="w-4 h-4 text-faint flex-shrink-0" />
+          <input
+            type="text"
+            placeholder="Search by client name, ID or category…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-transparent border-0 ring-0 outline-none flex-1 py-2 text-sm text-default placeholder:text-faint"
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="text-faint hover:text-default transition-colors flex-shrink-0">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Colour legend */}
@@ -242,7 +265,9 @@ export default function FinancialYearPage() {
 
       {/* ── DESKTOP TABLE ── */}
       <div className="bg-card rounded-2xl shadow-sm border border-base hidden lg:block">
-        {recLoading ? <LoadingSpinner /> : records.length === 0 ? <EmptyState message="No records for this FY" /> : (
+        {recLoading ? <LoadingSpinner /> : filteredRecords.length === 0 ? (
+          <EmptyState message={search ? `No results for "${search}"` : "No records for this FY"} />
+        ) : (
           <TableWrapper>
             <table className="w-full table-fixed">
               <colgroup>
@@ -259,13 +284,13 @@ export default function FinancialYearPage() {
               </colgroup>
               <thead>
                 <tr>
-                  <TH>Client</TH><TH>Type</TH>
+                  <TH first>Client</TH><TH>Type</TH>
                   <TH right>CAT-I</TH><TH right>CAT-II</TH><TH right>CAT-III</TH><TH right>CAT-IV</TH>
-                  <TH right>Total</TH><TH right>Used / Achieved</TH><TH>Remaining</TH><TH />
+                  <TH right>Total</TH><TH right>Used / Achieved</TH><TH>Remaining</TH><TH last />
                 </tr>
               </thead>
               <tbody>
-                {records.map((rec) => {
+                {filteredRecords.map((rec) => {
                   const cat = getCategory(rec.clientId);
                   const isPWPRow = cat === "PWP";
                   const isSIMPRow = cat === "SIMP";
@@ -302,7 +327,9 @@ export default function FinancialYearPage() {
 
       {/* ── MOBILE CARDS ── */}
       <div className="lg:hidden space-y-2">
-        {recLoading ? <LoadingSpinner /> : records.length === 0 ? <EmptyState message="No records for this FY" /> : records.map((rec) => {
+        {recLoading ? <LoadingSpinner /> : filteredRecords.length === 0 ? (
+          <EmptyState message={search ? `No results for "${search}"` : "No records for this FY"} />
+        ) : filteredRecords.map((rec) => {
           const cat = getCategory(rec.clientId);
           const isPWPRow = cat === "PWP";
           const isSIMPRow = cat === "SIMP";

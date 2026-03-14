@@ -9,6 +9,7 @@ import TableWrapper from "@/components/ui/TableWrapper";
 import EmptyState from "@/components/ui/EmptyState";
 import { FINANCIAL_YEARS, CURRENT_FY, formatCurrency, formatDate } from "@/lib/utils";
 import { Plus, Trash2, FileText, Upload, ArrowLeftRight, Recycle, Leaf, ChevronDown } from "lucide-react";
+import FYTabBar from "@/components/ui/FYTabBar";
 
 interface Client { clientId: string; companyName: string; category: string; }
 interface Transaction {
@@ -73,12 +74,12 @@ export default function CreditTransactionsPage() {
   const uploads = Array.isArray(rawUploads) ? rawUploads : [];
 
   const clientName = (id?: string) => id ? (clients.find((c) => c.clientId === id)?.companyName || id) : "External";
-  const pwpClients    = clients.filter((c) => c.category === "PWP");
+  const pwpClients = clients.filter((c) => c.category === "PWP");
   const nonPwpClients = clients.filter((c) => c.category !== "PWP");
   const totalTxAmount = transactions.reduce((s, t) => s + t.totalAmount, 0);
-  const totalTxQty = transactions.reduce((s, t) => s + (t.cat1||0)+(t.cat2||0)+(t.cat3||0)+(t.cat4||0), 0);
-  const liveTxTotal = (Number(txForm.cat1)*Number(txForm.rateCat1))+(Number(txForm.cat2)*Number(txForm.rateCat2))+(Number(txForm.cat3)*Number(txForm.rateCat3))+(Number(txForm.cat4)*Number(txForm.rateCat4));
-  const liveTxQty = Number(txForm.cat1)+Number(txForm.cat2)+Number(txForm.cat3)+Number(txForm.cat4);
+  const totalTxQty = transactions.reduce((s, t) => s + (t.cat1 || 0) + (t.cat2 || 0) + (t.cat3 || 0) + (t.cat4 || 0), 0);
+  const liveTxTotal = (Number(txForm.cat1) * Number(txForm.rateCat1)) + (Number(txForm.cat2) * Number(txForm.rateCat2)) + (Number(txForm.cat3) * Number(txForm.rateCat3)) + (Number(txForm.cat4) * Number(txForm.rateCat4));
+  const liveTxQty = Number(txForm.cat1) + Number(txForm.cat2) + Number(txForm.cat3) + Number(txForm.cat4);
 
   const submitTransaction = async (e: React.FormEvent) => {
     e.preventDefault(); setTxSaving(true);
@@ -130,13 +131,7 @@ export default function CreditTransactionsPage() {
       </PageHeader>
 
       {/* FY */}
-      <div className="bg-card border border-base rounded-2xl p-4 mb-4 shadow-sm flex flex-wrap items-center gap-3 transition-colors">
-        <span className="text-sm font-medium text-muted">Financial Year:</span>
-        {FINANCIAL_YEARS.map((y) => (
-          <button key={y} onClick={() => setFy(y)} className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${fy === y ? "bg-brand-600 text-white" : "bg-surface text-muted hover:text-default"}`}>{y}</button>
-        ))}
-      </div>
-
+      <FYTabBar value={fy} onChange={setFy} />
       {/* Section tabs */}
       <div className="flex gap-2 mb-4 flex-wrap">
         <NavBtn id="transactions" icon={<ArrowLeftRight className="w-4 h-4" />} label="Transactions" count={transactions.length} />
@@ -148,7 +143,7 @@ export default function CreditTransactionsPage() {
       {activeSection === "transactions" && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-            {[["Transactions", transactions.length.toString(), "text-default"],["Total Qty", totalTxQty.toLocaleString(), "text-teal-600"],["Total Value", formatCurrency(totalTxAmount), "text-brand-600"]].map(([label, val, cls]) => (
+            {[["Transactions", transactions.length.toString(), "text-default"], ["Total Qty", totalTxQty.toLocaleString(), "text-teal-600"], ["Total Value", formatCurrency(totalTxAmount), "text-brand-600"]].map(([label, val, cls]) => (
               <div key={label} className="bg-card border border-base rounded-xl p-4 shadow-sm text-center transition-colors">
                 <p className="text-xs text-muted mb-1">{label}</p>
                 <p className={`text-2xl font-bold ${cls}`}>{val}</p>
@@ -190,9 +185,11 @@ export default function CreditTransactionsPage() {
                         <td className="table-cell whitespace-nowrap">{creditTypeBadge(tx.creditType)}</td>
                         <td className="table-cell whitespace-nowrap"><span className="text-xs bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400 px-2 py-0.5 rounded-full font-medium">{clientName(tx.fromClientId)}</span></td>
                         <td className="table-cell font-medium text-sm whitespace-nowrap">{clientName(tx.toClientId)}</td>
-                        {CAT_KEYS.map((k, i) => { const qty = tx[k] || 0; const rate = (tx[`rateCat${i+1}` as keyof Transaction] as number) || 0; return (
-                          <td key={k} className="table-cell text-center">{qty > 0 ? <div><p className="font-semibold text-default">{qty.toLocaleString()}</p><p className="text-xs text-muted">@{formatCurrency(rate)}</p></div> : <span className="text-faint">—</span>}</td>
-                        ); })}
+                        {CAT_KEYS.map((k, i) => {
+                          const qty = tx[k] || 0; const rate = (tx[`rateCat${i + 1}` as keyof Transaction] as number) || 0; return (
+                            <td key={k} className="table-cell text-center">{qty > 0 ? <div><p className="font-semibold text-default">{qty.toLocaleString()}</p><p className="text-xs text-muted">@{formatCurrency(rate)}</p></div> : <span className="text-faint">—</span>}</td>
+                          );
+                        })}
                         <td className="table-cell font-bold text-brand-600 whitespace-nowrap">{formatCurrency(tx.totalAmount)}</td>
                         <td className="table-cell whitespace-nowrap"><button onClick={() => deleteTx(tx._id)} className="p-1.5 text-faint hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button></td>
                       </tr>
@@ -227,12 +224,14 @@ export default function CreditTransactionsPage() {
                     {isExp && (
                       <div className="card-expand px-4 pb-4 border-t border-soft pt-3 space-y-3">
                         <div className="grid grid-cols-2 gap-2">
-                          {CAT_KEYS.map((k, i) => { const qty = tx[k] || 0; const rate = (tx[`rateCat${i+1}` as keyof Transaction] as number) || 0; return qty > 0 ? (
-                            <div key={k} className="bg-surface rounded-lg px-3 py-2">
-                              <p className="text-xs text-faint">{CATS[i]}</p>
-                              <p className="font-semibold text-sm text-default">{qty.toLocaleString()} <span className="font-normal text-xs text-muted">@ {formatCurrency(rate)}</span></p>
-                            </div>
-                          ) : null; })}
+                          {CAT_KEYS.map((k, i) => {
+                            const qty = tx[k] || 0; const rate = (tx[`rateCat${i + 1}` as keyof Transaction] as number) || 0; return qty > 0 ? (
+                              <div key={k} className="bg-surface rounded-lg px-3 py-2">
+                                <p className="text-xs text-faint">{CATS[i]}</p>
+                                <p className="font-semibold text-sm text-default">{qty.toLocaleString()} <span className="font-normal text-xs text-muted">@ {formatCurrency(rate)}</span></p>
+                              </div>
+                            ) : null;
+                          })}
                         </div>
                         <button onClick={() => deleteTx(tx._id)} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-900/40 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"><Trash2 className="w-3.5 h-3.5" />Delete</button>
                       </div>
@@ -315,19 +314,21 @@ export default function CreditTransactionsPage() {
                 <table className="w-full min-w-[600px]">
                   <thead><tr><th className="table-header">Company</th><th className="table-header">FY</th><th className="table-header">CAT-I</th><th className="table-header">CAT-II</th><th className="table-header">CAT-III</th><th className="table-header">CAT-IV</th><th className="table-header">Total</th><th className="table-header">Added On</th><th className="table-header"></th></tr></thead>
                   <tbody>
-                    {uploads.map((upl) => { const total = (upl.cat1||0)+(upl.cat2||0)+(upl.cat3||0)+(upl.cat4||0); return (
-                      <tr key={upl._id} className="hover:bg-hover border-t border-soft transition-colors">
-                        <td className="table-cell font-medium whitespace-nowrap">{clientName(upl.clientId)}</td>
-                        <td className="table-cell whitespace-nowrap"><span className="text-xs bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-400 px-2 py-0.5 rounded-full font-medium">{upl.financialYear}</span></td>
-                        <td className="table-cell font-mono text-sm whitespace-nowrap">{(upl.cat1||0).toLocaleString()}</td>
-                        <td className="table-cell font-mono text-sm whitespace-nowrap">{(upl.cat2||0).toLocaleString()}</td>
-                        <td className="table-cell font-mono text-sm whitespace-nowrap">{(upl.cat3||0).toLocaleString()}</td>
-                        <td className="table-cell font-mono text-sm whitespace-nowrap">{(upl.cat4||0).toLocaleString()}</td>
-                        <td className="table-cell font-bold text-teal-600 whitespace-nowrap">{total.toLocaleString()}</td>
-                        <td className="table-cell text-muted text-sm whitespace-nowrap">{formatDate(upl.createdAt)}</td>
-                        <td className="table-cell whitespace-nowrap"><button onClick={() => deleteUpload(upl._id)} className="p-1.5 text-faint hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button></td>
-                      </tr>
-                    ); })}
+                    {uploads.map((upl) => {
+                      const total = (upl.cat1 || 0) + (upl.cat2 || 0) + (upl.cat3 || 0) + (upl.cat4 || 0); return (
+                        <tr key={upl._id} className="hover:bg-hover border-t border-soft transition-colors">
+                          <td className="table-cell font-medium whitespace-nowrap">{clientName(upl.clientId)}</td>
+                          <td className="table-cell whitespace-nowrap"><span className="text-xs bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-400 px-2 py-0.5 rounded-full font-medium">{upl.financialYear}</span></td>
+                          <td className="table-cell font-mono text-sm whitespace-nowrap">{(upl.cat1 || 0).toLocaleString()}</td>
+                          <td className="table-cell font-mono text-sm whitespace-nowrap">{(upl.cat2 || 0).toLocaleString()}</td>
+                          <td className="table-cell font-mono text-sm whitespace-nowrap">{(upl.cat3 || 0).toLocaleString()}</td>
+                          <td className="table-cell font-mono text-sm whitespace-nowrap">{(upl.cat4 || 0).toLocaleString()}</td>
+                          <td className="table-cell font-bold text-teal-600 whitespace-nowrap">{total.toLocaleString()}</td>
+                          <td className="table-cell text-muted text-sm whitespace-nowrap">{formatDate(upl.createdAt)}</td>
+                          <td className="table-cell whitespace-nowrap"><button onClick={() => deleteUpload(upl._id)} className="p-1.5 text-faint hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button></td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </TableWrapper>
@@ -336,7 +337,7 @@ export default function CreditTransactionsPage() {
           {/* Mobile cards */}
           <div className="lg:hidden space-y-2">
             {uplLoading ? <LoadingSpinner /> : uploads.length === 0 ? <EmptyState message="No upload records for this FY" /> : uploads.map((upl) => {
-              const total = (upl.cat1||0)+(upl.cat2||0)+(upl.cat3||0)+(upl.cat4||0);
+              const total = (upl.cat1 || 0) + (upl.cat2 || 0) + (upl.cat3 || 0) + (upl.cat4 || 0);
               const isExp = expandedUpl === upl._id;
               return (
                 <div key={upl._id} className="bg-card border border-base rounded-2xl shadow-sm overflow-hidden">
@@ -351,7 +352,7 @@ export default function CreditTransactionsPage() {
                   {isExp && (
                     <div className="card-expand px-4 pb-4 border-t border-soft pt-3 space-y-2">
                       <div className="grid grid-cols-2 gap-2 text-xs">
-                        {[["CAT-I", upl.cat1||0], ["CAT-II", upl.cat2||0], ["CAT-III", upl.cat3||0], ["CAT-IV", upl.cat4||0]].map(([label, val]) => (
+                        {[["CAT-I", upl.cat1 || 0], ["CAT-II", upl.cat2 || 0], ["CAT-III", upl.cat3 || 0], ["CAT-IV", upl.cat4 || 0]].map(([label, val]) => (
                           <div key={String(label)}><span className="text-faint block">{label}</span><span className="font-mono font-semibold text-default">{Number(val).toLocaleString()}</span></div>
                         ))}
                         <div><span className="text-faint block">Added On</span><span className="text-default">{formatDate(upl.createdAt)}</span></div>
@@ -399,8 +400,8 @@ export default function CreditTransactionsPage() {
                 <thead><tr className="bg-table-head border-b border-base"><th className="text-left text-xs text-muted font-semibold px-3 py-2">Category</th><th className="text-center text-xs text-muted font-semibold px-3 py-2">Quantity</th><th className="text-center text-xs text-muted font-semibold px-3 py-2">Rate (₹/unit)</th><th className="text-right text-xs text-muted font-semibold px-3 py-2">Amount</th></tr></thead>
                 <tbody>
                   {CATS.map((cat, i) => {
-                    const qk = `cat${i+1}` as keyof typeof txForm;
-                    const rk = `rateCat${i+1}` as keyof typeof txForm;
+                    const qk = `cat${i + 1}` as keyof typeof txForm;
+                    const rk = `rateCat${i + 1}` as keyof typeof txForm;
                     const amt = Number(txForm[qk]) * Number(txForm[rk]);
                     return (
                       <tr key={cat} className="border-b border-soft last:border-0">
@@ -454,9 +455,9 @@ export default function CreditTransactionsPage() {
           <div><label className="label">Financial Year *</label><select className="input-field" value={uplForm.financialYear} onChange={(e) => setUplForm({ ...uplForm, financialYear: e.target.value })} required>{FINANCIAL_YEARS.map((y) => <option key={y}>{y}</option>)}</select></div>
           <p className="label">Category-wise Quantity</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {CATS.map((cat, i) => { const key = `cat${i+1}` as keyof typeof uplForm; return (<div key={cat}><label className="block text-xs text-muted mb-1">{cat}</label><input type="number" min="0" className="input-field font-mono text-center" value={uplForm[key]} onChange={(e) => setUplForm({ ...uplForm, [key]: e.target.value })} /></div>); })}
+            {CATS.map((cat, i) => { const key = `cat${i + 1}` as keyof typeof uplForm; return (<div key={cat}><label className="block text-xs text-muted mb-1">{cat}</label><input type="number" min="0" className="input-field font-mono text-center" value={uplForm[key]} onChange={(e) => setUplForm({ ...uplForm, [key]: e.target.value })} /></div>); })}
           </div>
-          <div className="bg-teal-50 dark:bg-teal-900/20 rounded-xl p-3 flex justify-between text-sm"><span className="text-muted">Total:</span><span className="font-bold text-teal-600 dark:text-teal-400">{(Number(uplForm.cat1)+Number(uplForm.cat2)+Number(uplForm.cat3)+Number(uplForm.cat4)).toLocaleString()} units</span></div>
+          <div className="bg-teal-50 dark:bg-teal-900/20 rounded-xl p-3 flex justify-between text-sm"><span className="text-muted">Total:</span><span className="font-bold text-teal-600 dark:text-teal-400">{(Number(uplForm.cat1) + Number(uplForm.cat2) + Number(uplForm.cat3) + Number(uplForm.cat4)).toLocaleString()} units</span></div>
           <div className="flex gap-2 pt-2">
             <button type="submit" className="btn-primary flex-1 justify-center" disabled={uplSaving}>{uplSaving ? "Saving..." : "Add Record"}</button>
             <button type="button" className="btn-secondary" onClick={() => setUplModalOpen(false)}>Cancel</button>

@@ -9,6 +9,7 @@ import { FINANCIAL_YEARS, CURRENT_FY, formatDate } from "@/lib/utils";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
 import TableWrapper from "@/components/ui/TableWrapper";
 import { Plus, Search, Pencil, Trash2, CheckCircle2, Clock, AlertCircle, ShieldCheck, Sparkles, Mail, Send, FileEdit, ExternalLink, X, ChevronDown } from "lucide-react";
+import FYTabBar from "@/components/ui/FYTabBar";
 
 type ReturnStatus = "Pending" | "In Progress" | "Filed" | "Verified";
 
@@ -241,15 +242,8 @@ export default function AnnualReturnPage() {
 
       <>
           {/* FY */}
-          <div className="bg-card border border-base rounded-2xl p-4 mb-4 shadow-sm flex flex-wrap items-center gap-3 transition-colors">
-            <span className="text-sm font-medium text-muted">Financial Year:</span>
-            {FINANCIAL_YEARS.map((y) => (
-              <button key={y} onClick={() => setFy(y)}
-                className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${fy === y ? "bg-brand-600 text-white" : "bg-surface text-muted hover:bg-hover hover:text-default"}`}>
-                {y}
-              </button>
-            ))}
-          </div>
+          
+          <FYTabBar value={fy} onChange={setFy} />
 
           {/* Summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">

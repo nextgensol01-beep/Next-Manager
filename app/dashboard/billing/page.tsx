@@ -10,6 +10,7 @@ import { PaymentStatusBadge } from "@/components/ui/CategoryBadge";
 import { FINANCIAL_YEARS, CURRENT_FY, formatCurrency, formatDate, PAYMENT_MODES, getPaymentPercentage } from "@/lib/utils";
 import { Plus, Download, Send, FileText, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { useCache, invalidate } from "@/lib/useCache";
+import FYTabBar from "@/components/ui/FYTabBar";
 
 interface ClientContact { _id: string; name: string; email?: string; mobile?: string; }
 interface Client { clientId: string; companyName: string; category: string; email?: string; contacts?: ClientContact[]; }
@@ -71,10 +72,10 @@ export default function BillingPage() {
       const { html: template } = await tmplRes.json();
       const fmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const breakdownRows = [
-        billing.govtCharges > 0       ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Govt Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">₹${fmt(billing.govtCharges)}</td></tr>` : "",
+        billing.govtCharges > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Govt Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">₹${fmt(billing.govtCharges)}</td></tr>` : "",
         billing.consultancyCharges > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Consultancy Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">₹${fmt(billing.consultancyCharges)}</td></tr>` : "",
-        billing.targetCharges > 0      ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Target Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">₹${fmt(billing.targetCharges)}</td></tr>` : "",
-        billing.otherCharges > 0       ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Other Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">₹${fmt(billing.otherCharges)}</td></tr>` : "",
+        billing.targetCharges > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Target Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">₹${fmt(billing.targetCharges)}</td></tr>` : "",
+        billing.otherCharges > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Other Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">₹${fmt(billing.otherCharges)}</td></tr>` : "",
       ].join("");
       const html = template
         .replace(/{{clientName}}/g, cName)
@@ -180,12 +181,7 @@ export default function BillingPage() {
         <button className="btn-primary" onClick={() => setBillingModal(true)}><Plus className="w-4 h-4" /> Add Billing</button>
       </PageHeader>
 
-      <div className="bg-card rounded-2xl p-4 mb-4 shadow-sm border border-base flex items-center gap-3 flex-wrap">
-        <span className="text-sm font-medium text-muted">Financial Year:</span>
-        {FINANCIAL_YEARS.map((y) => (
-          <button key={y} onClick={() => setFy(y)} className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${fy === y ? "bg-brand-600 text-white" : "bg-surface text-muted hover:bg-hover"}`}>{y}</button>
-        ))}
-      </div>
+      <FYTabBar value={fy} onChange={setFy} />
 
       {loading ? <LoadingSpinner /> : billings.length === 0 ? (
         <div className="bg-card rounded-2xl p-8 shadow-sm border border-base">

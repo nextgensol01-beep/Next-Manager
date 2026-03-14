@@ -4,6 +4,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import { FINANCIAL_YEARS, CURRENT_FY } from "@/lib/utils";
 import { Download, Users, Leaf, ArrowLeftRight, CreditCard, FileText, Upload, ClipboardCheck } from "lucide-react";
 import toast from "react-hot-toast";
+import FYTabBar from "@/components/ui/FYTabBar";
 
 const REPORT_TYPES = [
   { id: "targets", label: "Targets Report", description: "Category-wise targets (CAT-I–IV) with achievement per Producer/Importer/Brand Owner", icon: Users, color: "bg-blue-50 text-blue-600", darkColor: "dark:bg-blue-900/30 dark:text-blue-400" },
@@ -40,12 +41,7 @@ export default function ReportsPage() {
     <div>
       <PageHeader title="Reports" description="Export all data as Excel files for analysis and records" />
 
-      <div className="bg-card border border-base rounded-2xl p-4 mb-6 shadow-sm flex items-center gap-3 flex-wrap transition-colors">
-        <span className="text-sm font-medium text-muted">Financial Year:</span>
-        {FINANCIAL_YEARS.map((y) => (
-          <button key={y} onClick={() => setFy(y)} className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${fy === y ? "bg-brand-600 text-white" : "bg-surface text-muted hover:text-default"}`}>{y}</button>
-        ))}
-      </div>
+      <FYTabBar value={fy} onChange={setFy} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         {REPORT_TYPES.map(({ id, label, description, icon: Icon, color, darkColor }) => (
