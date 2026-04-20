@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, Users, UserCircle, Calendar, ArrowLeftRight,
   Receipt, BarChart2, FileText, ClipboardCheck, Trash2, Mail, X, Settings2,
+  Upload, ChevronDown,
 } from "lucide-react";
 import { cachedFetch } from "@/lib/cache";
 
@@ -22,6 +23,11 @@ const navItems = [
   { href: "/dashboard/settings",            label: "Settings",            icon: Settings2 },
 ];
 
+const portalOpsItems = [
+  { href: "/dashboard/cpcb-uploads/invoice-tracking", label: "Invoice Tracking", icon: FileText },
+  { href: "/dashboard/cpcb-uploads/upload-records", label: "Upload Records", icon: Upload },
+];
+
 interface Props { open: boolean; onClose: () => void; }
 
 export default function Sidebar({ open, onClose }: Props) {
@@ -30,8 +36,16 @@ export default function Sidebar({ open, onClose }: Props) {
   const [emailCount, setEmailCount] = useState(0);
   const [drawerVisible, setDrawerVisible]   = useState(false);
   const [drawerRendered, setDrawerRendered] = useState(false);
+  const portalOpsActive = portalOpsItems.some(({ href }) => pathname.startsWith(href));
+  const [portalOpsOpen, setPortalOpsOpen] = useState(portalOpsActive);
 
   useEffect(() => { onClose(); }, [pathname, onClose]);
+
+  useEffect(() => {
+    if (portalOpsActive) {
+      setPortalOpsOpen(true);
+    }
+  }, [portalOpsActive]);
 
   useEffect(() => {
     if (open) {
@@ -83,6 +97,62 @@ export default function Sidebar({ open, onClose }: Props) {
             </Link>
           );
         })}
+
+        <div className="pt-4 pb-1">
+          <p className="sidebar-text-faint text-[10px] font-semibold uppercase tracking-widest px-4">Portal Operations</p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setPortalOpsOpen((value) => !value)}
+          className={cn(
+            "sidebar-link w-full justify-between",
+            portalOpsActive && "active"
+          )}
+          aria-expanded={portalOpsOpen}
+        >
+          <span className="flex items-center gap-3">
+            <Upload className="w-4 h-4 flex-shrink-0" />
+            CPCB Uploads
+          </span>
+          <ChevronDown
+            className="w-4 h-4 flex-shrink-0 transition-transform duration-200"
+            style={{ transform: portalOpsOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+          />
+        </button>
+
+        <div
+          className="overflow-hidden transition-all duration-300 ease-out"
+          style={{
+            maxHeight: portalOpsOpen ? "160px" : "0px",
+            opacity: portalOpsOpen ? 1 : 0,
+          }}
+          aria-hidden={!portalOpsOpen}
+        >
+          <div
+            className="mt-1 mb-2 space-y-1 pl-4 transition-all duration-300 ease-out"
+            style={{ transform: portalOpsOpen ? "translateY(0)" : "translateY(-8px)" }}
+          >
+            {portalOpsItems.map(({ href, label, icon: Icon }) => {
+              const isActive = pathname.startsWith(href);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm transition-colors",
+                    isActive
+                      ? "bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-text)]"
+                      : "sidebar-text-muted hover:bg-[var(--sidebar-hover-bg)] hover:text-[var(--sidebar-text-primary)]"
+                  )}
+                >
+                  <Icon className="w-4 h-4 flex-shrink-0" />
+                  {label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
 
         <div className="pt-4 pb-1">
           <p className="sidebar-text-faint text-[10px] font-semibold uppercase tracking-widest px-4">System</p>
