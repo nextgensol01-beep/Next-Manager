@@ -1,0 +1,393 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand: #2d47e2;
+  --sidebar-width: 260px;
+}
+
+/* ── BASE ── */
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  @apply bg-surface text-default transition-colors duration-200;
+}
+
+/* ── LIGHT / DARK TOKENS ── */
+@layer base {
+  :root {
+    --color-surface:        #f1f5f9;
+    --color-card:           #ffffff;
+    --color-border:         #e2e8f0;
+    --color-border-soft:    #f1f5f9;
+    --color-text:           #1e293b;
+    --color-text-muted:     #64748b;
+    --color-text-faint:     #94a3b8;
+    --color-sidebar:        #0f172a;
+    --color-header:         #ffffff;
+    --color-input-bg:       #ffffff;
+    --color-table-head:     #f8fafc;
+    --color-hover:          #f8fafc;
+  }
+  .dark {
+    --color-surface:        #0d1117;
+    --color-card:           #161b22;
+    --color-border:         #30363d;
+    --color-border-soft:    #21262d;
+    --color-text:           #e6edf3;
+    --color-text-muted:     #8b949e;
+    --color-text-faint:     #484f58;
+    --color-sidebar:        #010409;
+    --color-header:         #161b22;
+    --color-input-bg:       #0d1117;
+    --color-table-head:     #21262d;
+    --color-hover:          #1c2128;
+  }
+}
+
+/* ── TAILWIND TOKEN CLASSES ── */
+.bg-surface   { background-color: var(--color-surface); }
+.bg-card      { background-color: var(--color-card); }
+.bg-header    { background-color: var(--color-header); }
+.bg-table-head { background-color: var(--color-table-head); }
+.bg-hover:hover { background-color: var(--color-hover); }
+.border-base  { border-color: var(--color-border); }
+.border-soft  { border-color: var(--color-border-soft); }
+.text-default { color: var(--color-text); }
+.text-muted   { color: var(--color-text-muted); }
+.text-faint   { color: var(--color-text-faint); }
+
+/* ── SIDEBAR THEME TOKENS ── */
+/* Light mode: clean white sidebar */
+/* ── SIDEBAR — responds to :root vs .dark CSS variables ── */
+:root {
+  --sidebar-bg:       #ffffff;
+  --sidebar-border:   #e2e8f0;
+  --sidebar-text:     #1e293b;
+  --sidebar-muted:    #64748b;
+  --sidebar-faint:    #94a3b8;
+  --sidebar-hover-bg: #f1f5f9;
+  --sidebar-active-bg:#2563eb;
+  --sidebar-active-text: #ffffff;
+}
+.dark {
+  --sidebar-bg:       #0f172a;
+  --sidebar-border:   rgba(255,255,255,0.06);
+  --sidebar-text:     #f1f5f9;
+  --sidebar-muted:    #94a3b8;
+  --sidebar-faint:    #475569;
+  --sidebar-hover-bg: rgba(255,255,255,0.07);
+}
+.sidebar-panel {
+  background-color: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
+  transition: background-color 0.2s, border-color 0.2s;
+}
+.sidebar-divider   { border-color: var(--sidebar-border); }
+.sidebar-text-primary { color: var(--sidebar-text); }
+.sidebar-text-muted   { color: var(--sidebar-muted); }
+.sidebar-text-faint   { color: var(--sidebar-faint); }
+.sidebar-badge-blue {
+  font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px;
+  background: rgba(59,130,246,0.15); color: #3b82f6;
+}
+.sidebar-badge-red {
+  font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px;
+  background: rgba(239,68,68,0.15); color: #ef4444;
+}
+
+/* ── SIDEBAR LINKS ── */
+.sidebar-link {
+  @apply flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium;
+  color: var(--sidebar-muted);
+}
+.sidebar-link:hover {
+  background-color: var(--sidebar-hover-bg);
+  color: var(--sidebar-text);
+}
+.sidebar-link.active {
+  background-color: var(--sidebar-active-bg);
+  color: var(--sidebar-active-text);
+  @apply shadow-lg shadow-brand-600/20;
+}
+.dark .sidebar-link.active {
+  @apply shadow-brand-900/40;
+}
+
+/* ── BUTTONS ── */
+.btn-primary {
+  @apply bg-brand-600 hover:bg-brand-700 active:scale-95 text-white font-medium px-4 py-2 rounded-lg transition-all duration-150 text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+.btn-secondary {
+  background-color: var(--color-border-soft);
+  color: var(--color-text);
+  @apply font-medium px-4 py-2 rounded-lg transition-all duration-150 text-sm flex items-center gap-2 active:scale-95;
+}
+.btn-secondary:hover { background-color: var(--color-border); }
+.btn-danger {
+  @apply bg-red-600 hover:bg-red-700 active:scale-95 text-white font-medium px-4 py-2 rounded-lg transition-all duration-150 text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+/* ── INPUTS ── */
+.input-field {
+  background-color: var(--color-input-bg);
+  border-color: var(--color-border);
+  color: var(--color-text);
+  @apply w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-shadow duration-150;
+}
+.input-field option { background-color: var(--color-card); color: var(--color-text); }
+
+.label {
+  color: var(--color-text-muted);
+  @apply block text-xs font-semibold uppercase tracking-wide mb-1;
+}
+
+/* ── TABLE ── */
+.table-header {
+  background-color: var(--color-table-head);
+  color: var(--color-text-muted);
+  @apply text-xs font-semibold uppercase tracking-wide px-4 py-3 text-left;
+}
+.table-cell {
+  border-top-color: var(--color-border-soft);
+  color: var(--color-text);
+  @apply px-4 py-3 text-sm border-t whitespace-nowrap;
+}
+
+/* ── TABLE SCROLL WRAPPER ── */
+.table-scroll-wrap {
+  position: relative;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  /* No box-shadow here — it causes repaint glitches during scroll */
+}
+/* The fade overlay lives on the PARENT .table-scroll-outer div, not on the scroll container */
+.table-scroll-outer {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0 0 1rem 1rem;
+}
+.table-scroll-outer::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 40px;
+  background: linear-gradient(to right, transparent, var(--color-card));
+  opacity: 1;
+  transition: opacity 0.25s ease;
+  z-index: 2;
+}
+.table-scroll-outer.at-end::after {
+  opacity: 0;
+}
+
+/* Horizontal scrollbar — always show on touch devices for discoverability */
+.table-scroll-wrap::-webkit-scrollbar {
+  height: 4px;
+}
+.table-scroll-wrap::-webkit-scrollbar-track {
+  background: var(--color-surface);
+  border-radius: 2px;
+}
+.table-scroll-wrap::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2px;
+}
+.table-scroll-wrap::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-faint);
+}
+
+/* ── SCROLL HINT PILL (mobile only) ── */
+.scroll-hint-pill {
+  display: none;
+}
+@media (max-width: 1023px) {
+  .scroll-hint-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    z-index: 10;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--color-text-muted);
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    padding: 3px 8px 3px 6px;
+    border-radius: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    pointer-events: none;
+    user-select: none;
+    animation: hint-fade-in 0.3s ease-out;
+  }
+  .scroll-hint-pill svg {
+    animation: hint-arrow 1.6s ease-in-out infinite;
+  }
+  @keyframes hint-arrow {
+    0%, 100% { transform: translateX(0); opacity: 0.6; }
+    50%       { transform: translateX(3px); opacity: 1; }
+  }
+}
+/* ── THEME TOGGLE SPIN ── */
+.theme-icon-spin {
+  display: inline-flex;
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.15s;
+}
+.theme-icon-spin.is-dark {
+  transform: rotate(360deg);
+}
+
+/* ── CARD EXPAND ANIMATION ── */
+
+/* ── CARDS ── */
+.stat-card {
+  background-color: var(--color-card);
+  border-color: var(--color-border);
+  @apply rounded-2xl p-5 shadow-sm border hover:shadow-md transition-all duration-200;
+}
+
+/* ── MODAL ANIMATION ── */
+.modal-overlay {
+  @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4;
+  animation: overlay-in 0.2s ease-out;
+}
+.modal-box {
+  background-color: var(--color-card);
+  border-color: var(--color-border);
+  @apply rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto border;
+  animation: modal-in 0.22s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.modal-box-lg {
+  @apply max-w-2xl;
+}
+.modal-box-sm {
+  @apply max-w-sm;
+}
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.92) translateY(12px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+
+/* ── SIDEBAR DRAWER ANIMATION ── */
+.sidebar-drawer {
+  animation: drawer-in 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.sidebar-backdrop {
+  animation: overlay-in 0.2s ease-out;
+}
+@keyframes drawer-in {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+/* ── STATUS BADGE TRANSITIONS ── */
+.status-badge {
+  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold;
+  transition: background-color 0.25s, color 0.25s, box-shadow 0.25s;
+}
+
+/* ── ROW HOVER ── */
+tbody tr {
+  transition: background-color 0.15s;
+}
+
+/* ── FADE-IN FOR PAGE CONTENT ── */
+.page-fade-in {
+  animation: fade-up 0.3s ease-out;
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── STAT CARD ENTRANCE ── */
+.stat-card {
+  animation: fade-up 0.35s ease-out both;
+}
+.stat-card:nth-child(1) { animation-delay: 0.05s; }
+.stat-card:nth-child(2) { animation-delay: 0.10s; }
+.stat-card:nth-child(3) { animation-delay: 0.15s; }
+.stat-card:nth-child(4) { animation-delay: 0.20s; }
+
+/* ── BADGE PULSE (for Pending status) ── */
+.badge-pulse {
+  position: relative;
+}
+.badge-pulse::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  animation: badge-pulse-ring 2s ease-out infinite;
+}
+@keyframes badge-pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.35); }
+  70%  { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+/* ── TOOLTIP ── */
+.tooltip-enter {
+  animation: tooltip-in 0.15s ease-out;
+}
+@keyframes tooltip-in {
+  from { opacity: 0; transform: scale(0.94) translateY(4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ── BADGES ── */
+.badge-pwp        { @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400 text-xs font-semibold px-2 py-0.5 rounded-full; }
+.badge-producer   { @apply bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400 text-xs font-semibold px-2 py-0.5 rounded-full; }
+.badge-importer   { @apply bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400 text-xs font-semibold px-2 py-0.5 rounded-full; }
+.badge-brandowner { @apply bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400 text-xs font-semibold px-2 py-0.5 rounded-full; }
+.badge-simp       { @apply bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-400 text-xs font-semibold px-2 py-0.5 rounded-full; }
+.badge-paid       { @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400 text-xs font-semibold px-2 py-0.5 rounded-full; }
+.badge-partial    { @apply bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 text-xs font-semibold px-2 py-0.5 rounded-full; }
+.badge-unpaid     { @apply bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 text-xs font-semibold px-2 py-0.5 rounded-full; }
+
+
+/* ── MOBILE CARD EXPAND ANIMATION ── */
+.card-expand {
+  overflow: hidden;
+  animation: card-expand-in 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: top;
+}
+@keyframes card-expand-in {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: scaleY(0.97);
+  }
+  to {
+    opacity: 1;
+    max-height: 800px;
+    transform: scaleY(1);
+  }
+}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+
+/* ── DARK MODE TOGGLE SPIN ── */
+.theme-icon-spin {
+  animation: theme-icon-spin 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes theme-icon-spin {
+  from { transform: rotate(-90deg) scale(0.6); opacity: 0; }
+  to   { transform: rotate(0deg)   scale(1);   opacity: 1; }
+}
