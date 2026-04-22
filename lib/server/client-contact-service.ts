@@ -238,7 +238,7 @@ export async function getLikelyNextClientId(category: string) {
   const maxExistingSequence = await getMaxExistingClientSequence(prefix);
   const counter = await ClientIdCounter.findOne({ category: normalizedCategory })
     .select("seq")
-    .lean();
+    .lean() as { seq?: number } | null;
   const nextSequence = Math.max(maxExistingSequence, Number(counter?.seq) || 0) + 1;
 
   return `${prefix}-${String(nextSequence).padStart(3, "0")}`;

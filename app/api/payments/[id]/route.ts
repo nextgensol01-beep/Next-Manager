@@ -50,8 +50,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     const [client, billing] = await Promise.all([
-      Client.findOne({ clientId }).select("clientId").lean(),
-      Billing.findOne({ clientId, financialYear }).select("totalAmount").lean(),
+      Client.findOne({ clientId }).select("clientId").lean() as Promise<{ clientId?: string } | null>,
+      Billing.findOne({ clientId, financialYear }).select("totalAmount").lean() as Promise<{ totalAmount?: number } | null>,
     ]);
 
     if (!client) {
@@ -72,7 +72,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         paymentType: { $ne: "advance" },
       })
         .select("amountPaid")
-        .lean();
+        .lean() as Array<{ amountPaid?: number }>;
 
       const alreadyAllocated = existingBillingPayments.reduce(
         (sum, payment) => sum + (Number(payment.amountPaid) || 0),

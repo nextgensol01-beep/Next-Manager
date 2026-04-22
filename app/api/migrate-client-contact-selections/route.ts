@@ -26,7 +26,8 @@ export async function GET() {
   let missingPersons = 0;
 
   for (const link of links) {
-    const person = await Person.findById(link.personId).lean();
+    const person = await Person.findById(link.personId)
+      .lean() as { phoneNumbers?: string[]; emails?: string[] } | null;
     if (!person) {
       missingPersons++;
       continue;

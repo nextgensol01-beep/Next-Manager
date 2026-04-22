@@ -64,7 +64,7 @@ function fyStructuredTotal(
   ), 0);
 }
 
-// Read a field from a mongoose lean object â€” prefer canonical flat fields,
+// Read a field from a mongoose lean object - prefer canonical flat fields,
 // then structured arrays, then legacy aliases.
 function fyField(
   rec: Record<string, unknown> | null,
@@ -98,7 +98,7 @@ function normaliseCreditType(value: unknown): CreditBreakupType {
   return String(value || "").toUpperCase() === "EOL" ? "EOL" : "RECYCLING";
 }
 
-// Read qty from a credit transaction â€” prefer canonical qty fields,
+// Read qty from a credit transaction - prefer canonical qty fields,
 // then legacy aliases.
 function txCatQty(tx: Record<string, unknown>, i: number): number {
   const canonicalKey = `cat${i}Qty`;
@@ -148,7 +148,7 @@ export async function GET(req: NextRequest) {
     wb.creator = "Nextgen Solutions ERP";
     wb.created = new Date();
 
-  // â”€â”€ TARGETS (PIBO: Producer / Importer / Brand Owner) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // TARGETS (PIBO: Producer / Importer / Brand Owner)
   if (type === "targets") {
     const ws = wb.addWorksheet("Targets");
     ws.columns = [
@@ -182,24 +182,24 @@ export async function GET(req: NextRequest) {
 
     const clients = await Client.find({ category: { $in: ["Producer", "Importer", "Brand Owner"] } }).sort({ companyName: 1 }).lean();
     const clientIds = clients.map((client) => client.clientId);
-    const [fyRecords, incomingTransactions] = await Promise.all([
+    const [fyRecords, transactions] = await Promise.all([
       FinancialYear.find({ clientId: { $in: clientIds }, financialYear: fy }).lean() as Promise<Record<string, unknown>[]>,
       CreditTransaction.find({ toClientId: { $in: clientIds }, financialYear: fy }).lean() as Promise<Record<string, unknown>[]>,
     ]);
     const fyMap = new Map(fyRecords.map((record) => [String(record.clientId), record]));
-    const incomingTransactionsMap = new Map<string, Record<string, unknown>[]>();
-    incomingTransactions.forEach((tx) => {
+    const txToMap = new Map<string, Record<string, unknown>[]>();
+    transactions.forEach((tx) => {
       const clientId = String(tx.toClientId || "");
       if (!clientId) return;
-      const existing = incomingTransactionsMap.get(clientId) || [];
+      const existing = txToMap.get(clientId) || [];
       existing.push(tx);
-      incomingTransactionsMap.set(clientId, existing);
+      txToMap.set(clientId, existing);
     });
 
     let rowIdx = 0;
     for (const client of clients) {
       const fyRec = fyMap.get(client.clientId) || null;
-      const txTo  = incomingTransactionsMap.get(client.clientId) || [];
+      const txTo = txToMap.get(client.clientId) || [];
 
       const tcatRecycling = [1,2,3,4].map((i) =>
         fyField(fyRec, `cat${i}Target`, `targetCat${i}`, "targets", String(i), "RECYCLING")
@@ -253,7 +253,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-  // â”€â”€ PWP CREDITS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // PWP CREDITS
   } else if (type === "pwp") {
     const ws = wb.addWorksheet("PWP Credits");
     ws.columns = [
@@ -286,23 +286,23 @@ export async function GET(req: NextRequest) {
 
     const clients = await Client.find({ category: "PWP" }).sort({ companyName: 1 }).lean();
     const clientIds = clients.map((client) => client.clientId);
-    const [fyRecords, outgoingTransactions] = await Promise.all([
+    const [fyRecords, transactions] = await Promise.all([
       FinancialYear.find({ clientId: { $in: clientIds }, financialYear: fy }).lean() as Promise<Record<string, unknown>[]>,
       CreditTransaction.find({ fromClientId: { $in: clientIds }, financialYear: fy }).lean() as Promise<Record<string, unknown>[]>,
     ]);
     const fyMap = new Map(fyRecords.map((record) => [String(record.clientId), record]));
-    const outgoingTransactionsMap = new Map<string, Record<string, unknown>[]>();
-    outgoingTransactions.forEach((tx) => {
+    const txFromMap = new Map<string, Record<string, unknown>[]>();
+    transactions.forEach((tx) => {
       const clientId = String(tx.fromClientId || "");
       if (!clientId) return;
-      const existing = outgoingTransactionsMap.get(clientId) || [];
+      const existing = txFromMap.get(clientId) || [];
       existing.push(tx);
-      outgoingTransactionsMap.set(clientId, existing);
+      txFromMap.set(clientId, existing);
     });
     let rowIdx = 0;
     for (const client of clients) {
       const fyRec  = fyMap.get(client.clientId) || null;
-      const txFrom = outgoingTransactionsMap.get(client.clientId) || [];
+      const txFrom = txFromMap.get(client.clientId) || [];
 
       const ccatRecycling = [1,2,3,4].map((i) =>
         fyField(fyRec, `cat${i}Generated`, `creditsCat${i}`, "generated", String(i), "RECYCLING")
@@ -355,7 +355,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-  // â”€â”€ TRANSACTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // TRANSACTIONS
   } else if (type === "transactions") {
     const ws = wb.addWorksheet("Transactions");
     ws.columns = [
@@ -410,7 +410,7 @@ export async function GET(req: NextRequest) {
       ["rateCat1","rateCat2","rateCat3","rateCat4"].forEach((k) => { row.getCell(k).numFmt = INR_NUM_FMT; });
     }
 
-  // â”€â”€ PAYMENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // PAYMENTS
   } else if (type === "payments") {
     const ws = wb.addWorksheet("Payment Summary");
     ws.columns = [
@@ -429,29 +429,29 @@ export async function GET(req: NextRequest) {
 
     const clients = await Client.find().sort({ companyName: 1 }).lean();
     const clientIds = clients.map((client) => client.clientId);
-    const [billings, paymentsByFy] = await Promise.all([
+    const [billings, payments] = await Promise.all([
       Billing.find({ clientId: { $in: clientIds }, financialYear: fy }).lean() as Promise<Record<string, unknown>[]>,
       Payment.find({ clientId: { $in: clientIds }, financialYear: fy }).lean() as Promise<Record<string, unknown>[]>,
     ]);
     const billingMap = new Map(billings.map((billing) => [String(billing.clientId), billing]));
-    const paymentsMap = new Map<string, Record<string, unknown>[]>();
-    paymentsByFy.forEach((payment) => {
+    const paymentMap = new Map<string, Record<string, unknown>[]>();
+    payments.forEach((payment) => {
       const clientId = String(payment.clientId || "");
       if (!clientId) return;
-      const existing = paymentsMap.get(clientId) || [];
+      const existing = paymentMap.get(clientId) || [];
       existing.push(payment);
-      paymentsMap.set(clientId, existing);
+      paymentMap.set(clientId, existing);
     });
     let rowIdx = 0;
     for (const client of clients) {
       const billing = billingMap.get(client.clientId) || null;
-      const payments = paymentsMap.get(client.clientId) || [];
-      if (!billing && payments.length === 0) continue;
-      const billingPaid = payments.reduce(
+      const clientPayments = paymentMap.get(client.clientId) || [];
+      if (!billing && clientPayments.length === 0) continue;
+      const billingPaid = clientPayments.reduce<number>(
         (sum, payment) => sum + (payment.paymentType === "advance" ? 0 : (Number(payment.amountPaid) || 0)),
         0
       );
-      const advancePaid = payments.reduce(
+      const advancePaid = clientPayments.reduce<number>(
         (sum, payment) => sum + (payment.paymentType === "advance" ? (Number(payment.amountPaid) || 0) : 0),
         0
       );
@@ -479,7 +479,7 @@ export async function GET(req: NextRequest) {
       if (status in statusColors) row.getCell("status").font = { bold: true, color: { argb: statusColors[status] } };
     }
 
-  // â”€â”€ INVOICES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // INVOICES
   } else if (type === "invoices") {
     const ws = wb.addWorksheet("Invoice Tracking");
     ws.columns = [
@@ -514,7 +514,7 @@ export async function GET(req: NextRequest) {
       row.getCell("days").alignment = { horizontal: "center", vertical: "middle" };
     }
 
-  // â”€â”€ UPLOADS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // UPLOADS
   } else if (type === "uploads") {
     const ws = wb.addWorksheet("Upload Records");
     ws.columns = [
@@ -552,7 +552,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-  // â”€â”€ ANNUAL RETURN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ANNUAL RETURN
   } else if (type === "annual-return") {
     const ws = wb.addWorksheet("EPR Annual Returns");
     ws.columns = [

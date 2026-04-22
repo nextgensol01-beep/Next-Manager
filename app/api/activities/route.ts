@@ -155,7 +155,9 @@ export async function GET(req: NextRequest) {
       ? rawCategory as ActivityRecord["category"]
       : undefined;
 
-    const client = await Client.findOne({ clientId }).select("companyName").lean();
+    const client = await Client.findOne({ clientId })
+      .select("companyName")
+      .lean() as { companyName?: string } | null;
     const clientName = typeof client?.companyName === "string" ? client.companyName.trim() : "";
 
     const [transactions, fyRecords, billings, payments, emailLogs, deletedRecords] = await Promise.all([

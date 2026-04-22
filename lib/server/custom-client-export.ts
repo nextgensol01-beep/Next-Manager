@@ -510,13 +510,27 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
     const documentSummary = buildDocumentSummary(clientDocuments);
     const emailSummary = buildEmailSummary(clientEmails, options.fy);
     const financialSummary = buildFinancialSummary(financialYear, soldTotals, achievedTotals);
+    const {
+      __latestUploadTs,
+      ...uploadExportSummary
+    } = uploadSummary;
+    const {
+      __latestDocumentTs,
+      __hasDocuments,
+      ...documentExportSummary
+    } = documentSummary;
+    const {
+      __latestEmailTs,
+      __hasEmails,
+      ...emailExportSummary
+    } = emailSummary;
 
     const latestActivityTs = Math.max(
       toTimestamp(client.updatedAt),
       Number(paymentSummary.__latestPaymentTs || 0),
-      Number(uploadSummary.__latestUploadTs || 0),
-      Number(documentSummary.__latestDocumentTs || 0),
-      Number(emailSummary.__latestEmailTs || 0),
+      Number(__latestUploadTs || 0),
+      Number(__latestDocumentTs || 0),
+      Number(__latestEmailTs || 0),
       toTimestamp(latestInvoice?.createdAt),
       toTimestamp(annualReturn?.updatedAt)
     );
@@ -559,9 +573,9 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
       fyLatestInvoiceFromDate: formatDate(latestInvoice?.fromDate),
       fyLatestInvoiceToDate: formatDate(latestInvoice?.toDate),
       fyLatestInvoiceCreatedAt: formatDate(latestInvoice?.createdAt),
-      ...uploadSummary,
-      ...documentSummary,
-      ...emailSummary,
+      ...uploadExportSummary,
+      ...documentExportSummary,
+      ...emailExportSummary,
     };
 
     return {
@@ -579,8 +593,8 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
         hasContacts: Number(contactSummary.contactCount) > 0,
         hasBilling: Boolean(paymentSummary.__hasBilling),
         hasPayments: Boolean(paymentSummary.__hasPayments),
-        hasDocuments: Boolean(documentSummary.__hasDocuments),
-        hasEmails: Boolean(emailSummary.__hasEmails),
+        hasDocuments: Boolean(__hasDocuments),
+        hasEmails: Boolean(__hasEmails),
         hasAnnualReturn: Boolean(annualReturn),
       },
     };

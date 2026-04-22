@@ -9,14 +9,6 @@ const nextConfig = {
       },
     ],
   },
-  eslint: {
-    // ESLint warnings/errors won't block the production build
-    ignoreDuringBuilds: true,
-  },
-  typescript: {
-    // Type errors won't block the production build
-    ignoreBuildErrors: true,
-  },
 };
 
 export default nextConfig;
