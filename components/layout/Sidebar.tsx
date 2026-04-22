@@ -66,18 +66,18 @@ export default function Sidebar({ open, onClose }: Props) {
   }, [pathname]);
 
   const content = (
-    <aside className="sidebar-panel w-[260px] flex-shrink-0 flex flex-col h-full overflow-y-auto">
+    <aside className="sidebar-panel w-[256px] flex-shrink-0 flex flex-col h-full" style={{overflow: "hidden"}}>
       {/* Header */}
-      <div className="flex items-center justify-between p-5 border-b sidebar-divider">
+      <div className="flex items-center justify-between px-4 py-4 border-b sidebar-divider">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-brand-600 rounded-xl flex items-center justify-center shadow-lg shadow-brand-600/30 flex-shrink-0">
+          <div className="w-8 h-8 rounded-[9px] flex items-center justify-center flex-shrink-0" style={{background: "#0071e3", boxShadow: "0 3px 10px rgba(0,113,227,0.35)"}}>
             <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
             </svg>
           </div>
           <div>
-            <p className="sidebar-text-primary font-bold text-sm leading-tight">Nextgen Solutions</p>
-            <p className="sidebar-text-faint text-xs">EPR Consultancy</p>
+            <p className="sidebar-text-primary font-semibold text-[13px] leading-tight" style={{letterSpacing: "-0.01em"}}>Nextgen Solutions</p>
+            <p className="sidebar-text-faint text-[11px] mt-0.5">EPR Consultancy</p>
           </div>
         </div>
         <button onClick={onClose} className="lg:hidden p-1.5 rounded-lg sidebar-text-muted transition-all duration-150 active:scale-90 hover:bg-[var(--sidebar-hover-bg)]">
@@ -86,8 +86,8 @@ export default function Sidebar({ open, onClose }: Props) {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 p-4 space-y-0.5">
-        <p className="sidebar-text-faint text-[10px] font-semibold uppercase tracking-widest px-4 mb-2">Navigation</p>
+      <nav className="flex-1 p-3 space-y-0.5 overflow-hidden">
+        <p className="sidebar-text-faint text-[10px] font-semibold uppercase tracking-widest px-3 mb-1.5">Navigation</p>
         {navItems.map(({ href, label, icon: Icon }) => {
           const isActive = href === "/dashboard" ? pathname === href : pathname.startsWith(href);
           return (

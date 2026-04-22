@@ -14,11 +14,11 @@ export default function DashboardShell({ session, children }: { session: Session
   }, []);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface transition-colors">
+    <div className="flex h-screen overflow-hidden bg-surface transition-colors" style={{position: "fixed", inset: 0}}>
       <Sidebar open={sidebarOpen} onClose={handleSidebarClose} />
-      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+      <div className="flex-1 flex flex-col min-w-0" style={{overflow: "hidden", height: "100vh"}}>
         <TopBar session={session} onMenuClick={handleMenuClick} sidebarOpen={sidebarOpen} />
-        <main id="dashboard-scroll-area" className="flex-1 overflow-y-auto p-4 md:p-6 page-fade-in">{children}</main>
+        <main id="dashboard-scroll-area" className="flex-1 overflow-y-auto p-4 md:p-6 page-fade-in" style={{minHeight: 0}}>{children}</main>
       </div>
     </div>
   );

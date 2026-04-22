@@ -15,7 +15,7 @@ import {
   Trash2, User, Shield, FileText, Hash, Lock, Smartphone,
   ArrowUpRight, ArrowDownLeft, Target, Wallet, Zap,
   Receipt, Send, MailCheck, Activity, Pencil, X, Users, BarChart2,
-  Copy, Check, ChevronDown, ChevronRight
+  Copy, Check, ChevronDown, ChevronRight, Recycle, Leaf
 } from "lucide-react";
 
 interface Person {
@@ -48,6 +48,8 @@ interface FYRecord {
   _id?: string; clientId: string; financialYear: string;
   generated?: Array<{ categoryId: string; type: "RECYCLING" | "EOL"; value: number }>;
   targets?: Array<{ categoryId: string; type: "RECYCLING" | "EOL"; value: number }>;
+  soldByType?: Array<{ categoryId: string; type: "RECYCLING" | "EOL"; value: number }>;
+  achievedByType?: Array<{ categoryId: string; type: "RECYCLING" | "EOL"; value: number }>;
   cat1Generated?: number; cat2Generated?: number; cat3Generated?: number; cat4Generated?: number;
   cat1Target?: number;    cat2Target?: number;    cat3Target?: number;    cat4Target?: number;
   soldCat1?: number;      soldCat2?: number;      soldCat3?: number;      soldCat4?: number;
@@ -227,6 +229,15 @@ const buildFyEntries = (entries: Array<{ categoryId: string; type: "RECYCLING" |
 };
 
 const sumFyEntries = (entries: FYEntryForm[]) => entries.reduce((sum, entry) => sum + (Number(entry.value) || 0), 0);
+const buildEntryValueMap = (entries: Array<{ categoryId: string; type: "RECYCLING" | "EOL"; value: number }> | undefined) => {
+  const map: Record<string, number> = {};
+  (entries || []).forEach((entry) => {
+    const type = entry.type === "EOL" ? "EOL" : "RECYCLING";
+    const key = `${entry.categoryId}|${type}`;
+    map[key] = (map[key] || 0) + (Number(entry.value) || 0);
+  });
+  return map;
+};
 
 function restoreSuggestion(email: string, currentSuggestions: EmailOption[], catalog: EmailOption[]) {
   if (currentSuggestions.some((entry) => entry.email === email)) return currentSuggestions;
@@ -2097,6 +2108,59 @@ export default function ClientProfilePage() {
       { label: "CAT-IV",  base: pw ? (rec.cat4Generated ?? rec.creditsCat4 ?? 0) : (rec.cat4Target ?? rec.targetCat4 ?? 0), used: pw ? (rec.soldCat4 ?? rec.usedCat4 ?? 0) : (rec.achievedCat4 ?? 0) },
     ];
   };
+  const makeBreakdownProps = (rec: FYRecord) => {
+    const entries = isPWP ? rec.generated : rec.targets;
+    if (Array.isArray(entries) && entries.length > 0) {
+      return {
+        entries,
+        achievedMap: buildEntryValueMap(isPWP ? rec.soldByType : rec.achievedByType),
+        rows: undefined,
+      };
+    }
+
+    return {
+      entries: undefined,
+      achievedMap: undefined,
+      rows: makeBreakdownRows(rec),
+    };
+  };
+  const fyBaseEntries = fyData ? (isPWP ? fyData.generated : fyData.targets) : undefined;
+  const fyUsageEntries = fyData ? (isPWP ? fyData.soldByType : fyData.achievedByType) : undefined;
+  const fyHasTypedSplit = Array.isArray(fyBaseEntries) && fyBaseEntries.length > 0;
+  const fyBaseMap = buildEntryValueMap(fyBaseEntries);
+  const fyUsageMap = buildEntryValueMap(fyUsageEntries);
+  const fyCategoryRows = fyData ? CATS.map((cat, index) => {
+    const categoryId = CAT_IDS[index];
+    const n = index + 1;
+    const fallbackBase = isPWP
+      ? (fyData[`cat${n}Generated` as keyof FYRecord] as number ?? fyData[`creditsCat${n}` as keyof FYRecord] as number ?? 0)
+      : (fyData[`cat${n}Target` as keyof FYRecord] as number ?? fyData[`targetCat${n}` as keyof FYRecord] as number ?? 0);
+    const fallbackUsed = isPWP
+      ? (fyData[`soldCat${n}` as keyof FYRecord] as number ?? fyData[`usedCat${n}` as keyof FYRecord] as number ?? 0)
+      : (fyData[`achievedCat${n}` as keyof FYRecord] as number ?? 0);
+    const typedRows = CREDIT_TYPES.map((type) => {
+      const key = `${categoryId}|${type}`;
+      const base = fyBaseMap[key] ?? 0;
+      const used = fyUsageMap[key] ?? 0;
+      return { type, base, used, remaining: base - used };
+    });
+    const typedBase = typedRows.reduce((sum, row) => sum + row.base, 0);
+    const typedUsed = typedRows.reduce((sum, row) => sum + row.used, 0);
+
+    return {
+      label: cat,
+      categoryId,
+      base: fyHasTypedSplit ? typedBase : fallbackBase,
+      used: fyHasTypedSplit ? typedUsed : fallbackUsed,
+      remaining: fyHasTypedSplit ? typedBase - typedUsed : fallbackBase - fallbackUsed,
+      typedRows,
+    };
+  }) : [];
+  const fyTypeTotals = CREDIT_TYPES.map((type) => {
+    const base = CAT_IDS.reduce((sum, categoryId) => sum + (fyBaseMap[`${categoryId}|${type}`] ?? 0), 0);
+    const used = CAT_IDS.reduce((sum, categoryId) => sum + (fyUsageMap[`${categoryId}|${type}`] ?? 0), 0);
+    return { type, base, used, remaining: base - used };
+  });
 
   const pageTitleStyle = {
     transform: `translateY(${-6 * headerTitleProgress}px) scale(${1 - (0.08 * headerTitleProgress)})`,
@@ -2527,26 +2591,63 @@ export default function ClientProfilePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {CATS.map((cat, i) => {
-                      const n = i + 1;
-                      const base = isPWP
-                        ? (fyData[`cat${n}Generated` as keyof FYRecord] as number ?? fyData[`creditsCat${n}` as keyof FYRecord] as number ?? 0)
-                        : (fyData[`cat${n}Target` as keyof FYRecord] as number    ?? fyData[`targetCat${n}` as keyof FYRecord] as number ?? 0);
-                      const used = isPWP
-                        ? (fyData[`soldCat${n}` as keyof FYRecord] as number ?? fyData[`usedCat${n}` as keyof FYRecord] as number ?? 0)
-                        : (fyData[`achievedCat${n}` as keyof FYRecord] as number ?? 0);
-                      const rem = base - used;
-                      const pct = base > 0 ? Math.round((used / base) * 100) : 0;
+                    {fyCategoryRows.map((row) => {
+                      const pct = row.base > 0 ? Math.round((row.used / row.base) * 100) : 0;
                       return (
-                        <tr key={cat} className="border-b border-base last:border-0">
-                          <td className="px-4 py-2.5 font-medium text-default">{cat}</td>
-                          <td className="px-4 py-2.5 text-right font-mono">{base.toLocaleString()}</td>
-                          <td className="px-4 py-2.5 text-right">
-                            <span className={`font-mono ${isPWP ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}`}>{used.toLocaleString()}</span>
-                            {base > 0 && <span className="text-xs text-faint ml-1">({pct}%)</span>}
+                        <tr key={row.categoryId} className="border-b border-base last:border-0">
+                          <td className="px-4 py-2.5 font-medium text-default">{row.label}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">
+                            {fyHasTypedSplit ? (
+                              <div className="space-y-1">
+                                {row.typedRows.map((item) => (
+                                  <div key={item.type} className="flex items-center justify-end gap-1.5">
+                                    {item.type === "RECYCLING"
+                                      ? <Recycle className="w-3 h-3 text-teal-500 flex-shrink-0" />
+                                      : <Leaf className="w-3 h-3 text-amber-500 flex-shrink-0" />}
+                                    <span>{item.base.toLocaleString()}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : row.base.toLocaleString()}
                           </td>
                           <td className="px-4 py-2.5 text-right">
-                            <span className={`font-mono font-semibold ${rem < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>{rem.toLocaleString()}</span>
+                            {fyHasTypedSplit ? (
+                              <div className="space-y-1">
+                                {row.typedRows.map((item) => {
+                                  const typePct = item.base > 0 ? Math.round((item.used / item.base) * 100) : 0;
+                                  return (
+                                    <div key={item.type} className="flex items-center justify-end gap-1.5">
+                                      {item.type === "RECYCLING"
+                                        ? <Recycle className="w-3 h-3 text-teal-500 flex-shrink-0" />
+                                        : <Leaf className="w-3 h-3 text-amber-500 flex-shrink-0" />}
+                                      <span className={`font-mono ${isPWP ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}`}>{item.used.toLocaleString()}</span>
+                                      {item.base > 0 && <span className="text-[10px] text-faint">({typePct}%)</span>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <>
+                                <span className={`font-mono ${isPWP ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}`}>{row.used.toLocaleString()}</span>
+                                {row.base > 0 && <span className="text-xs text-faint ml-1">({pct}%)</span>}
+                              </>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            {fyHasTypedSplit ? (
+                              <div className="space-y-1">
+                                {row.typedRows.map((item) => (
+                                  <div key={item.type} className="flex items-center justify-end gap-1.5">
+                                    {item.type === "RECYCLING"
+                                      ? <Recycle className="w-3 h-3 text-teal-500 flex-shrink-0" />
+                                      : <Leaf className="w-3 h-3 text-amber-500 flex-shrink-0" />}
+                                    <span className={`font-mono font-semibold ${item.remaining < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>{item.remaining.toLocaleString()}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className={`font-mono font-semibold ${row.remaining < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>{row.remaining.toLocaleString()}</span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -2557,15 +2658,15 @@ export default function ClientProfilePage() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {isPWP ? (
                   <>
-                    <div className="bg-surface rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Total Generated</p><p className="text-xl font-bold text-default">{(fyData.totalGenerated ?? fyData.totalCredits ?? fyData.availableCredits ?? 0).toLocaleString()}</p></div>
-                    <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Total Sold</p><p className="text-xl font-bold text-red-600 dark:text-red-400">{(fyData.totalSold ?? fyData.totalUsed ?? fyData.usedCredits ?? 0).toLocaleString()}</p></div>
-                    <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Remaining</p><p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{(fyData.totalRemaining ?? fyData.remainingCredits ?? 0).toLocaleString()}</p></div>
+                    <div className="bg-surface rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Total Generated</p><p className="text-xl font-bold text-default">{(fyData.totalGenerated ?? fyData.totalCredits ?? fyData.availableCredits ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.base.toLocaleString()}</span>)}</div>}</div>
+                    <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Total Sold</p><p className="text-xl font-bold text-red-600 dark:text-red-400">{(fyData.totalSold ?? fyData.totalUsed ?? fyData.usedCredits ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.used.toLocaleString()}</span>)}</div>}</div>
+                    <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Remaining</p><p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{(fyData.totalRemaining ?? fyData.remainingCredits ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.remaining.toLocaleString()}</span>)}</div>}</div>
                   </>
                 ) : (
                   <>
-                    <div className="bg-surface rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Total Target</p><p className="text-xl font-bold text-default">{(fyData.totalTarget ?? fyData.targetAmount ?? 0).toLocaleString()}</p></div>
-                    <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Achieved</p><p className="text-xl font-bold text-blue-600 dark:text-blue-400">{(fyData.totalAchieved ?? fyData.achievedAmount ?? 0).toLocaleString()}</p></div>
-                    <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Remaining</p><p className="text-xl font-bold text-amber-600 dark:text-amber-400">{(fyData.totalRemainingTarget ?? fyData.remainingTarget ?? 0).toLocaleString()}</p></div>
+                    <div className="bg-surface rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Total Target</p><p className="text-xl font-bold text-default">{(fyData.totalTarget ?? fyData.targetAmount ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.base.toLocaleString()}</span>)}</div>}</div>
+                    <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Achieved</p><p className="text-xl font-bold text-blue-600 dark:text-blue-400">{(fyData.totalAchieved ?? fyData.achievedAmount ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.used.toLocaleString()}</span>)}</div>}</div>
+                    <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Remaining</p><p className="text-xl font-bold text-amber-600 dark:text-amber-400">{(fyData.totalRemainingTarget ?? fyData.remainingTarget ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.remaining.toLocaleString()}</span>)}</div>}</div>
                   </>
                 )}
               </div>
@@ -3093,10 +3194,17 @@ export default function ClientProfilePage() {
       {breakdownRec && (
         <Modal open={!!breakdownRec} onClose={() => setBreakdownRec(null)}
           title={`${client.companyName} — FY ${breakdownRec.financialYear}`} size="lg">
-          <CategoryBreakdown
-            clientType={isPWP ? "PWP" : "PIBO"}
-            rows={makeBreakdownRows(breakdownRec)}
-          />
+          {(() => {
+            const breakdownProps = makeBreakdownProps(breakdownRec);
+            return (
+              <CategoryBreakdown
+                clientType={isPWP ? "PWP" : "PIBO"}
+                entries={breakdownProps.entries}
+                achievedMap={breakdownProps.achievedMap}
+                rows={breakdownProps.rows}
+              />
+            );
+          })()}
         </Modal>
       )}
 

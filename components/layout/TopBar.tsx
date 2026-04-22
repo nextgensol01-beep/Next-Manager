@@ -41,7 +41,16 @@ export default function TopBar({ session, onMenuClick, sidebarOpen }: Props) {
   } as const;
 
   return (
-    <header className="h-14 bg-header border-b border-base flex items-center justify-between px-3 sm:px-6 flex-shrink-0 transition-colors gap-2">
+    <header
+      className="h-[60px] border-b flex items-center justify-between px-3 sm:px-6 flex-shrink-0 gap-2"
+      style={{
+        background: "var(--color-header)",
+        borderColor: "var(--color-border)",
+        backdropFilter: "saturate(180%) blur(20px)",
+        WebkitBackdropFilter: "saturate(180%) blur(20px)",
+        transition: "background 0.3s, border-color 0.3s",
+      }}
+    >
 
       {/* Hamburger — mobile only */}
       <button
