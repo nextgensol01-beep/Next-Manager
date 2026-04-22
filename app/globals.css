@@ -19,6 +19,47 @@ body {
   @apply bg-surface text-default transition-colors duration-200;
 }
 
+.dashboard-shell {
+  min-height: 100dvh;
+  overflow: visible;
+}
+.dashboard-content {
+  min-height: 100dvh;
+  overflow: visible;
+}
+.dashboard-main {
+  min-height: 0;
+  overflow: visible;
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+}
+.dashboard-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+@media (min-width: 768px) {
+  .dashboard-shell {
+    position: fixed;
+    inset: 0;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .dashboard-content {
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .dashboard-main {
+    overflow-y: auto;
+    padding-bottom: 1.5rem;
+    -webkit-overflow-scrolling: touch;
+  }
+  .dashboard-topbar {
+    position: static;
+  }
+}
+
 /* ── LIGHT / DARK TOKENS ── */
 @layer base {
   :root {

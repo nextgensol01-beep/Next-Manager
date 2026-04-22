@@ -42,7 +42,7 @@ export default function TopBar({ session, onMenuClick, sidebarOpen }: Props) {
 
   return (
     <header
-      className="h-[60px] border-b flex items-center justify-between px-3 sm:px-6 flex-shrink-0 gap-2"
+      className="dashboard-topbar h-[60px] border-b flex items-center justify-between px-3 sm:px-6 flex-shrink-0 gap-2"
       style={{
         background: "var(--color-header)",
         borderColor: "var(--color-border)",
