@@ -14,21 +14,22 @@
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
     "exceljs": "^4.4.0",
-    "googleapis": "^144.0.0",
+    "framer-motion": "^12.38.0",
+    "googleapis": "^171.4.0",
     "jspdf": "^4.2.0",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.469.0",
     "mongoose": "^8.9.0",
     "next": "^15.5.12",
     "next-auth": "^4.24.13",
-    "nodemailer": "^7.0.13",
+    "nodemailer8": "npm:nodemailer@^8.0.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hot-toast": "^2.4.1",
     "recharts": "^2.13.0",
     "swr": "^2.3.0",
     "tailwind-merge": "^3.3.0",
-    "framer-motion": "~11.3.0"
+    "uuid": "file:vendor/uuid-safe/uuid-14.0.0.tgz"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -42,5 +43,8 @@
     "postcss": "^8.5.0",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.0"
+  },
+  "overrides": {
+    "uuid": "$uuid"
   }
 }
