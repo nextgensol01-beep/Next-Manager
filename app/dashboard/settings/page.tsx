@@ -116,11 +116,11 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2 pt-2">
-              <button type="button" className="btn-primary" onClick={handleSave}>
+            <div className="glass-tray" style={{flexWrap:"wrap", marginTop:"8px"}}>
+              <button type="button" className="glass-pill glass-pill-active" onClick={handleSave}>
                 Save Settings
               </button>
-              <button type="button" className="btn-secondary" onClick={handleDisable}>
+              <button type="button" className="glass-pill" onClick={handleDisable}>
                 Disable Feature
               </button>
             </div>

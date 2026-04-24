@@ -451,3 +451,387 @@ tbody tr {
   from { transform: rotate(-90deg) scale(0.6); opacity: 0; }
   to   { transform: rotate(0deg)   scale(1);   opacity: 1; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   LIQUID GLASS — Apple visionOS / iOS 26 inspired
+   Used on: FYTabBar, FilterRail, action button groups, sidebar active
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── CSS variables for glass system ── */
+:root {
+  --glass-bg:          rgba(255, 255, 255, 0.55);
+  --glass-bg-hover:    rgba(255, 255, 255, 0.72);
+  --glass-border:      rgba(255, 255, 255, 0.75);
+  --glass-border-soft: rgba(255, 255, 255, 0.40);
+  --glass-shadow:      0 2px 16px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.06);
+  --glass-shadow-lg:   0 8px 32px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06);
+  --glass-pill-active-bg:    rgba(0, 113, 227, 0.90);
+  --glass-pill-active-border:rgba(0, 113, 227, 0.60);
+  --glass-pill-active-glow:  0 0 0 1px rgba(0,113,227,0.30), 0 4px 16px rgba(0,113,227,0.28);
+  --glass-pill-inactive-bg:  rgba(255,255,255,0.38);
+  --glass-pill-inactive-border: rgba(255,255,255,0.60);
+  --glass-pill-inactive-text: rgba(0,0,0,0.55);
+  --glass-pill-inactive-hover-bg: rgba(255,255,255,0.60);
+  --glass-tray-bg:     rgba(255,255,255,0.30);
+  --glass-tray-border: rgba(255,255,255,0.55);
+}
+.dark {
+  --glass-bg:          rgba(40, 40, 45, 0.55);
+  --glass-bg-hover:    rgba(55, 55, 60, 0.72);
+  --glass-border:      rgba(255, 255, 255, 0.14);
+  --glass-border-soft: rgba(255, 255, 255, 0.08);
+  --glass-shadow:      0 2px 16px rgba(0,0,0,0.30), 0 1px 4px rgba(0,0,0,0.20);
+  --glass-shadow-lg:   0 8px 32px rgba(0,0,0,0.40), 0 2px 8px rgba(0,0,0,0.24);
+  --glass-pill-active-bg:    rgba(0, 113, 227, 0.88);
+  --glass-pill-active-border:rgba(100, 170, 255, 0.45);
+  --glass-pill-active-glow:  0 0 0 1px rgba(0,113,227,0.40), 0 4px 20px rgba(0,113,227,0.35);
+  --glass-pill-inactive-bg:  rgba(255,255,255,0.07);
+  --glass-pill-inactive-border: rgba(255,255,255,0.12);
+  --glass-pill-inactive-text: rgba(255,255,255,0.50);
+  --glass-pill-inactive-hover-bg: rgba(255,255,255,0.13);
+  --glass-tray-bg:     rgba(28, 28, 32, 0.55);
+  --glass-tray-border: rgba(255,255,255,0.10);
+}
+
+/* ── Tray: the outer container that holds a pill group ── */
+.glass-tray {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--glass-tray-bg);
+  border: 1px solid var(--glass-tray-border);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: var(--glass-shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle specular shimmer on top edge of the tray */
+.glass-tray::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 8px; right: 8px;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255,255,255,0.70) 30%,
+    rgba(255,255,255,0.90) 50%,
+    rgba(255,255,255,0.70) 70%,
+    transparent 100%
+  );
+  pointer-events: none;
+  border-radius: 999px;
+}
+.dark .glass-tray::before {
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255,255,255,0.12) 30%,
+    rgba(255,255,255,0.20) 50%,
+    rgba(255,255,255,0.12) 70%,
+    transparent 100%
+  );
+}
+
+/* Inner gloss refraction overlay */
+.glass-tray::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    ellipse 100% 60% at 50% -10%,
+    rgba(255,255,255,0.22) 0%,
+    transparent 70%
+  );
+  pointer-events: none;
+}
+.dark .glass-tray::after {
+  background: radial-gradient(
+    ellipse 100% 60% at 50% -10%,
+    rgba(255,255,255,0.06) 0%,
+    transparent 70%
+  );
+}
+
+/* ── Pill button inside a glass tray ── */
+.glass-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 13px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1),
+    color 0.15s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+  flex-shrink: 0;
+
+  /* Inactive state */
+  background: var(--glass-pill-inactive-bg);
+  border-color: var(--glass-pill-inactive-border);
+  color: var(--glass-pill-inactive-text);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Specular highlight on pill top edge */
+.glass-pill::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 10%; right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(255,255,255,0.80) 40%,
+    rgba(255,255,255,0.95) 50%,
+    rgba(255,255,255,0.80) 60%,
+    transparent
+  );
+  border-radius: 999px;
+  pointer-events: none;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+.dark .glass-pill::before {
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(255,255,255,0.15) 40%,
+    rgba(255,255,255,0.25) 50%,
+    rgba(255,255,255,0.15) 60%,
+    transparent
+  );
+}
+
+/* Hover: inactive pill gets brighter glass */
+.glass-pill:hover:not(.glass-pill-active) {
+  background: var(--glass-pill-inactive-hover-bg);
+  border-color: rgba(255,255,255,0.75);
+  color: var(--color-text);
+  transform: translateY(-0.5px);
+}
+.dark .glass-pill:hover:not(.glass-pill-active) {
+  border-color: rgba(255,255,255,0.18);
+  color: rgba(255,255,255,0.80);
+}
+
+/* Active pill: solid brand with glass sheen */
+.glass-pill-active {
+  background: var(--glass-pill-active-bg);
+  border-color: var(--glass-pill-active-border);
+  color: #ffffff;
+  box-shadow: var(--glass-pill-active-glow);
+}
+
+/* Active pill inner gloss */
+.glass-pill-active::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 50%;
+  border-radius: 9px 9px 0 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(255,255,255,0.20) 0%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/* Press feedback */
+.glass-pill:active {
+  transform: scale(0.95) translateY(0) !important;
+  transition-duration: 0.06s !important;
+}
+
+/* ── Full-width glass tray (for FYTabBar strip) ── */
+.glass-tray-full {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 12px;
+  border-radius: 16px;
+  background: var(--glass-tray-bg);
+  border: 1px solid var(--glass-tray-border);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: var(--glass-shadow);
+  position: relative;
+  overflow: hidden;
+}
+.glass-tray-full::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 8px; right: 8px;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255,255,255,0.70) 30%,
+    rgba(255,255,255,0.90) 50%,
+    rgba(255,255,255,0.70) 70%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+.dark .glass-tray-full::before {
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255,255,255,0.12) 30%,
+    rgba(255,255,255,0.20) 50%,
+    rgba(255,255,255,0.12) 70%,
+    transparent 100%
+  );
+}
+.glass-tray-full::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    ellipse 100% 60% at 50% -10%,
+    rgba(255,255,255,0.18) 0%,
+    transparent 70%
+  );
+  pointer-events: none;
+}
+.dark .glass-tray-full::after {
+  background: radial-gradient(
+    ellipse 100% 60% at 50% -10%,
+    rgba(255,255,255,0.05) 0%,
+    transparent 70%
+  );
+}
+
+/* ── Glass action button (standalone, not in a tray) ── */
+.glass-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  border: 1px solid var(--glass-border-soft);
+  background: var(--glass-bg);
+  color: var(--color-text);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  box-shadow: var(--glass-shadow);
+  transition:
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1);
+  outline: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.glass-btn::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 8%; right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.90) 50%, transparent);
+  pointer-events: none;
+}
+.dark .glass-btn::before {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18) 50%, transparent);
+}
+.glass-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 90% 55% at 50% -5%, rgba(255,255,255,0.18) 0%, transparent 70%);
+  pointer-events: none;
+}
+.dark .glass-btn::after {
+  background: radial-gradient(ellipse 90% 55% at 50% -5%, rgba(255,255,255,0.05) 0%, transparent 70%);
+}
+
+.glass-btn:hover {
+  background: var(--glass-bg-hover);
+  box-shadow: var(--glass-shadow-lg);
+  transform: translateY(-1px);
+}
+.glass-btn:active {
+  transform: scale(0.96) !important;
+  transition-duration: 0.06s !important;
+}
+
+/* Primary variant */
+.glass-btn-primary {
+  background: rgba(0, 113, 227, 0.88);
+  border-color: rgba(0, 113, 227, 0.55);
+  color: #ffffff;
+  box-shadow: 0 0 0 1px rgba(0,113,227,0.25), 0 4px 16px rgba(0,113,227,0.28);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.glass-btn-primary::before {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.30) 50%, transparent);
+}
+.glass-btn-primary::after {
+  background: radial-gradient(ellipse 90% 55% at 50% -5%, rgba(255,255,255,0.22) 0%, transparent 70%);
+}
+.glass-btn-primary:hover {
+  background: rgba(0, 119, 237, 0.95);
+  box-shadow: 0 0 0 1px rgba(0,113,227,0.40), 0 6px 24px rgba(0,113,227,0.38);
+}
+
+/* ── Sidebar glass active pill ── */
+.sidebar-link.active {
+  background: var(--glass-pill-active-bg) !important;
+  border: 1px solid var(--glass-pill-active-border) !important;
+  color: #ffffff !important;
+  box-shadow: var(--glass-pill-active-glow) !important;
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  position: relative;
+  overflow: hidden;
+}
+.sidebar-link.active::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 8%; right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55) 50%, transparent);
+  pointer-events: none;
+}
+.sidebar-link.active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 90% 50% at 50% -5%, rgba(255,255,255,0.18) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* ── Scrollable glass tray strip: for FYTabBar ── */
+.glass-tray-scroll-track {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+  cursor: grab;
+}
+.glass-tray-scroll-track::-webkit-scrollbar { display: none; }
+.glass-tray-scroll-track:active { cursor: grabbing; }

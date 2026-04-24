@@ -176,15 +176,14 @@ export default function TrashPage() {
       <PageHeader title="Recycle Bin" description="Deleted records — auto-purged after 90 days">
         {items.length > 0 && (
           confirmEmpty ? (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-red-500 font-medium">Are you sure?</span>
-              <button onClick={emptyTrash} className="btn-danger text-sm px-3 py-1.5">Yes, empty all</button>
-              <button onClick={() => setConfirmEmpty(false)} className="btn-secondary text-sm px-3 py-1.5">Cancel</button>
+            <div className="glass-tray">
+              <span className="text-xs font-semibold" style={{ color: "#ff3b30", padding: "0 4px" }}>Are you sure?</span>
+              <button onClick={emptyTrash} className="glass-pill" style={{ color: "#ff3b30" }}>Yes, empty all</button>
+              <button onClick={() => setConfirmEmpty(false)} className="glass-pill">Cancel</button>
             </div>
           ) : (
-            <button onClick={() => setConfirmEmpty(true)}
-              className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-red-500 border border-red-500/30 rounded-lg hover:bg-red-500/10 transition-colors">
-              <Trash2 className="w-4 h-4" /> Empty Trash
+            <button onClick={() => setConfirmEmpty(true)} className="glass-btn" style={{ color: "#ff3b30" }}>
+              <Trash2 className="w-3.5 h-3.5" /> Empty Trash
             </button>
           )
         )}
@@ -201,14 +200,14 @@ export default function TrashPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="glass-tray" style={{ flexWrap: "wrap" }}>
           <button onClick={() => setTypeFilter("all")}
-            className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${typeFilter === "all" ? "bg-brand-600 text-white" : "bg-surface text-muted hover:bg-hover"}`}>
+            className={`glass-pill ${typeFilter === "all" ? "glass-pill-active" : ""}`}>
             All ({items.length})
           </button>
           {allTypes.filter((t) => typeCounts[t]).map((t) => (
             <button key={t} onClick={() => setTypeFilter(t)}
-              className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${typeFilter === t ? "bg-brand-600 text-white" : "bg-surface text-muted hover:bg-hover"}`}>
+              className={`glass-pill ${typeFilter === t ? "glass-pill-active" : ""}`}>
               {TYPE_LABELS[t]} ({typeCounts[t]})
             </button>
           ))}

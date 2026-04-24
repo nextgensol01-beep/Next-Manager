@@ -293,9 +293,9 @@ export default function BillingPage() {
   return (
     <div>
       <PageHeader title="Billing & Payments" description="Manage invoices and payment collection">
-        <div className="flex gap-2 flex-wrap">
-          <button className="btn-secondary" onClick={openAdvancePaymentModal}><Plus className="w-4 h-4" /> Record Advance</button>
-          <button className="btn-primary" onClick={openBillingModal}><Plus className="w-4 h-4" /> Add Billing</button>
+        <div className="glass-tray">
+          <button className="glass-pill" onClick={openAdvancePaymentModal}><Plus className="w-3.5 h-3.5" /> Record Advance</button>
+          <button className="glass-pill glass-pill-active" onClick={openBillingModal}><Plus className="w-3.5 h-3.5" /> Add Billing</button>
         </div>
       </PageHeader>
 
@@ -365,10 +365,10 @@ export default function BillingPage() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2 flex-wrap">
-                    <button className="btn-primary !py-1.5" onClick={() => openPaymentModal(billing)}><Plus className="w-3.5 h-3.5" /> Add Payment</button>
-                    <button className="btn-secondary !py-1.5" onClick={() => openEmailModal(billing)}><Send className="w-3.5 h-3.5" /> Send Reminder</button>
-                    <button className="btn-secondary !py-1.5" onClick={() => toggleRow(billing._id)}>
+                  <div className="glass-tray" style={{ flexWrap: "wrap" }}>
+                    <button className="glass-pill glass-pill-active" onClick={() => openPaymentModal(billing)}><Plus className="w-3.5 h-3.5" /> Add Payment</button>
+                    <button className="glass-pill" onClick={() => openEmailModal(billing)}><Send className="w-3.5 h-3.5" /> Send Reminder</button>
+                    <button className="glass-pill" onClick={() => toggleRow(billing._id)}>
                       <FileText className="w-3.5 h-3.5" /> Payment History {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                     </button>
                   </div>

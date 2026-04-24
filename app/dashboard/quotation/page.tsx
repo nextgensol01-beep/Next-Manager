@@ -169,7 +169,7 @@ export default function QuotationPage() {
           <div className="bg-card border border-base rounded-2xl shadow-sm overflow-hidden transition-colors">
             <div className="flex items-center justify-between p-4 border-b border-base">
               <h3 className="font-semibold text-default flex items-center gap-2"><IndianRupee className="w-4 h-4 text-muted" />EPR Credit Line Items</h3>
-              <button type="button" onClick={() => setItems([...items, newRow()])} className="btn-primary !py-1.5 !text-xs"><Plus className="w-3.5 h-3.5" /> Add Row</button>
+              <button type="button" onClick={() => setItems([...items, newRow()])} className="glass-btn glass-btn-primary"><Plus className="w-3.5 h-3.5" /> Add Row</button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -341,8 +341,14 @@ export default function QuotationPage() {
                     </div>
                   </div>
                 </div>
-                <button onClick={downloadPDF} disabled={pdfLoading} className="btn-primary w-full justify-center py-2.5"><Download className="w-4 h-4" />{pdfLoading ? "Opening..." : "Download PDF"}</button>
-                <button onClick={openEmail} className="btn-secondary w-full justify-center py-2.5"><Send className="w-4 h-4" />Send via Email</button>
+                <div className="glass-tray" style={{ flexDirection: "column", gap: "4px", width: "100%" }}>
+                  <button onClick={downloadPDF} disabled={pdfLoading} className="glass-pill glass-pill-active" style={{ width: "100%", justifyContent: "center", padding: "9px 14px" }}>
+                    <Download className="w-4 h-4" />{pdfLoading ? "Opening..." : "Download PDF"}
+                  </button>
+                  <button onClick={openEmail} className="glass-pill" style={{ width: "100%", justifyContent: "center", padding: "9px 14px" }}>
+                    <Send className="w-4 h-4" />Send via Email
+                  </button>
+                </div>
                 <p className="text-xs text-faint text-center">Customise PDF design: <code className="text-brand-600 bg-brand-50 dark:bg-brand-900/20 px-1 rounded">templates/quotation.html</code></p>
               </>
             ) : (

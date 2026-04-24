@@ -119,7 +119,7 @@ export default function UploadRecordsPage() {
         title="Upload Records"
         description="Track how many client invoices have been uploaded on the CPCB EPR portal"
       >
-        <button className="btn-primary" onClick={openModal}>
+        <button className="glass-btn glass-btn-primary" onClick={openModal}>
           <Plus className="w-4 h-4" /> Add Upload Record
         </button>
       </PageHeader>

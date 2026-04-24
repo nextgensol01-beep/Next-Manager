@@ -114,44 +114,46 @@ export default function EmailHistoryPage() {
     <div>
       <PageHeader title="Email History" description="All emails sent and drafts created from this system" />
 
-      {/* Summary chips */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        {[
-          { key: "all",                label: "All",       count: counts._total || 0 },
-          { key: "quotation",          label: "Quotations",count: counts.quotation || 0 },
-          { key: "payment_reminder",   label: "Reminders", count: counts.payment_reminder || 0 },
-          { key: "annual_return_draft",label: "AR Drafts", count: counts.annual_return_draft || 0 },
-          { key: "custom",             label: "Custom",    count: counts.custom || 0 },
-        ].map(({ key, label, count }) => (
-          <button key={key} onClick={() => setTypeFilter(key)}
-            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${
-              typeFilter === key
-                ? "bg-brand-600 text-white border-brand-600 shadow-sm"
-                : "bg-card text-muted border-base hover:bg-hover"
-            }`}>
-            {label}
-            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${typeFilter === key ? "bg-white/20 text-white" : "bg-surface text-faint"}`}>
-              {count}
-            </span>
-          </button>
-        ))}
+      {/* Summary chips + actions */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="glass-tray">
+          {[
+            { key: "all",                label: "All",       count: counts._total || 0 },
+            { key: "quotation",          label: "Quotations",count: counts.quotation || 0 },
+            { key: "payment_reminder",   label: "Reminders", count: counts.payment_reminder || 0 },
+            { key: "annual_return_draft",label: "AR Drafts", count: counts.annual_return_draft || 0 },
+            { key: "custom",             label: "Custom",    count: counts.custom || 0 },
+          ].map(({ key, label, count }) => (
+            <button key={key} onClick={() => setTypeFilter(key)}
+              className={`glass-pill ${typeFilter === key ? "glass-pill-active" : ""}`}>
+              {label}
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-0.5 ${
+                typeFilter === key ? "bg-white/20 text-white" : "bg-black/8 text-faint"
+              }`}>
+                {count}
+              </span>
+            </button>
+          ))}
+        </div>
 
         {/* Actions */}
         <div className="ml-auto flex items-center gap-2">
-          {selected.size > 0 && (
-            <button onClick={deleteSelected} disabled={deleting}
-              className="btn-danger !py-1.5 !text-xs flex items-center gap-1.5">
-              <Trash2 className="w-3.5 h-3.5" />Delete {selected.size} selected
+          <div className="glass-tray">
+            {selected.size > 0 && (
+              <button onClick={deleteSelected} disabled={deleting}
+                className="glass-pill" style={{ color: "#ff3b30" }}>
+                <Trash2 className="w-3.5 h-3.5" />Delete {selected.size} selected
+              </button>
+            )}
+            <button onClick={clearAll} disabled={deleting || logs.length === 0}
+              className="glass-pill">
+              <Trash2 className="w-3.5 h-3.5" />Clear {typeFilter === "all" ? "All" : TYPE_LABELS[typeFilter]?.label}
             </button>
-          )}
-          <button onClick={clearAll} disabled={deleting || logs.length === 0}
-            className="btn-secondary !py-1.5 !text-xs flex items-center gap-1.5 hover:!text-red-500 hover:!border-red-400">
-            <Trash2 className="w-3.5 h-3.5" />Clear {typeFilter === "all" ? "All" : TYPE_LABELS[typeFilter]?.label}
-          </button>
-          <button onClick={refetch} disabled={loading}
-            className="btn-secondary !py-1.5 !text-xs flex items-center gap-1.5">
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />Refresh
-          </button>
+            <button onClick={refetch} disabled={loading}
+              className="glass-pill">
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />Refresh
+            </button>
+          </div>
         </div>
       </div>
 

@@ -4,11 +4,13 @@ import { useParams, useRouter } from "next/navigation";
 import { formatCurrency, formatDate, PAYMENT_MODES } from "@/lib/utils";
 import { CategoryBadge, PaymentStatusBadge } from "@/components/ui/CategoryBadge";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
+import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { invalidate } from "@/lib/useCache";
 import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearState } from "@/app/providers";
 import ClientProfileActivityTimeline from "./ClientProfileActivityTimeline";
+import ClientProfileCpcbRecords from "./ClientProfileCpcbRecords";
 import ClientProfileFinancialSummary from "./ClientProfileFinancialSummary";
 import ClientProfileModals from "./ClientProfileModals";
 import {
@@ -56,9 +58,22 @@ import {
   type Document,
   type EmailOption,
   type FYRecord,
+  type InvoiceTrackingRecord,
   type Payment,
   type PersonEntry,
+  type UploadRecord,
 } from "./ClientProfileSupport";
+
+const INVOICE_TYPE_OPTIONS = [
+  { id: "sale", label: "Sale Invoice" },
+  { id: "purchase", label: "Purchase Invoice" },
+] as const;
+
+const RECEIVED_VIA_OPTIONS = [
+  { id: "hardcopy", label: "Hardcopy" },
+  { id: "mail", label: "Mail" },
+  { id: "whatsapp", label: "WhatsApp" },
+] as const;
 
 export default function ClientProfilePage() {
   const { clientId } = useParams<{ clientId: string }>();
@@ -69,6 +84,8 @@ export default function ClientProfilePage() {
   const [fyRecords, setFyRecords] = useState<FYRecord[]>([]);
   const [allBillings, setAllBillings] = useState<Billing[]>([]);
   const [allPayments, setAllPayments] = useState<Payment[]>([]);
+  const [allInvoices, setAllInvoices] = useState<InvoiceTrackingRecord[]>([]);
+  const [allUploadRecords, setAllUploadRecords] = useState<UploadRecord[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [activitiesTotal, setActivitiesTotal] = useState(0);
@@ -96,6 +113,22 @@ export default function ClientProfilePage() {
   const [docForm, setDocForm] = useState({ documentName: "", driveLink: "" });
   const [docModalMode, setDocModalMode] = useState<"create" | "edit">("create");
   const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null);
+  const [invoiceModal, setInvoiceModal] = useState(false);
+  const [invoiceForm, setInvoiceForm] = useState({
+    financialYear: selectedFy,
+    invoiceType: "",
+    receivedVia: "",
+    fromDate: "",
+    toDate: "",
+  });
+  const [uploadModal, setUploadModal] = useState(false);
+  const [uploadForm, setUploadForm] = useState({
+    financialYear: selectedFy,
+    cat1: "0",
+    cat2: "0",
+    cat3: "0",
+    cat4: "0",
+  });
   const [billingModal, setBillingModal] = useState(false);
   const [editingBillingId, setEditingBillingId] = useState<string | null>(null);
   const [billingForm, setBillingForm] = useState({
@@ -232,9 +265,11 @@ export default function ClientProfilePage() {
       fetchJson<Document[]>(`/api/documents?clientId=${clientId}`, "documents"),
       fetchJson<Billing[]>(`/api/billing?clientId=${clientId}`, "billing"),
       fetchJson<Payment[]>(`/api/payments?clientId=${clientId}`, "payments"),
+      fetchJson<InvoiceTrackingRecord[]>(`/api/invoices?clientId=${clientId}`, "invoice tracking"),
+      fetchJson<UploadRecord[]>(`/api/upload-records?clientId=${clientId}`, "uploaded records"),
     ]);
 
-    const [clientResult, fyResult, docsResult, billingResult, paymentsResult] = results;
+    const [clientResult, fyResult, docsResult, billingResult, paymentsResult, invoicesResult, uploadsResult] = results;
     const failedSections: string[] = [];
 
     if (clientResult.status === "fulfilled") {
@@ -265,6 +300,18 @@ export default function ClientProfilePage() {
       setAllPayments(Array.isArray(paymentsResult.value) ? paymentsResult.value : []);
     } else {
       failedSections.push("payments");
+    }
+
+    if (invoicesResult.status === "fulfilled") {
+      setAllInvoices(Array.isArray(invoicesResult.value) ? invoicesResult.value : []);
+    } else {
+      failedSections.push("invoice tracking");
+    }
+
+    if (uploadsResult.status === "fulfilled") {
+      setAllUploadRecords(Array.isArray(uploadsResult.value) ? uploadsResult.value : []);
+    } else {
+      failedSections.push("uploaded records");
     }
 
     if (clientResult.status === "rejected") {
@@ -371,6 +418,8 @@ export default function ClientProfilePage() {
 
   const billing  = allBillings.find((b) => b.financialYear === selectedFy) || null;
   const payments = allPayments.filter((p) => p.financialYear === selectedFy);
+  const invoices = allInvoices.filter((invoice) => invoice.financialYear === selectedFy);
+  const uploadRecords = allUploadRecords.filter((record) => record.financialYear === selectedFy);
   const filteredActivities = activities;
   const recentPayments = React.useMemo(() => {
     const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
@@ -514,6 +563,118 @@ export default function ClientProfilePage() {
       toast.success("Document removed");
     } finally {
       setBusyAction(null);
+    }
+  };
+
+  const closeInvoiceModal = () => {
+    setInvoiceModal(false);
+    setInvoiceForm({
+      financialYear: selectedFy,
+      invoiceType: "",
+      receivedVia: "",
+      fromDate: "",
+      toDate: "",
+    });
+  };
+
+  const openInvoiceModal = () => {
+    setInvoiceForm({
+      financialYear: selectedFy,
+      invoiceType: "",
+      receivedVia: "",
+      fromDate: "",
+      toDate: "",
+    });
+    setInvoiceModal(true);
+  };
+
+  const saveInvoiceTracking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInlineSaving(true);
+    try {
+      const payload = {
+        clientId,
+        financialYear: invoiceForm.financialYear,
+        invoiceType: invoiceForm.invoiceType,
+        receivedVia: invoiceForm.receivedVia,
+        fromDate: invoiceForm.fromDate,
+        toDate: invoiceForm.toDate,
+      };
+      const response = await fetch("/api/invoices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        toast.error(data?.error || "Failed to add invoice tracking.");
+        return;
+      }
+
+      closeInvoiceModal();
+      invalidate("/api/invoices");
+      await loadData();
+      setSelectedFy(payload.financialYear);
+      toast.success("Invoice tracking added!");
+    } finally {
+      setInlineSaving(false);
+    }
+  };
+
+  const closeUploadModal = () => {
+    setUploadModal(false);
+    setUploadForm({
+      financialYear: selectedFy,
+      cat1: "0",
+      cat2: "0",
+      cat3: "0",
+      cat4: "0",
+    });
+  };
+
+  const openUploadModal = () => {
+    setUploadForm({
+      financialYear: selectedFy,
+      cat1: "0",
+      cat2: "0",
+      cat3: "0",
+      cat4: "0",
+    });
+    setUploadModal(true);
+  };
+
+  const saveUploadRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInlineSaving(true);
+    try {
+      const payload = {
+        clientId,
+        financialYear: uploadForm.financialYear,
+        cat1: Number(uploadForm.cat1) || 0,
+        cat2: Number(uploadForm.cat2) || 0,
+        cat3: Number(uploadForm.cat3) || 0,
+        cat4: Number(uploadForm.cat4) || 0,
+      };
+      const response = await fetch("/api/upload-records", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        toast.error(data?.error || "Failed to add upload record.");
+        return;
+      }
+
+      closeUploadModal();
+      invalidate("/api/upload-records");
+      await loadData();
+      setSelectedFy(payload.financialYear);
+      toast.success("Upload record added!");
+    } finally {
+      setInlineSaving(false);
     }
   };
 
@@ -1078,15 +1239,15 @@ export default function ClientProfilePage() {
       <p className="text-default font-semibold mb-2">Unable to load client profile</p>
       <p className="text-sm text-faint mb-5">{loadError}</p>
       <div className="flex items-center justify-center gap-2">
-        <button onClick={() => loadData()} className="btn-primary">Retry</button>
-        <button onClick={() => router.back()} className="btn-secondary">Go Back</button>
+        <button onClick={() => loadData()} className="glass-btn glass-btn-primary">Retry</button>
+        <button onClick={() => router.back()} className="glass-btn">Go Back</button>
       </div>
     </div>
   );
   if (!client) return (
     <div className="text-center py-20">
       <p className="text-faint mb-4">Client not found</p>
-      <button onClick={() => router.back()} className="btn-secondary">Go Back</button>
+      <button onClick={() => router.back()} className="glass-btn">Go Back</button>
     </div>
   );
 
@@ -1133,6 +1294,16 @@ export default function ClientProfilePage() {
     {
       label: "Add Document",
       onClick: openCreateDocument,
+      tone: "secondary" as const,
+    },
+    {
+      label: "Add Invoice Tracking",
+      onClick: openInvoiceModal,
+      tone: "secondary" as const,
+    },
+    {
+      label: "Add Upload Record",
+      onClick: openUploadModal,
       tone: "secondary" as const,
     },
     !hasLinkedContacts
@@ -1332,7 +1503,7 @@ export default function ClientProfilePage() {
 
       {/* Header */}
       <div ref={pageHeaderRef} className="flex items-center gap-3 mb-6">
-        <button onClick={() => router.back()} className="btn-secondary !px-3"><ArrowLeft className="w-4 h-4" /></button>
+        <button onClick={() => router.back()} className="glass-btn" style={{padding:"7px"}}><ArrowLeft className="w-4 h-4" /></button>
         <div
           className="flex-1 min-w-0 transition-[opacity,transform,filter] duration-300 ease-out will-change-transform"
           style={pageTitleStyle}
@@ -1352,7 +1523,7 @@ export default function ClientProfilePage() {
           </div>
         </div>
         {/* Edit button in header */}
-        <button onClick={openEdit} className="btn-secondary flex items-center gap-1.5">
+        <button onClick={openEdit} className="glass-btn">
           <Pencil className="w-4 h-4" /> Edit Client
         </button>
       </div>
@@ -1376,23 +1547,23 @@ export default function ClientProfilePage() {
       </div>
 
       {emptyStateActions.length > 0 && (
-        <div className="bg-card rounded-2xl border border-base p-4 shadow-sm mb-6">
+        <div className="mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <p className="font-semibold text-default">Quick Actions</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-faint mb-1">Quick Actions</p>
               <p className="text-sm text-muted">
                 {isPWP
-                  ? "Set up credits, billing, documents, and contacts for this client from here."
-                  : "Set up FY data, billing, reminders, documents, and contacts for this client from here."}
+                  ? "Set up credits, billing, CPCB records, documents, and contacts for this client from here."
+                  : "Set up FY data, billing, CPCB records, reminders, documents, and contacts for this client from here."}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="glass-tray flex-wrap" style={{ flexWrap: "wrap", gap: "4px" }}>
               {emptyStateActions.map((action) => (
                 <button
                   key={action.label}
                   type="button"
                   onClick={action.onClick}
-                  className={action.tone === "primary" ? "btn-primary !py-2 !text-xs" : "btn-secondary !py-2 !text-xs"}
+                  className={`glass-pill${action.tone === "primary" ? " glass-pill-active" : ""}`}
                 >
                   {action.label}
                 </button>
@@ -1533,7 +1704,7 @@ export default function ClientProfilePage() {
                   <div className="text-center py-4">
                     <p className="text-sm text-faint mb-3">No portal credentials saved.</p>
                     <button onClick={() => { openEdit(); setEditTab("portal"); }}
-                      className="btn-secondary !text-xs">
+                      className="glass-btn">
                       <Plus className="w-3 h-3" /> Add Credentials
                     </button>
                   </div>
@@ -1670,7 +1841,7 @@ export default function ClientProfilePage() {
               subtitle={documents.length > 0 ? `${documents.length} linked document${documents.length === 1 ? "" : "s"}` : "Add important certificates, registrations, and shared links here."}
               open={sectionOpen.documents}
               onToggle={() => toggleSection("documents")}
-              trailing={<button className="btn-primary !py-1 !text-xs" onClick={openCreateDocument}><Plus className="w-3 h-3" /> Add</button>}
+              trailing={<button className="glass-btn glass-btn-primary" style={{padding:"5px 10px",fontSize:"11px"}} onClick={openCreateDocument}><Plus className="w-3 h-3" /> Add</button>}
             />
             {sectionOpen.documents && (
               <div className="mt-4">
@@ -1678,11 +1849,13 @@ export default function ClientProfilePage() {
                   <div className="text-center py-6">
                     <p className="text-sm font-medium text-default">No documents yet</p>
                     <p className="text-sm text-faint mt-1">Add important certificates, registrations, and shared drive links here.</p>
-                    <div className="mt-4 flex flex-wrap justify-center gap-2">
-                      <button type="button" className="btn-primary !py-2 !text-xs" onClick={openCreateDocument}>Add Document</button>
-                      {!hasLinkedContacts && (
-                        <button type="button" className="btn-secondary !py-2 !text-xs" onClick={openEdit}>Link Contact</button>
-                      )}
+                    <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+                      <div className="glass-tray">
+                        <button type="button" className="glass-pill glass-pill-active" onClick={openCreateDocument}>Add Document</button>
+                        {!hasLinkedContacts && (
+                          <button type="button" className="glass-pill" onClick={openEdit}>Link Contact</button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -1727,6 +1900,14 @@ export default function ClientProfilePage() {
             />
           )}
 
+          <ClientProfileCpcbRecords
+            selectedFy={selectedFy}
+            invoices={invoices}
+            uploadRecords={uploadRecords}
+            onAddInvoice={openInvoiceModal}
+            onAddUpload={openUploadModal}
+          />
+
           <div className="bg-card rounded-2xl p-5 shadow-sm border border-base">
             <div className="flex items-center justify-between gap-3 mb-4">
               <div className="flex items-center gap-2">
@@ -1735,21 +1916,21 @@ export default function ClientProfilePage() {
               </div>
               <div className="flex items-center gap-2">
                 {billing ? (
-                  <>
+                  <div className="glass-tray" style={{ gap: "3px" }}>
                     {billing.pendingAmount > 0 && (
-                      <button type="button" className="btn-secondary !py-1.5 !px-3 !text-xs" onClick={() => openReminderModal(billing)}>
-                        <Send className="w-3.5 h-3.5" /> Reminder
+                      <button type="button" className="glass-pill" onClick={() => openReminderModal(billing)}>
+                        <Send className="w-3 h-3" /> Reminder
                       </button>
                     )}
-                    <button type="button" className="btn-secondary !py-1.5 !px-3 !text-xs" onClick={() => openBillingModalForRecord(billing)}>
-                      <Pencil className="w-3.5 h-3.5" /> Edit
+                    <button type="button" className="glass-pill" onClick={() => openBillingModalForRecord(billing)}>
+                      <Pencil className="w-3 h-3" /> Edit
                     </button>
-                    <button type="button" className="btn-secondary !py-1.5 !px-3 !text-xs text-red-500" disabled={busyAction === `billing-${billing._id}`} onClick={() => deleteBilling(billing)}>
-                      <Trash2 className="w-3.5 h-3.5" /> Delete
+                    <button type="button" className="glass-pill" style={{ color: "#ff3b30" }} disabled={busyAction === `billing-${billing._id}`} onClick={() => deleteBilling(billing)}>
+                      <Trash2 className="w-3 h-3" /> Delete
                     </button>
-                  </>
+                  </div>
                 ) : (
-                  <button type="button" className="btn-primary !py-1.5 !px-3 !text-xs" onClick={() => openBillingModalForRecord()}>
+                  <button type="button" className="glass-btn glass-btn-primary" onClick={() => openBillingModalForRecord()}>
                     <Plus className="w-3.5 h-3.5" /> Create Billing
                   </button>
                 )}
@@ -1775,15 +1956,17 @@ export default function ClientProfilePage() {
               <div className="text-center py-6">
                 <p className="text-sm font-medium text-default">No billing recorded for FY {selectedFy}</p>
                 <p className="text-sm text-faint mt-1">Create the first billing entry here so reminders and payment tracking can start.</p>
-                <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  <button type="button" className="btn-primary !py-2 !text-xs" onClick={() => openBillingModalForRecord()}>
-                    Create Billing
-                  </button>
-                  {!fyData && (
-                    <button type="button" className="btn-secondary !py-2 !text-xs" onClick={() => openFYModal()}>
-                      {isPWP ? "Add Credit Data" : "Add FY Data"}
+                <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+                  <div className="glass-tray">
+                    <button type="button" className="glass-pill glass-pill-active" onClick={() => openBillingModalForRecord()}>
+                      Create Billing
                     </button>
-                  )}
+                    {!fyData && (
+                      <button type="button" className="glass-pill" onClick={() => openFYModal()}>
+                        {isPWP ? "Add Credit Data" : "Add FY Data"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -1792,7 +1975,7 @@ export default function ClientProfilePage() {
           <div className="bg-card rounded-2xl shadow-sm border border-base overflow-hidden">
             <div className="p-4 border-b border-base flex items-center justify-between gap-3">
               <h3 className="font-semibold text-default">Payment History - FY {selectedFy}</h3>
-              <button type="button" className="btn-primary !py-1.5 !px-3 !text-xs" onClick={() => openPaymentModalForRecord()}>
+              <button type="button" className="glass-btn glass-btn-primary" onClick={() => openPaymentModalForRecord()}>
                 <Plus className="w-3.5 h-3.5" /> Add Payment
               </button>
             </div>
@@ -1829,15 +2012,17 @@ export default function ClientProfilePage() {
               <div className="p-6 text-center">
                 <p className="text-sm font-medium text-default">No payments recorded for FY {selectedFy}</p>
                 <p className="text-sm text-faint mt-1">Record billing or advance payments here without leaving the profile page.</p>
-                <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  <button type="button" className="btn-primary !py-2 !text-xs" onClick={() => openPaymentModalForRecord()}>
-                    Add Payment
-                  </button>
-                  {billing && billing.pendingAmount > 0 && (
-                    <button type="button" className="btn-secondary !py-2 !text-xs" onClick={() => openReminderModal()}>
-                      Send Reminder
+                <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+                  <div className="glass-tray">
+                    <button type="button" className="glass-pill glass-pill-active" onClick={() => openPaymentModalForRecord()}>
+                      Add Payment
                     </button>
-                  )}
+                    {billing && billing.pendingAmount > 0 && (
+                      <button type="button" className="glass-pill" onClick={() => openReminderModal()}>
+                        Send Reminder
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -1878,22 +2063,123 @@ export default function ClientProfilePage() {
                   ? "Start by adding credits or billing for this client, then link contacts and documents as needed."
                   : "Start by adding FY data or billing for this client, then link contacts, reminders, and documents as needed."}
               </p>
-              <div className="flex flex-wrap justify-center gap-2">
-                {emptyStateActions.map((action) => (
-                  <button
-                    key={`empty-${action.label}`}
-                    type="button"
-                    onClick={action.onClick}
-                    className={action.tone === "primary" ? "btn-primary !py-2 !text-xs" : "btn-secondary !py-2 !text-xs"}
-                  >
-                    {action.label}
-                  </button>
-                ))}
+              <div className="flex flex-wrap justify-center gap-1.5 mt-2">
+                <div className="glass-tray" style={{ flexWrap: "wrap", justifyContent: "center" }}>
+                  {emptyStateActions.map((action) => (
+                    <button
+                      key={`empty-${action.label}`}
+                      type="button"
+                      onClick={action.onClick}
+                      className={`glass-pill${action.tone === "primary" ? " glass-pill-active" : ""}`}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}
         </div>
       </div>
+
+      <Modal open={invoiceModal} onClose={closeInvoiceModal} title="Add Invoice Tracking">
+        <form onSubmit={saveInvoiceTracking} className="space-y-4">
+          <div>
+            <label className="label">Financial Year</label>
+            <input className="input-field bg-surface text-faint" value={invoiceForm.financialYear} readOnly />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="label">Invoice Type *</label>
+              <select
+                className="input-field"
+                value={invoiceForm.invoiceType}
+                onChange={(e) => setInvoiceForm((current) => ({ ...current, invoiceType: e.target.value }))}
+                required
+              >
+                <option value="">Select type</option>
+                {INVOICE_TYPE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Received Via *</label>
+              <select
+                className="input-field"
+                value={invoiceForm.receivedVia}
+                onChange={(e) => setInvoiceForm((current) => ({ ...current, receivedVia: e.target.value }))}
+                required
+              >
+                <option value="">Select source</option>
+                {RECEIVED_VIA_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="label">From Date *</label>
+              <input
+                type="date"
+                className="input-field"
+                value={invoiceForm.fromDate}
+                onChange={(e) => setInvoiceForm((current) => ({ ...current, fromDate: e.target.value }))}
+                required
+              />
+            </div>
+            <div>
+              <label className="label">To Date *</label>
+              <input
+                type="date"
+                className="input-field"
+                value={invoiceForm.toDate}
+                onChange={(e) => setInvoiceForm((current) => ({ ...current, toDate: e.target.value }))}
+                required
+              />
+            </div>
+          </div>
+          <div className="flex gap-2 pt-2 border-t border-base">
+            <button type="submit" className="btn-primary flex-1 justify-center" disabled={inlineSaving}>
+              {inlineSaving ? "Saving..." : "Add Invoice Tracking"}
+            </button>
+            <button type="button" className="btn-secondary" onClick={closeInvoiceModal}>Cancel</button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal open={uploadModal} onClose={closeUploadModal} title="Add Upload Record">
+        <form onSubmit={saveUploadRecord} className="space-y-4">
+          <div>
+            <label className="label">Financial Year</label>
+            <input className="input-field bg-surface text-faint" value={uploadForm.financialYear} readOnly />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {CATS.map((category, index) => {
+              const field = `cat${index + 1}` as "cat1" | "cat2" | "cat3" | "cat4";
+              return (
+                <div key={category}>
+                  <label className="label">{category}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    className="input-field font-mono"
+                    value={uploadForm[field]}
+                    onChange={(e) => setUploadForm((current) => ({ ...current, [field]: e.target.value }))}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex gap-2 pt-2 border-t border-base">
+            <button type="submit" className="btn-primary flex-1 justify-center" disabled={inlineSaving}>
+              {inlineSaving ? "Saving..." : "Add Upload Record"}
+            </button>
+            <button type="button" className="btn-secondary" onClick={closeUploadModal}>Cancel</button>
+          </div>
+        </form>
+      </Modal>
 
       <ClientProfileModals
         client={client}

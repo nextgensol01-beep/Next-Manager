@@ -53,17 +53,17 @@ export default function ClientProfileFinancialSummary({
     <div className="bg-card rounded-2xl p-5 shadow-sm border border-base">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold text-default">{isPWP ? "Credits Summary" : "Target Summary"} {"\u2014"} FY {selectedFy}</h3>
-        <div className="flex items-center gap-2">
+        <div className="glass-tray">
           <button
             type="button"
             onClick={() => openFYModal(fyData)}
-            className="btn-secondary !py-1.5 !px-3 !text-xs flex items-center gap-1.5"
+            className="glass-pill"
           >
             <Pencil className="w-3.5 h-3.5" /> Edit FY
           </button>
           <button
             onClick={() => setBreakdownRec(fyData)}
-            className="btn-secondary !py-1.5 !px-3 !text-xs flex items-center gap-1.5"
+            className="glass-pill"
           >
             <BarChart2 className="w-3.5 h-3.5" /> Breakdown
           </button>

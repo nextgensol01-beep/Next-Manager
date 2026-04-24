@@ -114,7 +114,7 @@ export default function ContactsPage() {
   return (
     <div>
       <PageHeader title="Contacts" description="Manage persons — one person can link to multiple companies">
-        <button className="btn-primary" onClick={openAdd}><Plus className="w-4 h-4" /> Add Person</button>
+        <button className="glass-btn glass-btn-primary" onClick={openAdd}><Plus className="w-3.5 h-3.5" /> Add Person</button>
       </PageHeader>
 
       <div className="bg-card rounded-2xl p-4 mb-4 shadow-sm border border-base flex gap-3">
@@ -274,9 +274,9 @@ export default function ContactsPage() {
                         </div>
                       </div>
                     )}
-                    <div className="flex gap-2 pt-1">
-                      <button onClick={() => openEdit(p)} className="flex-1 btn-secondary justify-center text-xs py-1.5"><Pencil className="w-3.5 h-3.5" />Edit</button>
-                      <button onClick={() => handleDelete(p._id)} className="flex-1 justify-center text-xs py-1.5 flex items-center gap-1.5 text-red-500 border border-red-200 dark:border-red-900/40 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors font-medium"><Trash2 className="w-3.5 h-3.5" />Delete</button>
+                    <div className="glass-tray" style={{ marginTop: "8px", width: "100%" }}>
+                      <button onClick={() => openEdit(p)} className="glass-pill flex-1 justify-center"><Pencil className="w-3.5 h-3.5" />Edit</button>
+                      <button onClick={() => handleDelete(p._id)} className="glass-pill flex-1 justify-center" style={{ color: "#ff3b30" }}><Trash2 className="w-3.5 h-3.5" />Delete</button>
                     </div>
                   </div>
                 )}

@@ -615,7 +615,7 @@ export default function ClientsPage() {
 
   const TabBtn = ({ id, label }: { id: "basic" | "portal"; label: string }) => (
     <button type="button" onClick={() => setActiveTab(id)}
-      className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === id ? "bg-brand-600 text-white" : "text-muted hover:text-default"}`}>
+      className={`glass-pill flex-1 justify-center ${activeTab === id ? "glass-pill-active" : ""}`}>
       {label}
     </button>
   );
@@ -623,8 +623,10 @@ export default function ClientsPage() {
   return (
     <div>
       <PageHeader title="Clients" description="Manage all client companies">
-        <button className="btn-secondary" onClick={() => router.push("/dashboard/contacts")}><UserPlus className="w-4 h-4" /> Contacts</button>
-        <button className="btn-primary" onClick={openAdd}><Plus className="w-4 h-4" /> Add Client</button>
+        <div className="glass-tray">
+          <button className="glass-pill" onClick={() => router.push("/dashboard/contacts")}><UserPlus className="w-3.5 h-3.5" /> Contacts</button>
+          <button className="glass-pill glass-pill-active" onClick={openAdd}><Plus className="w-3.5 h-3.5" /> Add Client</button>
+        </div>
       </PageHeader>
 
       {/* Filters */}
@@ -746,10 +748,10 @@ export default function ClientsPage() {
                         </div>
                       </div>
                     )}
-                    <div className="flex gap-2 pt-1">
-                      <button onClick={() => router.push(`/dashboard/clients/${client.clientId}`)} className="flex-1 btn-secondary justify-center text-xs py-1.5"><Eye className="w-3.5 h-3.5" /> View</button>
-                      <button onClick={() => openEdit(client)} className="flex-1 btn-secondary justify-center text-xs py-1.5"><Pencil className="w-3.5 h-3.5" /> Edit</button>
-                      <button onClick={() => handleDelete(client.clientId)} className="flex-1 justify-center text-xs py-1.5 flex items-center gap-1.5 text-red-500 border border-red-200 dark:border-red-900/40 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors font-medium"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
+                    <div className="glass-tray pt-0" style={{ marginTop: "8px", width: "100%" }}>
+                      <button onClick={() => router.push(`/dashboard/clients/${client.clientId}`)} className="glass-pill flex-1 justify-center"><Eye className="w-3.5 h-3.5" /> View</button>
+                      <button onClick={() => openEdit(client)} className="glass-pill flex-1 justify-center"><Pencil className="w-3.5 h-3.5" /> Edit</button>
+                      <button onClick={() => handleDelete(client.clientId)} className="glass-pill flex-1 justify-center" style={{ color: "#ff3b30" }}><Trash2 className="w-3.5 h-3.5" /> Delete</button>
                     </div>
                   </div>
                 )}
@@ -762,7 +764,7 @@ export default function ClientsPage() {
       {/* ── MODAL ── */}
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editClient ? "Edit Client" : "Add New Client"} size="lg">
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="flex gap-1 bg-surface p-1 rounded-xl">
+          <div className="glass-tray" style={{ width: "100%" }}>
             <TabBtn id="basic" label="Basic Info" />
             <TabBtn id="portal" label="Portal Credentials" />
           </div>

@@ -492,7 +492,7 @@ export default function ReportsPage() {
         title="Reports"
         description="Export operational data as Excel files for analysis, sharing, and records"
         action={(
-          <button className="btn-secondary" onClick={openCustomExport}>
+          <button className="glass-btn" onClick={openCustomExport}>
             <SlidersHorizontal className="w-4 h-4" />
             Custom Export
           </button>
@@ -594,11 +594,7 @@ export default function ReportsPage() {
                     </button>
                     <button
                       type="button"
-                      className={`btn-secondary !py-1.5 !text-xs shrink-0 ${
-                        fields.every((field) => customFields.includes(field.id as CustomClientExportField))
-                          ? "!border-brand-500 !bg-brand-50 !text-brand-700 dark:!bg-brand-900/20 dark:!text-brand-300"
-                          : ""
-                      }`}
+                      className={`glass-pill ${fields.every((field) => customFields.includes(field.id as CustomClientExportField)) ? "glass-pill-active" : ""}`}
                       onClick={() => {
                         const fieldIds = fields.map((field) => field.id) as CustomClientExportField[];
                         setCustomFields((current) => Array.from(new Set<CustomClientExportField>([...current, ...fieldIds])));
@@ -657,32 +653,32 @@ export default function ReportsPage() {
 
             <div className="xl:sticky xl:top-24 xl:self-start xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto xl:pr-1 space-y-4">
               <div className="rounded-2xl border border-base bg-card p-4">
-                <div className="text-xs uppercase tracking-wide text-faint mb-2">Quick Actions</div>
-                <div className="flex flex-wrap gap-2">
+                <div className="text-xs uppercase tracking-wide text-faint mb-3">Quick Actions</div>
+                <div className="glass-tray" style={{ flexWrap: "wrap" }}>
                   <button
                     type="button"
-                    className={`btn-secondary !py-1.5 !text-xs ${allFieldsSelected ? "!border-brand-500 !bg-brand-50 !text-brand-700 dark:!bg-brand-900/20 dark:!text-brand-300" : ""}`}
+                    className={`glass-pill ${allFieldsSelected ? "glass-pill-active" : ""}`}
                     onClick={() => setCustomFields(CUSTOM_CLIENT_EXPORT_FIELDS.map((field) => field.id))}
                   >
                     Select All
                   </button>
                   <button
                     type="button"
-                    className={`btn-secondary !py-1.5 !text-xs ${usingExampleFields ? "!border-brand-500 !bg-brand-50 !text-brand-700 dark:!bg-brand-900/20 dark:!text-brand-300" : ""}`}
+                    className={`glass-pill ${usingExampleFields ? "glass-pill-active" : ""}`}
                     onClick={() => setCustomFields([...DEFAULT_CUSTOM_FIELDS])}
                   >
                     Use Example
                   </button>
                   <button
                     type="button"
-                    className={`btn-secondary !py-1.5 !text-xs ${noFieldsSelected ? "!border-brand-500 !bg-brand-50 !text-brand-700 dark:!bg-brand-900/20 dark:!text-brand-300" : ""}`}
+                    className={`glass-pill ${noFieldsSelected ? "glass-pill-active" : ""}`}
                     onClick={() => setCustomFields([])}
                   >
                     Clear Fields
                   </button>
                   <button
                     type="button"
-                    className={`btn-secondary !py-1.5 !text-xs ${filtersAreReset ? "!border-brand-500 !bg-brand-50 !text-brand-700 dark:!bg-brand-900/20 dark:!text-brand-300" : ""}`}
+                    className={`glass-pill ${filtersAreReset ? "glass-pill-active" : ""}`}
                     onClick={() => {
                       setCustomCategories([]);
                       setSelectedClientIds([]);
@@ -829,7 +825,7 @@ export default function ReportsPage() {
                               className="flex-1 rounded-xl border border-base bg-surface px-3 py-2.5 text-sm text-default outline-none focus:border-brand-500"
                               disabled={customDownloading}
                             />
-                            <button type="button" className="btn-secondary !px-3" onClick={saveCurrentPreset} disabled={customDownloading}>
+                            <button type="button" className="glass-btn" style={{padding:"8px 10px"}} onClick={saveCurrentPreset} disabled={customDownloading}>
                               <Save className="w-4 h-4" />
                             </button>
                           </div>
@@ -920,29 +916,24 @@ export default function ReportsPage() {
                         disabled={customDownloading}
                       />
                     </div>
-                    <div className="flex gap-2 mb-2">
-                    <button
-                      type="button"
-                      className={`btn-secondary !py-1.5 !text-xs ${
-                        filteredClientOptions.length > 0 &&
-                        filteredClientOptions.every((client) => selectedClientSet.has(client.clientId))
-                          ? "!border-brand-500 !bg-brand-50 !text-brand-700 dark:!bg-brand-900/20 dark:!text-brand-300"
-                          : ""
-                      }`}
-                      onClick={() => {
-                        const visibleIds = filteredClientOptions.map((client) => client.clientId);
-                        setSelectedClientIds((current) => Array.from(new Set([...current, ...visibleIds])));
+                    <div className="glass-tray mb-2">
+                      <button
+                        type="button"
+                        className={`glass-pill ${filteredClientOptions.length > 0 && filteredClientOptions.every((client) => selectedClientSet.has(client.clientId)) ? "glass-pill-active" : ""}`}
+                        onClick={() => {
+                          const visibleIds = filteredClientOptions.map((client) => client.clientId);
+                          setSelectedClientIds((current) => Array.from(new Set([...current, ...visibleIds])));
                         }}
                         disabled={clientsLoading || !hasClientQuery || filteredClientOptions.length === 0}
                       >
                         Select Visible
                       </button>
-                    <button
-                      type="button"
-                      className={`btn-secondary !py-1.5 !text-xs ${selectedClientIds.length === 0 ? "!border-brand-500 !bg-brand-50 !text-brand-700 dark:!bg-brand-900/20 dark:!text-brand-300" : ""}`}
-                      onClick={() => setSelectedClientIds([])}
-                      disabled={selectedClientIds.length === 0}
-                    >
+                      <button
+                        type="button"
+                        className={`glass-pill ${selectedClientIds.length === 0 ? "glass-pill-active" : ""}`}
+                        onClick={() => setSelectedClientIds([])}
+                        disabled={selectedClientIds.length === 0}
+                      >
                         Clear Selection
                       </button>
                     </div>
@@ -966,7 +957,8 @@ export default function ReportsPage() {
                             <div className="text-sm text-red-500 dark:text-red-300">{clientsLoadError}</div>
                             <button
                               type="button"
-                              className="btn-secondary !mt-3 !py-1.5 !text-xs"
+                              className="glass-btn"
+                              style={{marginTop:"10px"}}
                               onClick={() => setClientLoadAttempt((current) => current + 1)}
                             >
                               Retry Loading Clients

@@ -724,7 +724,7 @@ export default function FinancialYearPage() {
   return (
     <div>
       <PageHeader title="Financial Year" description="Manage category-wise targets and credits per FY">
-        <button className="btn-primary" onClick={openAdd}><Plus className="w-4 h-4" /> Add Record</button>
+        <button className="glass-btn glass-btn-primary" onClick={openAdd}><Plus className="w-3.5 h-3.5" /> Add Record</button>
       </PageHeader>
 
       <FYTabBar value={fy} onChange={setFy} />
@@ -979,15 +979,13 @@ export default function FinancialYearPage() {
                       </button>
                     </>
                   )}
-                  <div className="flex gap-2 pt-1">
+                  <div className="glass-tray" style={{ marginTop: "8px", width: "100%" }}>
                     <button onClick={() => openEdit(rec)} disabled={deleting}
-                      className="flex-1 btn-secondary justify-center text-xs py-1.5">
+                      className="glass-pill flex-1 justify-center">
                       <Pencil className="w-3.5 h-3.5" />Edit
                     </button>
                     <button onClick={() => handleDelete(rec)} disabled={deleting}
-                      className="flex-1 justify-center text-xs py-1.5 flex items-center gap-1.5
-                                 text-red-500 border border-red-200 dark:border-red-900/40 rounded-lg
-                                 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors font-medium">
+                      className="glass-pill flex-1 justify-center" style={{ color: "#ff3b30" }}>
                       <Trash2 className="w-3.5 h-3.5" />Delete
                     </button>
                   </div>

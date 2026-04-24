@@ -306,10 +306,12 @@ export default function AnnualReturnPage() {
   return (
     <div>
       <PageHeader title="EPR Annual Return" description="Track annual return filing status for all clients per financial year">
-        <button className="btn-secondary" onClick={bulkInit} disabled={initLoading}>
-          <Sparkles className="w-4 h-4" />{initLoading ? "Initialising…" : `Init FY ${fy}`}
-        </button>
-        <button className="btn-primary" onClick={openAdd}><Plus className="w-4 h-4" />Add Record</button>
+        <div className="glass-tray">
+          <button className="glass-pill" onClick={bulkInit} disabled={initLoading}>
+            <Sparkles className="w-3.5 h-3.5" />{initLoading ? "Initialising…" : `Init FY ${fy}`}
+          </button>
+          <button className="glass-pill glass-pill-active" onClick={openAdd}><Plus className="w-3.5 h-3.5" />Add Record</button>
+        </div>
       </PageHeader>
 
       <>
@@ -367,14 +369,14 @@ export default function AnnualReturnPage() {
               <input className="bg-transparent outline-none flex-1 py-2 text-sm text-default placeholder:text-faint"
                 placeholder="Search company name…" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
-            <div className="flex gap-1.5 flex-wrap">
+            <div className="glass-tray" style={{ flexWrap: "wrap" }}>
               <button onClick={() => setStatusFilter("all")}
-                className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${statusFilter === "all" ? "bg-brand-600 text-white" : "bg-surface text-muted hover:text-default hover:bg-hover"}`}>
+                className={`glass-pill ${statusFilter === "all" ? "glass-pill-active" : ""}`}>
                 All
               </button>
               {STATUSES.map((s) => (
                 <button key={s} onClick={() => setStatusFilter(statusFilter === s ? "all" : s)}
-                  className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${statusFilter === s ? "bg-brand-600 text-white" : "bg-surface text-muted hover:text-default hover:bg-hover"}`}>
+                  className={`glass-pill ${statusFilter === s ? "glass-pill-active" : ""}`}>
                   {STATUS_CONFIG[s].icon}{s}
                 </button>
               ))}
@@ -390,11 +392,13 @@ export default function AnnualReturnPage() {
                 </div>
                 <p className="font-semibold text-default mb-1">No records for FY {fy}</p>
                 <p className="text-sm text-muted mb-5">Use <strong>Init FY {fy}</strong> to bulk-create Pending records for every client, or add them one by one.</p>
-                <div className="flex gap-2 justify-center">
-                  <button className="btn-secondary" onClick={bulkInit} disabled={initLoading}>
-                    <Sparkles className="w-4 h-4" />{initLoading ? "Working…" : `Init FY ${fy}`}
-                  </button>
-                  <button className="btn-primary" onClick={openAdd}><Plus className="w-4 h-4" />Add Manually</button>
+                <div className="flex gap-1.5 justify-center">
+                  <div className="glass-tray">
+                    <button className="glass-pill" onClick={bulkInit} disabled={initLoading}>
+                      <Sparkles className="w-3.5 h-3.5" />{initLoading ? "Working…" : `Init FY ${fy}`}
+                    </button>
+                    <button className="glass-pill glass-pill-active" onClick={openAdd}><Plus className="w-3.5 h-3.5" />Add Manually</button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -488,13 +492,21 @@ export default function AnnualReturnPage() {
                               <div><span className="text-xs text-faint block mb-1">Ack. No.</span><span className="font-mono text-xs bg-card px-2 py-1 rounded border border-base">{rec.acknowledgeNumber}</span></div>
                             )}
                             {rec.remarks && <div><span className="text-xs text-faint block mb-1">Remarks</span><p className="text-sm text-default">{rec.remarks}</p></div>}
-                            <div className="flex gap-2 pt-1 flex-wrap">
-                              <button onClick={() => quickStatus(rec, nextStatus)} className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${cfg.badge}`}>
+                            <div className="glass-tray" style={{ flexWrap: "wrap", marginTop: "8px" }}>
+                              <button onClick={() => quickStatus(rec, nextStatus)} className={`glass-pill glass-pill-active`}>
                                 {cfg.icon} Mark as {nextStatus}
                               </button>
-                              {rec.status === "Verified" && (<button onClick={() => openDraftModal(rec)} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-base hover:bg-hover transition-colors text-muted"><FileEdit className="w-3.5 h-3.5" />Draft Email</button>)}
-                              <button onClick={() => openEdit(rec)} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-base hover:bg-hover transition-colors text-muted"><Pencil className="w-3.5 h-3.5" />Edit</button>
-                              <button onClick={() => deleteRecord(rec._id)} className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-900/40 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-red-500"><Trash2 className="w-3.5 h-3.5" />Delete</button>
+                              {rec.status === "Verified" && (
+                                <button onClick={() => openDraftModal(rec)} className="glass-pill">
+                                  <FileEdit className="w-3.5 h-3.5" />Draft Email
+                                </button>
+                              )}
+                              <button onClick={() => openEdit(rec)} className="glass-pill">
+                                <Pencil className="w-3.5 h-3.5" />Edit
+                              </button>
+                              <button onClick={() => deleteRecord(rec._id)} className="glass-pill" style={{ color: "#ff3b30" }}>
+                                <Trash2 className="w-3.5 h-3.5" />Delete
+                              </button>
                             </div>
                           </div>
                         )}

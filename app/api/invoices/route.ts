@@ -4,6 +4,15 @@ import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import Invoice from "@/models/Invoice";
 
+const cleanInvoicePayload = (body: Record<string, unknown>) => ({
+  clientId: String(body.clientId || "").trim(),
+  financialYear: String(body.financialYear || "").trim(),
+  invoiceType: body.invoiceType === "sale" || body.invoiceType === "purchase" ? body.invoiceType : undefined,
+  receivedVia: body.receivedVia === "hardcopy" || body.receivedVia === "mail" || body.receivedVia === "whatsapp" ? body.receivedVia : undefined,
+  fromDate: body.fromDate,
+  toDate: body.toDate,
+});
+
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -29,7 +38,7 @@ export async function POST(req: NextRequest) {
   try {
     await connectDB();
     const body = await req.json();
-    const invoice = await Invoice.create(body);
+    const invoice = await Invoice.create(cleanInvoicePayload(body));
     return NextResponse.json(invoice, { status: 201 });
   } catch (error) {
     console.error("POST /api/invoices:", error);

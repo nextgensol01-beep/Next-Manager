@@ -131,6 +131,8 @@ export const CUSTOM_CLIENT_EXPORT_FIELDS = [
   { id: "fyAnnualReturnUpdatedAt", label: "FY Annual Return Updated At", description: "Last update date of annual return for the selected FY", group: "Annual Return", width: 23, fyScoped: true },
 
   { id: "fyInvoiceCount", label: "FY Invoice Count", description: "Number of invoice records in the selected FY", group: "Invoices & Uploads", width: 15, fyScoped: true },
+  { id: "fyLatestInvoiceType", label: "FY Latest Invoice Type", description: "Sale or purchase type for the latest invoice record", group: "Invoices & Uploads", width: 20, fyScoped: true },
+  { id: "fyLatestInvoiceReceivedVia", label: "FY Latest Invoice Received Via", description: "How the latest invoice record was received", group: "Invoices & Uploads", width: 24, fyScoped: true },
   { id: "fyLatestInvoiceFromDate", label: "FY Latest Invoice From", description: "Latest invoice from-date in the selected FY", group: "Invoices & Uploads", width: 20, fyScoped: true },
   { id: "fyLatestInvoiceToDate", label: "FY Latest Invoice To", description: "Latest invoice to-date in the selected FY", group: "Invoices & Uploads", width: 18, fyScoped: true },
   { id: "fyLatestInvoiceCreatedAt", label: "FY Latest Invoice Added", description: "Latest invoice creation date in the selected FY", group: "Invoices & Uploads", width: 20, fyScoped: true },

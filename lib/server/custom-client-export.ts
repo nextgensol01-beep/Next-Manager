@@ -89,6 +89,19 @@ function joinUnique(values: Array<string | null | undefined>): string {
   return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean))).join(", ");
 }
 
+function formatInvoiceType(value: unknown): string {
+  if (value === "sale") return "Sale Invoice";
+  if (value === "purchase") return "Purchase Invoice";
+  return "";
+}
+
+function formatReceivedVia(value: unknown): string {
+  if (value === "hardcopy") return "Hardcopy";
+  if (value === "mail") return "Mail";
+  if (value === "whatsapp") return "WhatsApp";
+  return "";
+}
+
 function sumNumbers(values: unknown[]): number {
   return values.reduce<number>((sum, value) => sum + (Number(value) || 0), 0);
 }
@@ -570,6 +583,8 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
       fyAnnualReturnRemarks: String(annualReturn?.remarks || ""),
       fyAnnualReturnUpdatedAt: formatDate(annualReturn?.updatedAt),
       fyInvoiceCount: clientInvoices.length,
+      fyLatestInvoiceType: formatInvoiceType(latestInvoice?.invoiceType),
+      fyLatestInvoiceReceivedVia: formatReceivedVia(latestInvoice?.receivedVia),
       fyLatestInvoiceFromDate: formatDate(latestInvoice?.fromDate),
       fyLatestInvoiceToDate: formatDate(latestInvoice?.toDate),
       fyLatestInvoiceCreatedAt: formatDate(latestInvoice?.createdAt),

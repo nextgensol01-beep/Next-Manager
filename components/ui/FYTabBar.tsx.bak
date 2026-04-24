@@ -1,0 +1,624 @@
+"use client";
+import React, { useRef, useState, useEffect, useCallback } from "react";
+import {
+  motion,
+  useMotionValue,
+  useSpring,
+  useTransform,
+  useVelocity,
+  AnimatePresence,
+  useReducedMotion,
+} from "framer-motion";
+import { FINANCIAL_YEARS } from "@/lib/utils";
+
+/* ─────────────────────────────────────────────────────────────
+   Spring configs
+   Tuned so the pill feels like a soft glass object:
+   - SLIDE: main position spring — moderate stiffness, low damping
+     gives a tiny controlled overshoot on arrival
+   - WIDTH: softer than SLIDE so width lags position → stretch
+   - GLOSS: very lazy — the internal light "sloshes" behind motion
+   - TILT: gentle depth cue on hover
+   - SCALE: snappy for press/hover feedback
+───────────────────────────────────────────────────────────── */
+const SLIDE_SPRING = { stiffness: 340, damping: 30, mass: 0.9 };
+const WIDTH_SPRING = { stiffness: 180, damping: 26, mass: 1.1 };
+const GLOSS_SPRING = { stiffness: 80,  damping: 16, mass: 0.8 };
+const TILT_SPRING  = { stiffness: 150, damping: 24, mass: 0.55 };
+const SCALE_SPRING = { stiffness: 340, damping: 32, mass: 0.55 };
+// Highlight inertia — deliberately heavier than the pill so it "floats"
+const HIGHLIGHT_SPRING = { stiffness: 60, damping: 14, mass: 1.2 };
+
+interface FYTabBarProps {
+  value: string;
+  onChange: (fy: string) => void;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   SelectionPill
+───────────────────────────────────────────────────────────── */
+interface SelectionPillProps {
+  targetRect: { left: number; width: number; height: number; top: number } | null;
+  reduced: boolean;
+  isHovered: boolean;
+  isPressed: boolean;
+  cursorX: ReturnType<typeof useMotionValue<number>>;
+  cursorY: ReturnType<typeof useMotionValue<number>>;
+}
+
+function SelectionPill({
+  targetRect,
+  reduced,
+  isHovered,
+  isPressed,
+  cursorX,
+  cursorY,
+}: SelectionPillProps) {
+  /* ── Raw position targets ── */
+  const rawLeft   = useMotionValue(targetRect?.left   ?? 0);
+  const rawWidth  = useMotionValue(targetRect?.width  ?? 0);
+  const rawTop    = useMotionValue(targetRect?.top    ?? 0);
+  const rawHeight = useMotionValue(targetRect?.height ?? 0);
+
+  /* ── Springified position ── */
+  const left   = useSpring(rawLeft,   SLIDE_SPRING);
+  const top    = useSpring(rawTop,    SLIDE_SPRING);
+  const height = useSpring(rawHeight, SLIDE_SPRING);
+  // Width uses a softer/heavier spring → lags behind left → directional stretch
+  const width  = useSpring(rawWidth,  WIDTH_SPRING);
+
+  /* ── Velocity of the left spring — drives directional stretch ──
+     When the pill is mid-flight, leftVelocity is large.
+     We map that into a small scaleX boost so the pill stretches
+     in the direction of travel and snaps back on arrival.        */
+  const leftVelocity = useVelocity(left);
+  // scaleX: clamp velocity contribution to ±4% stretch
+  const scaleX = useTransform(
+    leftVelocity,
+    [-600, 0, 600],
+    reduced ? [1, 1, 1] : [0.97, 1, 1.04]
+  );
+
+  /* ── Drive position springs when targetRect changes ── */
+  useEffect(() => {
+    if (!targetRect) return;
+    rawLeft.set(targetRect.left);
+    rawTop.set(targetRect.top);
+    rawWidth.set(targetRect.width);
+    rawHeight.set(targetRect.height);
+  }, [targetRect, rawLeft, rawTop, rawWidth, rawHeight]);
+
+  /* ── Cursor springs — the gloss lags the cursor ── */
+  const gX = useSpring(cursorX, GLOSS_SPRING);
+  const gY = useSpring(cursorY, GLOSS_SPRING);
+  const tX = useSpring(cursorX, TILT_SPRING);
+  const tY = useSpring(cursorY, TILT_SPRING);
+
+  /* ── 3-D tilt from cursor ── */
+  const rotateY = useTransform(tX, [-1, 1], reduced ? [0, 0] : [-2.5, 2.5]);
+  const rotateX = useTransform(tY, [-1, 1], reduced ? [0, 0] : [2.5, -2.5]);
+
+  /* ── Gloss blob position: cursor-driven ── */
+  const glossCursorLeft = useTransform(gX, [-1, 1], ["12%", "88%"]);
+  const glossCursorTop  = useTransform(gY, [-1, 1], ["5%",  "75%"]);
+
+  /* ── Highlight inertia — the top-edge dome light "floats" independently ──
+     We derive an offset from leftVelocity so the highlight drifts
+     opposite to the direction of motion (like light sloshing inside glass).
+     Range: ±8% horizontal shift of the highlight origin.                    */
+  const highlightDriftRaw = useTransform(
+    leftVelocity,
+    [-600, 0, 600],
+    reduced ? [0, 0, 0] : [8, 0, -8]   // px — shifts left when moving right
+  );
+  // Spring the drift so it settles smoothly, not instantly
+  const highlightDrift = useSpring(highlightDriftRaw, HIGHLIGHT_SPRING);
+
+  /* ── Opacity springs (not boolean jumps) ── */
+  const glossOpacity = useSpring(0,    { stiffness: 160, damping: 20 });
+  const rimOpacity   = useSpring(0.35, { stiffness: 160, damping: 20 });
+  const topHighlight = useSpring(0.58, { stiffness: 180, damping: 22 });
+
+  useEffect(() => {
+    if (reduced) return;
+    glossOpacity.set(isHovered ? 0.88 : 0);
+    rimOpacity.set(isHovered ? 0.72 : 0.35);
+    topHighlight.set(isHovered ? 0.82 : 0.58);
+  }, [isHovered, reduced, glossOpacity, rimOpacity, topHighlight]);
+
+  /* ── Scale spring ── */
+  const rawScale = useMotionValue(1);
+  const scale    = useSpring(rawScale, SCALE_SPRING);
+  useEffect(() => {
+    if (reduced) return;
+    rawScale.set(isPressed ? 0.96 : isHovered ? 1.025 : 1);
+  }, [isPressed, isHovered, reduced, rawScale]);
+
+  /* ── Reset cursor when not hovered ── */
+  useEffect(() => {
+    if (!isHovered || reduced) {
+      cursorX.set(0);
+      cursorY.set(0);
+    }
+  }, [isHovered, reduced, cursorX, cursorY]);
+
+  /* ── Layer E: Motion shimmer transforms — must be unconditional ──
+     Computed here (not inside JSX) so hooks are never called
+     conditionally, regardless of the `reduced` flag.              */
+  const shimmerBackground = useTransform(
+    leftVelocity,
+    [-400, -80, 0, 80, 400],
+    [
+      "linear-gradient(270deg, rgba(255,255,255,0.18) 0%, transparent 60%)",
+      "linear-gradient(270deg, rgba(255,255,255,0.05) 0%, transparent 60%)",
+      "none",
+      "linear-gradient(90deg, rgba(255,255,255,0.05) 0%, transparent 60%)",
+      "linear-gradient(90deg, rgba(255,255,255,0.18) 0%, transparent 60%)",
+    ]
+  );
+  const shimmerOpacity = useTransform(
+    leftVelocity,
+    [-400, -60, 0, 60, 400],
+    [1, 0, 0, 0, 1]
+  );
+
+  if (!targetRect) return null;
+
+  return (
+    <motion.div
+      aria-hidden
+      style={{
+        position: "absolute",
+        left,
+        top,
+        width,
+        height,
+        scale,
+        scaleX,          // velocity-derived directional stretch
+        rotateX,
+        rotateY,
+        transformStyle: "preserve-3d",
+        perspective: "800px",
+        borderRadius: 9999,
+        pointerEvents: "none",
+        willChange: "transform, left, width",
+        zIndex: 1,
+      }}
+    >
+      {/* Clip wrapper */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          borderRadius: 9999,
+          overflow: "hidden",
+          background: "var(--glass-pill-active-bg)",
+          border: "1px solid var(--glass-pill-active-border)",
+          boxShadow: "var(--glass-pill-active-glow)",
+          backdropFilter: "blur(20px) saturate(180%)",
+          WebkitBackdropFilter: "blur(20px) saturate(180%)",
+        }}
+      >
+        {/* ── Layer A: Top-edge dome highlight with independent inertia ──
+            highlightDrift shifts its x-position opposite to travel
+            so it "floats" and lags behind like liquid light.          */}
+        <motion.span
+          style={{
+            position: "absolute",
+            // Start from 50% and apply the drift offset
+            left: highlightDrift,
+            right: 0,
+            top: 0,
+            height: "55%",
+            borderRadius: "9999px 9999px 40% 40%",
+            background:
+              "linear-gradient(175deg, rgba(255,255,255,0.68) 0%, rgba(255,255,255,0.14) 40%, transparent 65%)",
+            opacity: topHighlight,
+            pointerEvents: "none",
+            // Counter-scale the X so the highlight doesn't stretch with the pill body
+            // This makes it look independent even though it's a child
+            transformOrigin: "center top",
+          }}
+        />
+
+        {/* ── Layer B: Cursor-reactive gloss blob ──
+            Reacts to cursor position when hovered.
+            When the pill is in motion, gX/gY spring to 0 slowly,
+            so the blob also drifts as a secondary effect.          */}
+        {!reduced && (
+          <motion.span
+            style={{
+              position: "absolute",
+              width: "75%",
+              height: "130%",
+              left: glossCursorLeft,
+              top: glossCursorTop,
+              x: "-50%",
+              y: "-50%",
+              borderRadius: "50%",
+              background:
+                "radial-gradient(circle, rgba(190,225,255,0.55) 0%, rgba(255,255,255,0.22) 38%, transparent 68%)",
+              opacity: glossOpacity,
+              filter: "blur(7px)",
+              pointerEvents: "none",
+            }}
+          />
+        )}
+
+        {/* ── Layer C: Edge rim light ── */}
+        <motion.span
+          style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: 9999,
+            border: "1px solid rgba(255,255,255,0.80)",
+            opacity: rimOpacity,
+            pointerEvents: "none",
+          }}
+        />
+
+        {/* ── Layer D: Bottom brand-blue subsurface scatter ── */}
+        <span
+          style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: 9999,
+            background:
+              "radial-gradient(ellipse at 50% 110%, rgba(0,113,227,0.22) 0%, transparent 70%)",
+            pointerEvents: "none",
+          }}
+        />
+
+        {/* ── Layer E: Motion shimmer ──
+            A thin bright band that sweeps through during travel.
+            Derived from velocity — visible only when moving fast,
+            fades out as the pill settles.                          */}
+        {!reduced && (
+          <motion.span
+            style={{
+              position: "absolute",
+              inset: 0,
+              borderRadius: 9999,
+              background: shimmerBackground,
+              opacity: shimmerOpacity,
+              pointerEvents: "none",
+            }}
+          />
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   GhostPill — transparent label button (unchanged structure)
+───────────────────────────────────────────────────────────── */
+interface GhostPillProps {
+  label: string;
+  isActive: boolean;
+  onClick: () => void;
+  reduced: boolean;
+  onHoverChange: (hovered: boolean) => void;
+  onPressChange: (pressed: boolean) => void;
+  onPointerMove: (x: number, y: number) => void;
+}
+
+function GhostPill({
+  label,
+  isActive,
+  onClick,
+  reduced,
+  onHoverChange,
+  onPressChange,
+  onPointerMove,
+}: GhostPillProps) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const rawScale = useMotionValue(1);
+  const scale    = useSpring(rawScale, SCALE_SPRING);
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const [ripple,  setRipple]  = useState(false);
+
+  useEffect(() => {
+    if (reduced) return;
+    if (!isActive) rawScale.set(pressed ? 0.97 : hovered ? 1.02 : 1);
+    else           rawScale.set(1);
+  }, [hovered, pressed, isActive, reduced, rawScale]);
+
+  const trackPointer = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (reduced) return;
+      const rect = ref.current?.getBoundingClientRect();
+      if (!rect) return;
+      onPointerMove(
+        ((e.clientX - rect.left)  / rect.width  - 0.5) * 2,
+        ((e.clientY - rect.top)   / rect.height - 0.5) * 2,
+      );
+    },
+    [onPointerMove, reduced]
+  );
+
+  return (
+    <motion.button
+      ref={ref}
+      type="button"
+      data-fy={label}
+      onClick={onClick}
+      onMouseEnter={() => { setHovered(true);  onHoverChange(true);  }}
+      onMouseLeave={() => { setHovered(false); setPressed(false); onHoverChange(false); }}
+      onMouseMove={trackPointer}
+      onMouseDown={() => {
+        setPressed(true); onPressChange(true);
+        if (!isActive) { setRipple(false); requestAnimationFrame(() => setRipple(true)); }
+      }}
+      onMouseUp={() => { setPressed(false); onPressChange(false); }}
+      onTouchStart={() => { setPressed(true);  onPressChange(true);  }}
+      onTouchEnd={() =>  { setPressed(false); onPressChange(false); }}
+      style={{
+        scale: isActive ? undefined : scale,
+        position: "relative",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        padding: "5px 12px",
+        fontSize: "11px",
+        fontWeight: isActive ? 600 : 500,
+        letterSpacing: isActive ? "0.005em" : "0.01em",
+        borderRadius: 9999,
+        border: isActive
+          ? "1px solid transparent"
+          : "1px solid var(--glass-pill-inactive-border)",
+        background: isActive
+          ? "transparent"
+          : "var(--glass-pill-inactive-bg)",
+        color: isActive ? "#fff" : "var(--glass-pill-inactive-text)",
+        boxShadow: isActive ? "none" : (hovered ? "0 2px 8px rgba(0,0,0,0.09)" : "none"),
+        backdropFilter: isActive ? "none" : (hovered ? "blur(16px) saturate(160%)" : "blur(12px) saturate(140%)"),
+        WebkitBackdropFilter: isActive ? "none" : (hovered ? "blur(16px) saturate(160%)" : "blur(12px) saturate(140%)"),
+        cursor: "pointer",
+        userSelect: "none",
+        overflow: "hidden",
+        outline: "none",
+        whiteSpace: "nowrap",
+        zIndex: 2,
+        transition: "color 0.22s ease, border-color 0.22s ease, background 0.22s ease, box-shadow 0.22s ease",
+      }}
+    >
+      {/* Inactive top highlight */}
+      {!isActive && (
+        <span
+          style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: 9999,
+            background:
+              "linear-gradient(175deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.04) 45%, transparent 65%)",
+            opacity: hovered ? 0.9 : 0.6,
+            transition: "opacity 0.2s ease",
+            pointerEvents: "none",
+          }}
+        />
+      )}
+
+      {/* Inactive hover glow */}
+      {!isActive && hovered && !reduced && (
+        <motion.span
+          initial={{ opacity: 0, scale: 0.6 }}
+          animate={{ opacity: 0.55, scale: 1 }}
+          style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: 9999,
+            background:
+              "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.28) 0%, transparent 70%)",
+            filter: "blur(4px)",
+            pointerEvents: "none",
+          }}
+        />
+      )}
+
+      {/* Press ripple for inactive pills */}
+      <AnimatePresence>
+        {!isActive && ripple && (
+          <motion.span
+            key="ripple"
+            aria-hidden
+            initial={{ opacity: 0.45, scale: 0.2 }}
+            animate={{ opacity: 0, scale: 1.9 }}
+            exit={{ opacity: 0 }}
+            onAnimationComplete={() => setRipple(false)}
+            transition={{ duration: 0.44, ease: [0.22, 1, 0.36, 1] }}
+            style={{
+              position: "absolute",
+              inset: 0,
+              borderRadius: 9999,
+              background:
+                "radial-gradient(circle, rgba(255,255,255,0.35) 0%, transparent 65%)",
+              pointerEvents: "none",
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      <span style={{ position: "relative", zIndex: 3 }}>{label}</span>
+    </motion.button>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   FYTabBar — main export (layout/structure unchanged)
+───────────────────────────────────────────────────────────── */
+export default function FYTabBar({ value, onChange }: FYTabBarProps) {
+  const scrollRef  = useRef<HTMLDivElement>(null);
+  const trackRef   = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const scrollStart= useRef(0);
+  const prefersReduced = useReducedMotion();
+  const reduced        = prefersReduced ?? false;
+
+  const [showLeftFade,  setShowLeftFade]  = useState(false);
+  const [showRightFade, setShowRightFade] = useState(true);
+  const [pillRect, setPillRect] = useState<{
+    left: number; top: number; width: number; height: number;
+  } | null>(null);
+  const [activeHovered, setActiveHovered] = useState(false);
+  const [activePressed, setActivePressed] = useState(false);
+
+  // Cursor motion values owned here, passed into SelectionPill
+  const pillCurX = useMotionValue(0);
+  const pillCurY = useMotionValue(0);
+
+  const measurePill = useCallback(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const btn = track.querySelector<HTMLElement>(`[data-fy="${value}"]`);
+    if (!btn) return;
+    const trackRect = track.getBoundingClientRect();
+    const btnRect   = btn.getBoundingClientRect();
+    setPillRect({
+      left:   btnRect.left   - trackRect.left,
+      top:    btnRect.top    - trackRect.top,
+      width:  btnRect.width,
+      height: btnRect.height,
+    });
+  }, [value]);
+
+  useEffect(() => {
+    const t = setTimeout(measurePill, 20);
+    return () => clearTimeout(t);
+  }, [measurePill]);
+
+  const updateFades = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setShowLeftFade(el.scrollLeft > 4);
+    setShowRightFade(el.scrollLeft < el.scrollWidth - el.clientWidth - 4);
+    measurePill();
+  }, [measurePill]);
+
+  const scrollToSelected = useCallback((year: string) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const btn = el.querySelector<HTMLElement>(`[data-fy="${year}"]`);
+    if (!btn) return;
+    const offset = btn.offsetLeft - el.clientWidth / 2 + btn.offsetWidth / 2;
+    el.scrollTo({ left: offset, behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => { scrollToSelected(value); updateFades(); }, 100);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let raf: number;
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measurePill); };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => { el.removeEventListener("scroll", onScroll); cancelAnimationFrame(raf); };
+  }, [measurePill]);
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    isDragging.current  = true;
+    dragStartX.current  = e.pageX;
+    scrollStart.current = scrollRef.current?.scrollLeft ?? 0;
+    if (scrollRef.current) scrollRef.current.style.cursor = "grabbing";
+  };
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging.current || !scrollRef.current) return;
+    e.preventDefault();
+    scrollRef.current.scrollLeft = scrollStart.current - (e.pageX - dragStartX.current);
+  };
+  const onMouseUp = () => {
+    isDragging.current = false;
+    if (scrollRef.current) scrollRef.current.style.cursor = "grab";
+  };
+
+  const handleSelect = (y: string) => { onChange(y); scrollToSelected(y); };
+
+  const handleActivePointerMove = useCallback((nx: number, ny: number) => {
+    pillCurX.set(nx);
+    pillCurY.set(ny);
+  }, [pillCurX, pillCurY]);
+
+  return (
+    <div className="glass-tray-full mb-4">
+      <span
+        className="text-[10px] font-semibold uppercase tracking-widest flex-shrink-0"
+        style={{ color: "var(--color-text-faint)", letterSpacing: "0.14em" }}
+      >
+        Financial Year
+      </span>
+
+      <div className="relative flex-1 min-w-0 overflow-hidden">
+        <div
+          className="pointer-events-none absolute left-0 top-0 h-full w-8 z-10 transition-opacity duration-200"
+          style={{
+            background: "linear-gradient(to right, var(--glass-tray-bg) 10%, transparent)",
+            opacity: showLeftFade ? 1 : 0,
+          }}
+        />
+        <div
+          className="pointer-events-none absolute right-0 top-0 h-full w-8 z-10 transition-opacity duration-200"
+          style={{
+            background: "linear-gradient(to left, var(--glass-tray-bg) 10%, transparent)",
+            opacity: showRightFade ? 1 : 0,
+          }}
+        />
+
+        <div
+          ref={scrollRef}
+          style={{
+            cursor: "grab",
+            scrollbarWidth: "none",
+            msOverflowStyle: "none",
+            WebkitOverflowScrolling: "touch",
+            overflowX: "auto",
+          }}
+          onScroll={updateFades}
+          onMouseDown={onMouseDown}
+          onMouseMove={onMouseMove}
+          onMouseUp={onMouseUp}
+          onMouseLeave={onMouseUp}
+        >
+          <div
+            ref={trackRef}
+            style={{
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "4px 2px",
+            }}
+          >
+            <SelectionPill
+              targetRect={pillRect}
+              reduced={reduced}
+              isHovered={activeHovered}
+              isPressed={activePressed}
+              cursorX={pillCurX}
+              cursorY={pillCurY}
+            />
+
+            {FINANCIAL_YEARS.map((y) => (
+              <GhostPill
+                key={y}
+                label={y}
+                isActive={value === y}
+                onClick={() => handleSelect(y)}
+                reduced={reduced}
+                onHoverChange={(hov) => { if (value === y) setActiveHovered(hov); }}
+                onPressChange={(prs) => { if (value === y) setActivePressed(prs); }}
+                onPointerMove={(nx, ny) => { if (value === y) handleActivePointerMove(nx, ny); }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

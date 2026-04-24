@@ -85,6 +85,28 @@ export interface Payment {
   paymentDate: string; paymentMode: string; referenceNumber: string; notes?: string; financialYear?: string;
 }
 
+export interface InvoiceTrackingRecord {
+  _id: string;
+  clientId: string;
+  financialYear: string;
+  invoiceType?: "sale" | "purchase";
+  receivedVia?: "hardcopy" | "mail" | "whatsapp";
+  fromDate: string;
+  toDate: string;
+  createdAt: string;
+}
+
+export interface UploadRecord {
+  _id: string;
+  clientId: string;
+  financialYear: string;
+  cat1?: number;
+  cat2?: number;
+  cat3?: number;
+  cat4?: number;
+  createdAt: string;
+}
+
 export interface Document {
   _id: string;
   documentName: string;
@@ -554,67 +576,89 @@ export function FilterRail<T extends string>({
   };
 
   return (
-    <div className={`rounded-2xl border border-base bg-surface/70 ${dense ? "p-1.5" : "p-2"} backdrop-blur-sm`}>
-      <div className="flex items-center gap-3 min-w-0">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-faint flex-shrink-0">{label}</span>
-        <div className="relative flex-1 min-w-0 overflow-hidden">
-          <div
-            className="pointer-events-none absolute left-[-6px] top-0 h-full w-8 z-10 transition-opacity duration-200"
-            style={{
-              background: "linear-gradient(to right, var(--color-surface) 28%, transparent)",
-              opacity: showLeftFade ? 1 : 0,
-            }}
-          />
-          <div
-            className="pointer-events-none absolute right-[-6px] top-0 h-full w-8 z-10 transition-opacity duration-200"
-            style={{
-              background: "linear-gradient(to left, var(--color-surface) 28%, transparent)",
-              opacity: showRightFade ? 1 : 0,
-            }}
-          />
-          <div
-            ref={scrollRef}
-            className="overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden snap-x snap-proximity"
-            style={{
-              cursor: "grab",
-              WebkitOverflowScrolling: "touch",
-            }}
-            onScroll={updateFades}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-          >
-            <div
-              className="flex gap-1.5 min-w-max transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
-              style={{ transform: `translateX(${elasticOffset}px)` }}
-            >
-              {options.map((option) => {
-                const active = value === option.id;
-                const activeClass = tone === "brand"
-                  ? "bg-brand-600 text-white shadow-[0_10px_24px_rgba(37,99,235,0.22)]"
-                  : "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-[0_8px_20px_rgba(15,23,42,0.2)]";
+    <div className="glass-tray-full" style={{ marginBottom: 0 }}>
+      {/* Section label */}
+      <span
+        className="flex-shrink-0"
+        style={{
+          fontSize: "10px",
+          fontWeight: 600,
+          letterSpacing: "0.14em",
+          textTransform: "uppercase",
+          color: "var(--color-text-faint)",
+        }}
+      >
+        {label}
+      </span>
 
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    data-filter-option={String(option.id)}
-                    onClick={() => handleSelect(option.id)}
-                    className={`rounded-xl px-3 py-2 text-xs font-semibold transition-all duration-200 ${
-                      active
-                        ? activeClass
-                        : "bg-card/70 text-muted hover:text-default border border-transparent hover:border-base"
-                    } snap-start`}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
+      {/* Scrollable pill strip */}
+      <div className="relative flex-1 min-w-0 overflow-hidden">
+        {/* Left fade */}
+        <div
+          className="pointer-events-none absolute left-0 top-0 h-full w-8 z-10 transition-opacity duration-200"
+          style={{
+            background: "linear-gradient(to right, var(--glass-tray-bg) 10%, transparent)",
+            opacity: showLeftFade ? 1 : 0,
+          }}
+        />
+        {/* Right fade */}
+        <div
+          className="pointer-events-none absolute right-0 top-0 h-full w-8 z-10 transition-opacity duration-200"
+          style={{
+            background: "linear-gradient(to left, var(--glass-tray-bg) 10%, transparent)",
+            opacity: showRightFade ? 1 : 0,
+          }}
+        />
+
+        <div
+          ref={scrollRef}
+          className="overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden snap-x snap-proximity"
+          style={{ cursor: "grab", WebkitOverflowScrolling: "touch" }}
+          onScroll={updateFades}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
+          <div
+            className="flex gap-1.5 min-w-max transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+            style={{ transform: `translateX(${elasticOffset}px)` }}
+          >
+            {options.map((option) => {
+              const active = value === option.id;
+              /* neutral tone: use slate instead of brand blue */
+              const neutralActive = tone === "neutral";
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  data-filter-option={String(option.id)}
+                  onClick={() => handleSelect(option.id)}
+                  className={`glass-pill snap-start ${
+                    active
+                      ? neutralActive
+                        ? "glass-pill-neutral-active"
+                        : "glass-pill-active"
+                      : ""
+                  }`}
+                  style={
+                    active && neutralActive
+                      ? {
+                          background: "rgba(15,23,42,0.88)",
+                          borderColor: "rgba(100,116,139,0.50)",
+                          color: "#ffffff",
+                          boxShadow: "0 0 0 1px rgba(15,23,42,0.30), 0 4px 16px rgba(15,23,42,0.28)",
+                        }
+                      : undefined
+                  }
+                >
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>

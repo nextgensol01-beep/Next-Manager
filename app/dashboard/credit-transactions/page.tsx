@@ -269,7 +269,7 @@ export default function CreditTransactionsPage() {
           <span className="font-medium text-default">{transactions.length.toLocaleString()}</span>
           <span>recorded</span>
         </div>
-        <button className="btn-primary" onClick={openTransactionModal}>
+        <button className="glass-btn glass-btn-primary" onClick={openTransactionModal}>
           <Plus className="w-4 h-4" /> Add Transaction
         </button>
       </PageHeader>
@@ -312,12 +312,12 @@ export default function CreditTransactionsPage() {
         )}
       </div>
 
-      <div className="flex gap-2 mb-4">
+      <div className="glass-tray mb-4">
         {["all", "Recycling", "EOL"].map((type) => (
           <button
             key={type}
             onClick={() => setCreditTypeFilter(type)}
-            className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${creditTypeFilter === type ? "bg-brand-600 text-white" : "bg-card border border-base text-muted hover:text-default"}`}
+            className={`glass-pill ${creditTypeFilter === type ? "glass-pill-active" : ""}`}
           >
             {type === "Recycling" && <Recycle className="w-3 h-3" />}
             {type === "EOL" && <Leaf className="w-3 h-3" />}
