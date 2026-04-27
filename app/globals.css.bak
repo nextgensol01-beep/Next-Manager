@@ -136,12 +136,10 @@ body {
 .sidebar-badge-blue {
   font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px;
   background: rgba(59,130,246,0.15); color: #3b82f6;
-  transition: background 220ms ease, color 220ms ease;
 }
 .sidebar-badge-red {
   font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px;
   background: rgba(239,68,68,0.15); color: #ef4444;
-  transition: background 220ms ease, color 220ms ease;
 }
 
 /* ── SIDEBAR LINKS ── */
@@ -161,27 +159,6 @@ body {
 }
 .dark .sidebar-link.active {
   box-shadow: 0 2px 8px rgba(0,113,227,0.40);
-}
-
-/* ── SIDEBAR NAV LINK (liquid glass version) ──
-   No background painted here — SidebarPill provides the active bg.
-   Inactive links get subtle hover bg.                              */
-.sidebar-nav-link {
-  @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium w-full;
-  color: var(--sidebar-muted);
-  letter-spacing: -0.01em;
-  transition: color 0.18s ease;
-  position: relative;
-  overflow: hidden;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  text-align: left;
-  text-decoration: none;
-}
-.sidebar-nav-link:hover {
-  color: var(--sidebar-text);
-  /* No background here — SidebarLinkGlow handles the hover surface */
 }
 
 /* ── BUTTONS ── */
@@ -821,7 +798,32 @@ tbody tr {
   box-shadow: 0 0 0 1px rgba(0,113,227,0.40), 0 6px 24px rgba(0,113,227,0.38);
 }
 
-/* ── Sidebar glass active pill — now handled by SidebarPill motion.div in Sidebar.tsx ── */
+/* ── Sidebar glass active pill ── */
+.sidebar-link.active {
+  background: var(--glass-pill-active-bg) !important;
+  border: 1px solid var(--glass-pill-active-border) !important;
+  color: #ffffff !important;
+  box-shadow: var(--glass-pill-active-glow) !important;
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  position: relative;
+  overflow: hidden;
+}
+.sidebar-link.active::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 8%; right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55) 50%, transparent);
+  pointer-events: none;
+}
+.sidebar-link.active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 90% 50% at 50% -5%, rgba(255,255,255,0.18) 0%, transparent 70%);
+  pointer-events: none;
+}
 
 /* ── Scrollable glass tray strip: for FYTabBar ── */
 .glass-tray-scroll-track {
