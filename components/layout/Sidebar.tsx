@@ -624,8 +624,9 @@ export default function Sidebar({ open, onClose }: Props) {
 
   // Re-measure on window resize
   useEffect(() => {
-    window.addEventListener("resize", measurePill, { passive: true });
-    return () => window.removeEventListener("resize", measurePill);
+    const onResize = () => measurePill();
+    window.addEventListener("resize", onResize, { passive: true });
+    return () => window.removeEventListener("resize", onResize);
   }, [measurePill]);
 
   useEffect(() => { onClose(); }, [pathname, onClose]);
