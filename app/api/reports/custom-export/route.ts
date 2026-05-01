@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
 
     const worksheet = workbook.addWorksheet("Custom Client Export");
     worksheet.columns = result.fields.map((field) => {
-      const config = getFieldConfig(field);
+      const config = result.fieldConfigs[field] || getFieldConfig(field);
       return {
         header: config?.label || field,
         key: field,

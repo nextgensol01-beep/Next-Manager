@@ -9,6 +9,7 @@ import Invoice from "@/models/Invoice";
 import UploadRecord from "@/models/UploadRecord";
 import Document from "@/models/Document";
 import EmailLog from "@/models/EmailLog";
+import ClientCustomField from "@/models/ClientCustomField";
 import {
   CUSTOM_CLIENT_EXPORT_FIELDS,
   CUSTOM_EXPORT_CLIENT_CATEGORIES,
@@ -18,6 +19,7 @@ import {
   type CustomExportSortBy,
 } from "@/lib/reports";
 import { getClientContactsMap } from "@/lib/server/client-contact-service";
+import { buildInvoiceCoverageSummary } from "@/lib/invoiceCoverage";
 
 type CreditBreakupType = "RECYCLING" | "EOL";
 type FlatRecord = Record<string, unknown>;
@@ -62,6 +64,7 @@ export type CustomClientExportSummary = {
 export type CustomClientExportResult = {
   fy: string;
   fields: CustomClientExportField[];
+  fieldConfigs: Record<string, CustomClientExportFieldDefinition>;
   rows: Array<Record<string, ExportValue>>;
   previewColumns: CustomClientExportPreviewColumn[];
   summary: CustomClientExportSummary;
@@ -108,6 +111,10 @@ function sumNumbers(values: unknown[]): number {
 
 export function getFieldConfig(field: CustomClientExportField): CustomClientExportFieldDefinition | undefined {
   return CUSTOM_CLIENT_EXPORT_FIELDS.find((entry) => entry.id === field);
+}
+
+function customFieldExportId(key: string) {
+  return `custom:${key}`;
 }
 
 function parseDateInput(value?: string): Date | null {
@@ -222,6 +229,18 @@ function buildUploadSummary(uploads: FlatRecord[]) {
   const fyUploadedCat2 = sumNumbers(uploads.map((upload) => upload.cat2));
   const fyUploadedCat3 = sumNumbers(uploads.map((upload) => upload.cat3));
   const fyUploadedCat4 = sumNumbers(uploads.map((upload) => upload.cat4));
+  const saleUploads = uploads.filter((upload) => upload.uploadType !== "purchase");
+  const purchaseUploads = uploads.filter((upload) => upload.uploadType === "purchase");
+  const saleCat1 = sumNumbers(saleUploads.map((upload) => upload.cat1));
+  const saleCat2 = sumNumbers(saleUploads.map((upload) => upload.cat2));
+  const saleCat3 = sumNumbers(saleUploads.map((upload) => upload.cat3));
+  const saleCat4 = sumNumbers(saleUploads.map((upload) => upload.cat4));
+  const purchaseCat1 = sumNumbers(purchaseUploads.map((upload) => upload.cat1));
+  const purchaseCat2 = sumNumbers(purchaseUploads.map((upload) => upload.cat2));
+  const purchaseCat3 = sumNumbers(purchaseUploads.map((upload) => upload.cat3));
+  const purchaseCat4 = sumNumbers(purchaseUploads.map((upload) => upload.cat4));
+  const fySaleUploadedInvoiceCount = sumNumbers(saleUploads.map((upload) => upload.invoiceCount));
+  const fyPurchaseUploadedInvoiceCount = sumNumbers(purchaseUploads.map((upload) => upload.invoiceCount));
 
   return {
     fyUploadRecordCount: uploads.length,
@@ -230,6 +249,19 @@ function buildUploadSummary(uploads: FlatRecord[]) {
     fyUploadedCat3,
     fyUploadedCat4,
     fyUploadedTotal: fyUploadedCat1 + fyUploadedCat2 + fyUploadedCat3 + fyUploadedCat4,
+    fySaleUploadedCat1: saleCat1,
+    fySaleUploadedCat2: saleCat2,
+    fySaleUploadedCat3: saleCat3,
+    fySaleUploadedCat4: saleCat4,
+    fySaleUploadedTotal: saleCat1 + saleCat2 + saleCat3 + saleCat4,
+    fySaleUploadedInvoiceCount,
+    fyPurchaseUploadedCat1: purchaseCat1,
+    fyPurchaseUploadedCat2: purchaseCat2,
+    fyPurchaseUploadedCat3: purchaseCat3,
+    fyPurchaseUploadedCat4: purchaseCat4,
+    fyPurchaseUploadedTotal: purchaseCat1 + purchaseCat2 + purchaseCat3 + purchaseCat4,
+    fyPurchaseUploadedInvoiceCount,
+    fyUploadedTotalInvoiceCount: fySaleUploadedInvoiceCount + fyPurchaseUploadedInvoiceCount,
     fyLatestUploadDate: formatDate(latestUpload?.createdAt),
     __latestUploadTs: toTimestamp(latestUpload?.createdAt),
   };
@@ -332,6 +364,31 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
     throw new Error("Select at least one field to export");
   }
 
+  const customFieldDefinitions = (await ClientCustomField.find({ active: true })
+    .sort({ order: 1, label: 1 })
+    .lean()) as Array<{ key?: string; label?: string }>;
+  const customFieldConfigs = customFieldDefinitions.reduce<Record<string, CustomClientExportFieldDefinition>>((acc, field) => {
+    const key = typeof field.key === "string" ? field.key : "";
+    if (key === "legalName") return acc;
+    if (!key) return acc;
+    const id = customFieldExportId(key);
+    acc[id] = {
+      id,
+      label: typeof field.label === "string" && field.label.trim() ? field.label.trim() : key,
+      description: "Custom client field configured in Settings",
+      group: "Custom Client Fields",
+      width: 24,
+    };
+    return acc;
+  }, {});
+  const fieldConfigs = {
+    ...CUSTOM_CLIENT_EXPORT_FIELDS.reduce<Record<string, CustomClientExportFieldDefinition>>((acc, field) => {
+      acc[field.id] = field;
+      return acc;
+    }, {}),
+    ...customFieldConfigs,
+  };
+
   const clientQuery: Record<string, unknown> = {};
   if (options.categories.length > 0) {
     clientQuery.category = { $in: options.categories };
@@ -347,9 +404,10 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
     return {
       fy: options.fy,
       fields: options.fields,
+      fieldConfigs,
       rows: [],
       previewColumns: options.fields.map((field) => {
-        const config = getFieldConfig(field);
+        const config = fieldConfigs[field];
         return {
           id: field,
           label: config?.label || field,
@@ -517,6 +575,7 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
     const soldTotals = soldTotalsMap.get(clientId) || { ...emptyTypedTotals };
     const achievedTotals = achievedTotalsMap.get(clientId) || { ...emptyTypedTotals };
     const latestInvoice = getLatestByDate(clientInvoices, "createdAt");
+    const invoiceCoverage = buildInvoiceCoverageSummary(clientInvoices, options.fy);
     const contactSummary = buildContactSummary(contacts);
     const paymentSummary = buildPaymentSummary(billing, clientPayments);
     const uploadSummary = buildUploadSummary(clientUploads);
@@ -547,9 +606,14 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
       toTimestamp(latestInvoice?.createdAt),
       toTimestamp(annualReturn?.updatedAt)
     );
+    const customFields = client.customFields && typeof client.customFields === "object"
+      ? client.customFields as Record<string, unknown>
+      : {};
+    const legalName = String(client.legalName || customFields.legalName || "");
 
     const exportValues: Record<string, ExportValue> = {
       companyName: String(client.companyName || ""),
+      legalName,
       state: String(client.state || ""),
       gstNumber: String(client.gstNumber || ""),
       clientId,
@@ -588,10 +652,25 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
       fyLatestInvoiceFromDate: formatDate(latestInvoice?.fromDate),
       fyLatestInvoiceToDate: formatDate(latestInvoice?.toDate),
       fyLatestInvoiceCreatedAt: formatDate(latestInvoice?.createdAt),
+      fySaleInvoiceMonthsDone: invoiceCoverage.sale.doneCount,
+      fySaleInvoiceMonthsLeft: invoiceCoverage.sale.leftCount,
+      fySaleInvoiceDoneMonths: invoiceCoverage.sale.doneText === "-" ? "" : invoiceCoverage.sale.doneText,
+      fySaleInvoiceLeftMonths: invoiceCoverage.sale.leftText === "-" ? "" : invoiceCoverage.sale.leftText,
+      fyPurchaseInvoiceMonthsDone: invoiceCoverage.purchase.doneCount,
+      fyPurchaseInvoiceMonthsLeft: invoiceCoverage.purchase.leftCount,
+      fyPurchaseInvoiceDoneMonths: invoiceCoverage.purchase.doneText === "-" ? "" : invoiceCoverage.purchase.doneText,
+      fyPurchaseInvoiceLeftMonths: invoiceCoverage.purchase.leftText === "-" ? "" : invoiceCoverage.purchase.leftText,
       ...uploadExportSummary,
       ...documentExportSummary,
       ...emailExportSummary,
     };
+
+    for (const definition of customFieldDefinitions) {
+      const key = typeof definition.key === "string" ? definition.key : "";
+      if (!key || key === "legalName") continue;
+      const value = customFields[key];
+      exportValues[customFieldExportId(key)] = typeof value === "boolean" ? (value ? "Yes" : "No") : String(value ?? "");
+    }
 
     return {
       exportValues,
@@ -667,7 +746,7 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
     fields: finalFields,
     rows,
     previewColumns: finalFields.map((field) => {
-      const config = getFieldConfig(field);
+      const config = fieldConfigs[field];
       return {
         id: field,
         label: config?.label || field,
@@ -676,6 +755,7 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
         nonEmptyCount: fieldStats.get(field) || 0,
       };
     }),
+    fieldConfigs,
     summary: {
       matchedClients: entries.length,
       withContacts: entries.filter((entry) => entry.flags.hasContacts).length,

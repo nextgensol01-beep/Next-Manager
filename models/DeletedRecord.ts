@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose";
 
 export interface IDeletedRecord extends Document {
-  recordType: "client" | "contact" | "creditTransaction" | "financialYear" | "billing" | "payment" | "annualReturn" | "uploadRecord" | "invoice";
+  recordType: "client" | "contact" | "creditTransaction" | "financialYear" | "billing" | "payment" | "annualReturn" | "uploadRecord" | "invoice" | "document";
   recordId: string;
   label: string;         // human-readable name e.g. "ABC Pvt Ltd (PWP-001)"
   subLabel?: string;     // extra context e.g. "FY 2024-25"

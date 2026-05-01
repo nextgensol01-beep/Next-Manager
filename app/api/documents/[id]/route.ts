@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import Document from "@/models/Document";
+import DeletedRecord from "@/models/DeletedRecord";
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -52,6 +53,15 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   try {
     await connectDB();
     const { id } = await params;
+    const doc = await Document.findById(id);
+    if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    await DeletedRecord.create({
+      recordType: "document",
+      recordId: id,
+      label: `Document - ${doc.documentName}`,
+      subLabel: `Client ${doc.clientId}`,
+      data: doc.toObject(),
+    });
     await Document.findByIdAndDelete(id);
     return NextResponse.json({ success: true });
   } catch (error) {

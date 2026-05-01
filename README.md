@@ -35,6 +35,11 @@ MONGODB_URI=mongodb+srv://<user>:<pass>@cluster.mongodb.net/nextgen-erp
 NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=<generate-with-openssl-rand-base64-32>
 
+# Admin credentials
+ADMIN_NAME=Admin
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD_HASH="\$2a\$12\$..."
+
 # Google OAuth
 GOOGLE_CLIENT_ID=<your-client-id>.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=<your-client-secret>
@@ -53,6 +58,14 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+To generate the admin password hash:
+
+```bash
+node scripts/generate-hash.js yourpassword
+```
+
+Paste the quoted `ADMIN_PASSWORD_HASH="\$..."` output into your environment file, then restart the dev server.
 
 ## Useful Scripts
 

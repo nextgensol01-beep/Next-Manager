@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import Invoice from "@/models/Invoice";
+import Client from "@/models/Client";
 
 const cleanInvoicePayload = (body: Record<string, unknown>) => ({
   clientId: String(body.clientId || "").trim(),
@@ -21,9 +22,22 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const clientId = searchParams.get("clientId");
     const fy = searchParams.get("fy");
-    const query: Record<string, string> = {};
+    const search = String(searchParams.get("search") || "").trim();
+    const query: Record<string, unknown> = {};
     if (clientId) query.clientId = clientId;
     if (fy) query.financialYear = fy;
+
+    if (!clientId && search) {
+      const matchingClients = await Client.find({
+        $or: [
+          { clientId: { $regex: search, $options: "i" } },
+          { companyName: { $regex: search, $options: "i" } },
+        ],
+      }).select("clientId").lean() as Array<{ clientId?: string }>;
+      const matchingClientIds = matchingClients.map((client) => client.clientId).filter(Boolean);
+      query.clientId = { $in: matchingClientIds };
+    }
+
     const invoices = await Invoice.find(query).sort({ fromDate: -1 });
     return NextResponse.json(invoices);
   } catch (error) {

@@ -12,6 +12,7 @@ import Payment from "@/models/Payment";
 import AnnualReturn from "@/models/AnnualReturn";
 import UploadRecord from "@/models/UploadRecord";
 import Invoice from "@/models/Invoice";
+import Document from "@/models/Document";
 import {
   isRestorableClientAggregate,
   restoreClientAggregate,
@@ -25,6 +26,7 @@ function getModel(type: string): RestorableModel | null {
     client: Client, creditTransaction: CreditTransaction,
     financialYear: FinancialYear, billing: Billing, payment: Payment,
     annualReturn: AnnualReturn, uploadRecord: UploadRecord, invoice: Invoice,
+    document: Document,
   } as unknown as Record<string, RestorableModel>;
   return map[type] || null;
 }

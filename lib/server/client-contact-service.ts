@@ -11,12 +11,19 @@ import Invoice from "@/models/Invoice";
 import AppDocument from "@/models/Document";
 import EmailLog from "@/models/EmailLog";
 import ClientIdCounter from "@/models/ClientIdCounter";
+import ClientCustomField from "@/models/ClientCustomField";
 import {
   normalizeEmailList,
   normalizePhoneList,
   resolveCompanySelections,
   sameStringArray,
 } from "@/lib/clientContactSelections";
+import {
+  customFieldValueIsEmpty,
+  normalizeCustomFieldValue,
+  type ClientCustomFieldDefinition,
+  type ClientCustomFieldValues,
+} from "@/lib/clientCustomFields";
 
 type MaybeId = { toString(): string } | string;
 
@@ -41,8 +48,13 @@ type ClientContactRecord = {
 export type ClientSummary = {
   clientId: string;
   companyName: string;
+  legalName?: string;
   category: string;
   state: string;
+};
+
+type ClientCustomFieldRecord = ClientCustomFieldDefinition & {
+  _id?: MaybeId;
 };
 
 export type ClientPersonInput = {
@@ -92,6 +104,7 @@ export type ContactDirectoryEntry = {
 const CLIENT_MUTABLE_FIELDS = [
   "category",
   "companyName",
+  "legalName",
   "state",
   "address",
   "gstNumber",
@@ -118,6 +131,46 @@ const stripModelMetadata = <T extends Record<string, unknown>>(record: T) => {
   void __v;
   return rest;
 };
+
+async function getActiveClientCustomFields() {
+  return (await ClientCustomField.find({ active: true })
+    .sort({ order: 1, label: 1 })
+    .lean()) as unknown as ClientCustomFieldRecord[];
+}
+
+async function getSearchableCustomFieldConditions(search: string) {
+  const definitions = (await ClientCustomField.find({ active: true, searchable: true })
+    .select("key")
+    .lean()) as Array<{ key?: string }>;
+
+  return definitions
+    .map((definition) => (typeof definition.key === "string" ? definition.key.trim() : ""))
+    .filter((key) => Boolean(key) && key !== "legalName")
+    .map((key) => ({ [`customFields.${key}`]: { $regex: search, $options: "i" } }));
+}
+
+async function normalizeClientCustomFields(input: unknown, existingValues: unknown = {}) {
+  const definitions = await getActiveClientCustomFields();
+  const rawValues = input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  const values: ClientCustomFieldValues = existingValues && typeof existingValues === "object" && !Array.isArray(existingValues)
+    ? { ...(existingValues as ClientCustomFieldValues) }
+    : {};
+
+  for (const definition of definitions) {
+    if (definition.key === "legalName") continue;
+
+    const normalizedValue = normalizeCustomFieldValue(definition, rawValues[definition.key]);
+    if (definition.required && customFieldValueIsEmpty(definition, normalizedValue)) {
+      throw new Error(`${definition.label} is required`);
+    }
+
+    values[definition.key] = normalizedValue;
+  }
+
+  return values;
+}
 
 const buildLinkedContact = (person: PersonRecord, link: ClientContactRecord): LinkedContact => {
   const selections = resolveCompanySelections({
@@ -638,9 +691,12 @@ export async function listClientsWithContacts(options: {
   const search = options.search?.trim();
   if (search) {
     const matchedClientIds = await findClientIdsByContactSearch(search);
+    const customFieldConditions = await getSearchableCustomFieldConditions(search);
     query.$or = [
       { clientId: { $regex: search, $options: "i" } },
       { companyName: { $regex: search, $options: "i" } },
+      { legalName: { $regex: search, $options: "i" } },
+      ...customFieldConditions,
       ...(matchedClientIds.length > 0 ? [{ clientId: { $in: matchedClientIds } }] : []),
     ];
   }
@@ -675,14 +731,17 @@ export async function listClientSummaries(options: {
 
   const search = options.search?.trim();
   if (search) {
+    const customFieldConditions = await getSearchableCustomFieldConditions(search);
     query.$or = [
       { clientId: { $regex: search, $options: "i" } },
       { companyName: { $regex: search, $options: "i" } },
+      { legalName: { $regex: search, $options: "i" } },
+      ...customFieldConditions,
     ];
   }
 
   const clientQuery = Client.find(query)
-    .select("clientId companyName category state")
+    .select("clientId companyName legalName category state")
     .sort({ companyName: 1 })
     .lean();
 
@@ -696,6 +755,7 @@ export async function listClientSummaries(options: {
     .map((client) => ({
       clientId: typeof client.clientId === "string" ? client.clientId : "",
       companyName: typeof client.companyName === "string" ? client.companyName : "",
+      legalName: typeof client.legalName === "string" ? client.legalName : "",
       category: typeof client.category === "string" ? client.category : "",
       state: typeof client.state === "string" ? client.state : "",
     }))
@@ -738,8 +798,9 @@ export async function createClientRecord(body: Record<string, unknown>) {
   const { clientId: ignoredClientId, ...clientData } = clientFields;
   void ignoredClientId;
 
+  const customFields = await normalizeClientCustomFields(body.customFields);
   const nextClientId = await allocateNextClientId(clientCategory);
-  const client = await Client.create({ ...clientData, clientId: nextClientId });
+  const client = await Client.create({ ...clientData, clientId: nextClientId, customFields });
   await syncClientPersons(
     client.clientId,
     Array.isArray(persons) ? (persons as ClientPersonInput[]) : [],
@@ -758,7 +819,7 @@ export async function updateClientRecord(clientId: string, body: Record<string, 
     throw new Error("clientId cannot be changed");
   }
 
-  const existingClient = await Client.findOne({ clientId }).select("category");
+  const existingClient = await Client.findOne({ clientId }).select("category customFields");
   if (!existingClient) {
     return null;
   }
@@ -772,9 +833,10 @@ export async function updateClientRecord(clientId: string, body: Record<string, 
   }
 
   const clientFields = pickClientFields(rest);
+  const customFields = await normalizeClientCustomFields(body.customFields, existingClient.customFields);
   const client = await Client.findOneAndUpdate(
     { clientId },
-    { $set: clientFields },
+    { $set: { ...clientFields, customFields } },
     { new: true, runValidators: true }
   );
 

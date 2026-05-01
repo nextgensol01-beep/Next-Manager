@@ -5,6 +5,8 @@ import { Plus, Send, Users } from "lucide-react";
 import { formatCurrency, FINANCIAL_YEARS, PAYMENT_MODES, STATES, CATEGORIES } from "@/lib/utils";
 import { CategoryBreakdown } from "@/components/ui/CategoryBreakdown";
 import Modal from "@/components/ui/Modal";
+import { CustomFieldInputs } from "@/components/clients/CustomFieldInputs";
+import type { ClientCustomFieldDefinition, ClientCustomFieldValues } from "@/lib/clientCustomFields";
 import {
   CAT_IDS,
   CATS,
@@ -45,6 +47,7 @@ type FyForm = {
 type ReminderForm = { subject: string; message: string };
 type EditForm = {
   companyName: string;
+  legalName: string;
   category: string;
   state: string;
   address: string;
@@ -53,6 +56,7 @@ type EditForm = {
   cpcbLoginId: string;
   cpcbPassword: string;
   otpMobileNumber: string;
+  customFields: ClientCustomFieldValues;
 };
 type BreakdownProps = {
   entries?: Array<{ categoryId: string; type: "RECYCLING" | "EOL"; value: number }>;
@@ -116,6 +120,7 @@ interface ClientProfileModalsProps {
   setEditTab: (tab: "basic" | "portal") => void;
   editForm: EditForm;
   setEditForm: SetState<EditForm>;
+  customFieldDefinitions: ClientCustomFieldDefinition[];
   persons: PersonEntry[];
   addPerson: () => void;
   updatePerson: (index: number, updated: PersonEntry) => void;
@@ -183,6 +188,7 @@ export default function ClientProfileModals({
   setEditTab,
   editForm,
   setEditForm,
+  customFieldDefinitions,
   persons,
   addPerson,
   updatePerson,
@@ -193,6 +199,8 @@ export default function ClientProfileModals({
   saving,
   inlineSaving,
 }: ClientProfileModalsProps) {
+  const visibleCustomFieldDefinitions = customFieldDefinitions.filter((field) => field.key !== "legalName");
+
   return (
     <>
       <Modal open={docModal} onClose={closeDocumentModal} title={docModalMode === "edit" ? "Edit Document" : "Add Document"}>
@@ -483,6 +491,16 @@ export default function ClientProfileModals({
                 <label className="label">Company Name *</label>
                 <input className="input-field" value={editForm.companyName} onChange={(e) => setEditForm({ ...editForm, companyName: e.target.value })} required />
               </div>
+              <div>
+                <label className="label">Legal Name</label>
+                <input className="input-field" value={editForm.legalName} onChange={(e) => setEditForm({ ...editForm, legalName: e.target.value })} />
+              </div>
+
+              <CustomFieldInputs
+                fields={visibleCustomFieldDefinitions}
+                values={editForm.customFields}
+                onChange={(customFields) => setEditForm({ ...editForm, customFields })}
+              />
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">

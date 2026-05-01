@@ -13,6 +13,7 @@ import AnnualReturn from "@/models/AnnualReturn";
 import ExcelJS from "exceljs";
 import { CURRENT_FY, FINANCIAL_YEARS } from "@/lib/utils";
 import { REPORT_FILE_PREFIX, isReportType, type ReportType } from "@/lib/reports";
+import { buildInvoiceCoverageSummary, getCoveredInvoiceMonths, getFinancialYearMonths } from "@/lib/invoiceCoverage";
 
 const HEADER_COLOR = "FF2D47E2";
 const INR_NUM_FMT = "\"INR\" #,##0.00";
@@ -114,12 +115,14 @@ function txCatQty(tx: Record<string, unknown>, i: number): number {
   return 0;
 }
 
-function inclusiveDaySpan(fromDate: string | Date, toDate: string | Date): number {
-  const from = new Date(fromDate);
-  const to = new Date(toDate);
-  const utcFrom = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
-  const utcTo = Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
-  return Math.max(1, Math.round((utcTo - utcFrom) / 86400000) + 1);
+function getClientLegalName(client: Record<string, unknown>): string {
+  const directLegalName = typeof client.legalName === "string" ? client.legalName.trim() : "";
+  if (directLegalName) return directLegalName;
+
+  const customFields = client.customFields;
+  if (!customFields || typeof customFields !== "object" || Array.isArray(customFields)) return "";
+
+  return String((customFields as Record<string, unknown>).legalName || "");
 }
 
 export async function GET(req: NextRequest) {
@@ -154,6 +157,8 @@ export async function GET(req: NextRequest) {
     ws.columns = [
       { header: "Client ID",       key: "clientId",      width: 14 },
       { header: "Company Name",    key: "companyName",   width: 32 },
+      { header: "Legal Name",      key: "legalName",     width: 34 },
+      { header: "Registration No.", key: "registrationNumber", width: 24 },
       { header: "Category",        key: "category",      width: 14 },
       { header: "FY",              key: "fy",            width: 10 },
       { header: "Target Recycling CAT-I",   key: "tcat1Recycling",   width: 20 },
@@ -225,7 +230,12 @@ export async function GET(req: NextRequest) {
       const remaining     = totalTarget - totalAchieved;
 
       const row = ws.addRow({
-        clientId: client.clientId, companyName: client.companyName, category: client.category, fy,
+        clientId: client.clientId,
+        companyName: client.companyName,
+        legalName: getClientLegalName(client as Record<string, unknown>),
+        registrationNumber: client.registrationNumber || "",
+        category: client.category,
+        fy,
         tcat1Recycling: tcatRecycling[0], tcat2Recycling: tcatRecycling[1], tcat3Recycling: tcatRecycling[2], tcat4Recycling: tcatRecycling[3],
         tcat1Eol: tcatEol[0], tcat2Eol: tcatEol[1], tcat3Eol: tcatEol[2], tcat4Eol: tcatEol[3],
         totalTarget,
@@ -259,6 +269,8 @@ export async function GET(req: NextRequest) {
     ws.columns = [
       { header: "Client ID",      key: "clientId",     width: 14 },
       { header: "Company Name",   key: "companyName",  width: 32 },
+      { header: "Legal Name",     key: "legalName",    width: 34 },
+      { header: "Registration No.", key: "registrationNumber", width: 24 },
       { header: "FY",             key: "fy",           width: 10 },
       { header: "Credits Recycling CAT-I",   key: "ccat1Recycling",   width: 21 },
       { header: "Credits Recycling CAT-II",  key: "ccat2Recycling",   width: 21 },
@@ -328,7 +340,11 @@ export async function GET(req: NextRequest) {
       const remaining    = totalCredits - totalUsed;
 
       const row = ws.addRow({
-        clientId: client.clientId, companyName: client.companyName, fy,
+        clientId: client.clientId,
+        companyName: client.companyName,
+        legalName: getClientLegalName(client as Record<string, unknown>),
+        registrationNumber: client.registrationNumber || "",
+        fy,
         ccat1Recycling: ccatRecycling[0], ccat2Recycling: ccatRecycling[1], ccat3Recycling: ccatRecycling[2], ccat4Recycling: ccatRecycling[3],
         ccat1Eol: ccatEol[0], ccat2Eol: ccatEol[1], ccat3Eol: ccatEol[2], ccat4Eol: ccatEol[3],
         totalCredits,
@@ -481,29 +497,96 @@ export async function GET(req: NextRequest) {
 
   // INVOICES
   } else if (type === "invoices") {
-    const ws = wb.addWorksheet("Invoice Tracking");
-    ws.columns = [
-      { header: "Company Name",   key: "companyName",   width: 32 },
-      { header: "Client ID",      key: "clientId",      width: 14 },
-      { header: "Financial Year", key: "financialYear", width: 14 },
-      { header: "Invoice Type",   key: "invoiceType",   width: 18 },
-      { header: "Received Via",   key: "receivedVia",   width: 16 },
-      { header: "From Date",      key: "fromDate",      width: 14 },
-      { header: "To Date",        key: "toDate",        width: 14 },
-      { header: "Duration (days)",key: "days",          width: 16 },
-      { header: "Added On",       key: "createdAt",     width: 14 },
-    ];
-    applyHeaderStyle(ws.getRow(1));
-
     const invoices = await Invoice.find({ financialYear: fy }).sort({ fromDate: 1 }).lean() as Record<string,unknown>[];
     const allClients = await Client.find().lean();
     const nameMap: Record<string, string> = {};
     allClients.forEach((c) => { nameMap[c.clientId] = c.companyName; });
+    const monthLabelMap = new Map(getFinancialYearMonths(fy).map((month) => [month.key, month.label]));
+
+    const coveredMonthLabels = (invoice: Record<string, unknown>) => {
+      const labels = getCoveredInvoiceMonths(invoice.fromDate as string, invoice.toDate as string, fy)
+        .map((key) => monthLabelMap.get(key))
+        .filter(Boolean);
+      return labels.length > 0 ? labels.join(", ") : "";
+    };
+
+    const invoicesByClient = new Map<string, Record<string, unknown>[]>();
+    invoices.forEach((invoice) => {
+      const clientId = String(invoice.clientId || "");
+      if (!clientId) return;
+      const existing = invoicesByClient.get(clientId) || [];
+      existing.push(invoice);
+      invoicesByClient.set(clientId, existing);
+    });
+
+    const summaryWs = wb.addWorksheet("Invoice Coverage");
+    summaryWs.columns = [
+      { header: "Company Name",          key: "companyName",        width: 32 },
+      { header: "Client ID",             key: "clientId",           width: 14 },
+      { header: "Financial Year",        key: "financialYear",      width: 14 },
+      { header: "Sale Months Done",      key: "saleDoneCount",      width: 17 },
+      { header: "Sale Months Left",      key: "saleLeftCount",      width: 17 },
+      { header: "Sale Done Months",      key: "saleDoneMonths",     width: 34 },
+      { header: "Sale Left Months",      key: "saleLeftMonths",     width: 42 },
+      { header: "Purchase Months Done",  key: "purchaseDoneCount",  width: 21 },
+      { header: "Purchase Months Left",  key: "purchaseLeftCount",  width: 21 },
+      { header: "Purchase Done Months",  key: "purchaseDoneMonths", width: 34 },
+      { header: "Purchase Left Months",  key: "purchaseLeftMonths", width: 42 },
+      { header: "Entry Count",           key: "entryCount",         width: 12 },
+      { header: "Overall Status",        key: "status",             width: 18 },
+    ];
+    applyHeaderStyle(summaryWs.getRow(1));
+
+    let summaryRowIdx = 0;
+    for (const [clientId, clientInvoices] of Array.from(invoicesByClient.entries()).sort((a, b) => (
+      (nameMap[a[0]] || a[0]).localeCompare(nameMap[b[0]] || b[0])
+    ))) {
+      const coverage = buildInvoiceCoverageSummary(clientInvoices, fy);
+      const complete = coverage.sale.leftCount === 0 && coverage.purchase.leftCount === 0;
+      const row = summaryWs.addRow({
+        companyName: nameMap[clientId] || clientId,
+        clientId,
+        financialYear: fy,
+        saleDoneCount: coverage.sale.doneCount,
+        saleLeftCount: coverage.sale.leftCount,
+        saleDoneMonths: coverage.sale.doneText === "-" ? "" : coverage.sale.doneText,
+        saleLeftMonths: coverage.sale.leftText === "-" ? "" : coverage.sale.leftText,
+        purchaseDoneCount: coverage.purchase.doneCount,
+        purchaseLeftCount: coverage.purchase.leftCount,
+        purchaseDoneMonths: coverage.purchase.doneText === "-" ? "" : coverage.purchase.doneText,
+        purchaseLeftMonths: coverage.purchase.leftText === "-" ? "" : coverage.purchase.leftText,
+        entryCount: clientInvoices.length,
+        status: complete ? "Complete" : "Pending",
+      });
+      applyDataStyle(row, summaryRowIdx++);
+      ["saleDoneCount", "saleLeftCount", "purchaseDoneCount", "purchaseLeftCount", "entryCount"].forEach((key) => {
+        row.getCell(key).alignment = { horizontal: "center", vertical: "middle" };
+      });
+      row.getCell("status").font = {
+        bold: true,
+        color: { argb: complete ? "FF16A34A" : "FFEA580C" },
+      };
+    }
+
+    const entriesWs = wb.addWorksheet("Invoice Entries");
+    entriesWs.columns = [
+      { header: "Company Name",          key: "companyName",   width: 32 },
+      { header: "Client ID",             key: "clientId",      width: 14 },
+      { header: "Financial Year",        key: "financialYear", width: 14 },
+      { header: "Invoice Type",          key: "invoiceType",   width: 18 },
+      { header: "Received Via",          key: "receivedVia",   width: 16 },
+      { header: "From Date",             key: "fromDate",      width: 14 },
+      { header: "To Date",               key: "toDate",        width: 14 },
+      { header: "Covered Months Count",  key: "months",        width: 22 },
+      { header: "Covered Months",        key: "coveredMonths", width: 34 },
+      { header: "Added On",              key: "createdAt",     width: 14 },
+    ];
+    applyHeaderStyle(entriesWs.getRow(1));
 
     let rowIdx = 0;
     for (const inv of invoices) {
-      const days = inclusiveDaySpan(inv.fromDate as string, inv.toDate as string);
-      const row = ws.addRow({
+      const coveredMonths = coveredMonthLabels(inv);
+      const row = entriesWs.addRow({
         companyName:   nameMap[inv.clientId as string] || inv.clientId,
         clientId:      inv.clientId,
         financialYear: inv.financialYear,
@@ -511,33 +594,115 @@ export async function GET(req: NextRequest) {
         receivedVia:   inv.receivedVia === "hardcopy" ? "Hardcopy" : inv.receivedVia === "mail" ? "Mail" : inv.receivedVia === "whatsapp" ? "WhatsApp" : "",
         fromDate:      new Date(inv.fromDate as string).toLocaleDateString("en-IN"),
         toDate:        new Date(inv.toDate as string).toLocaleDateString("en-IN"),
-        days,
+        months:        coveredMonths ? coveredMonths.split(", ").length : 0,
+        coveredMonths,
         createdAt:     new Date(inv.createdAt as string).toLocaleDateString("en-IN"),
       });
       applyDataStyle(row, rowIdx++);
-      row.getCell("days").alignment = { horizontal: "center", vertical: "middle" };
+      row.getCell("months").alignment = { horizontal: "center", vertical: "middle" };
     }
 
   // UPLOADS
   } else if (type === "uploads") {
-    const ws = wb.addWorksheet("Upload Records");
-    ws.columns = [
-      { header: "Company Name",   key: "companyName",   width: 32 },
-      { header: "Client ID",      key: "clientId",      width: 14 },
-      { header: "Financial Year", key: "financialYear", width: 14 },
-      { header: "CAT-I",   key: "cat1",  width: 10 },
-      { header: "CAT-II",  key: "cat2",  width: 10 },
-      { header: "CAT-III", key: "cat3",  width: 11 },
-      { header: "CAT-IV",  key: "cat4",  width: 10 },
-      { header: "Total",   key: "total", width: 10 },
-      { header: "Added On",key: "createdAt", width: 14 },
-    ];
-    applyHeaderStyle(ws.getRow(1));
-
     const uploads = await UploadRecord.find({ financialYear: fy }).sort({ createdAt: -1 }).lean() as Record<string,unknown>[];
     const allClients = await Client.find().lean();
     const nameMap: Record<string, string> = {};
     allClients.forEach((c) => { nameMap[c.clientId] = c.companyName; });
+
+    const grouped = new Map<string, Record<string, unknown>[]>();
+    uploads.forEach((upload) => {
+      const clientId = String(upload.clientId || "");
+      if (!clientId) return;
+      const existing = grouped.get(clientId) || [];
+      existing.push(upload);
+      grouped.set(clientId, existing);
+    });
+
+    const summaryWs = wb.addWorksheet("Upload Summary");
+    summaryWs.columns = [
+      { header: "Company Name",      key: "companyName",      width: 32 },
+      { header: "Client ID",         key: "clientId",         width: 14 },
+      { header: "Financial Year",    key: "financialYear",    width: 14 },
+      { header: "Sale CAT-I",        key: "saleCat1",         width: 12 },
+      { header: "Sale CAT-II",       key: "saleCat2",         width: 12 },
+      { header: "Sale CAT-III",      key: "saleCat3",         width: 13 },
+      { header: "Sale CAT-IV",       key: "saleCat4",         width: 12 },
+      { header: "Sale Total Qty",    key: "saleTotal",        width: 15 },
+      { header: "Sale Invoices",     key: "saleInvoices",     width: 15 },
+      { header: "Purchase CAT-I",    key: "purchaseCat1",     width: 16 },
+      { header: "Purchase CAT-II",   key: "purchaseCat2",     width: 16 },
+      { header: "Purchase CAT-III",  key: "purchaseCat3",     width: 17 },
+      { header: "Purchase CAT-IV",   key: "purchaseCat4",     width: 16 },
+      { header: "Purchase Total Qty",key: "purchaseTotal",    width: 19 },
+      { header: "Purchase Invoices", key: "purchaseInvoices", width: 18 },
+      { header: "Grand Total Qty",   key: "grandTotal",       width: 16 },
+      { header: "Total Invoices",    key: "totalInvoices",    width: 16 },
+      { header: "Entry Count",       key: "entryCount",       width: 12 },
+    ];
+    applyHeaderStyle(summaryWs.getRow(1));
+
+    let summaryRowIdx = 0;
+    for (const [clientId, records] of Array.from(grouped.entries()).sort((a, b) => (
+      (nameMap[a[0]] || a[0]).localeCompare(nameMap[b[0]] || b[0])
+    ))) {
+      const sale = { cat1: 0, cat2: 0, cat3: 0, cat4: 0, invoices: 0 };
+      const purchase = { cat1: 0, cat2: 0, cat3: 0, cat4: 0, invoices: 0 };
+      records.forEach((record) => {
+        const bucket = record.uploadType === "purchase" ? purchase : sale;
+        bucket.cat1 += Number(record.cat1) || 0;
+        bucket.cat2 += Number(record.cat2) || 0;
+        bucket.cat3 += Number(record.cat3) || 0;
+        bucket.cat4 += Number(record.cat4) || 0;
+        bucket.invoices += Number(record.invoiceCount) || 0;
+      });
+      const saleTotal = sale.cat1 + sale.cat2 + sale.cat3 + sale.cat4;
+      const purchaseTotal = purchase.cat1 + purchase.cat2 + purchase.cat3 + purchase.cat4;
+      const row = summaryWs.addRow({
+        companyName: nameMap[clientId] || clientId,
+        clientId,
+        financialYear: fy,
+        saleCat1: sale.cat1,
+        saleCat2: sale.cat2,
+        saleCat3: sale.cat3,
+        saleCat4: sale.cat4,
+        saleTotal,
+        saleInvoices: sale.invoices,
+        purchaseCat1: purchase.cat1,
+        purchaseCat2: purchase.cat2,
+        purchaseCat3: purchase.cat3,
+        purchaseCat4: purchase.cat4,
+        purchaseTotal,
+        purchaseInvoices: purchase.invoices,
+        grandTotal: saleTotal + purchaseTotal,
+        totalInvoices: sale.invoices + purchase.invoices,
+        entryCount: records.length,
+      });
+      applyDataStyle(row, summaryRowIdx++);
+      [
+        "saleCat1","saleCat2","saleCat3","saleCat4","saleTotal","saleInvoices",
+        "purchaseCat1","purchaseCat2","purchaseCat3","purchaseCat4","purchaseTotal","purchaseInvoices",
+        "grandTotal","totalInvoices","entryCount",
+      ].forEach((key) => {
+        row.getCell(key).alignment = { horizontal: "right", vertical: "middle" };
+        row.getCell(key).numFmt = "#,##0";
+      });
+    }
+
+    const ws = wb.addWorksheet("Upload Entries");
+    ws.columns = [
+      { header: "Company Name",   key: "companyName",   width: 32 },
+      { header: "Client ID",      key: "clientId",      width: 14 },
+      { header: "Financial Year", key: "financialYear", width: 14 },
+      { header: "Upload Type",    key: "uploadType",    width: 14 },
+      { header: "CAT-I",          key: "cat1",          width: 10 },
+      { header: "CAT-II",         key: "cat2",          width: 10 },
+      { header: "CAT-III",        key: "cat3",          width: 11 },
+      { header: "CAT-IV",         key: "cat4",          width: 10 },
+      { header: "Total Qty",      key: "total",         width: 12 },
+      { header: "Invoices",       key: "invoiceCount",  width: 12 },
+      { header: "Added On",       key: "createdAt",     width: 14 },
+    ];
+    applyHeaderStyle(ws.getRow(1));
 
     let rowIdx = 0;
     for (const upl of uploads) {
@@ -546,11 +711,13 @@ export async function GET(req: NextRequest) {
       const row = ws.addRow({
         companyName: nameMap[upl.clientId as string] || upl.clientId,
         clientId: upl.clientId, financialYear: upl.financialYear,
+        uploadType: upl.uploadType === "purchase" ? "Purchase" : "Sale",
         cat1: c1, cat2: c2, cat3: c3, cat4: c4, total: c1+c2+c3+c4,
+        invoiceCount: Number(upl.invoiceCount) || 0,
         createdAt: new Date(upl.createdAt as string).toLocaleDateString("en-IN"),
       });
       applyDataStyle(row, rowIdx++);
-      ["cat1","cat2","cat3","cat4","total"].forEach((k) => {
+      ["cat1","cat2","cat3","cat4","total","invoiceCount"].forEach((k) => {
         row.getCell(k).alignment = { horizontal: "right", vertical: "middle" };
         row.getCell(k).numFmt = "#,##0";
       });

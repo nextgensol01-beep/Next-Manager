@@ -7,12 +7,16 @@ interface Cached {
   promise: Promise<typeof mongoose> | null;
 }
 
-declare global {
-  var mongoose: Cached | undefined;
-}
+const globalForMongoose = globalThis as typeof globalThis & {
+  mongooseCache?: Cached;
+  mongoose?: Cached;
+};
 
-const cached: Cached = global.mongoose || { conn: null, promise: null };
-if (!global.mongoose) global.mongoose = cached;
+const cached: Cached = globalForMongoose.mongooseCache ||
+  globalForMongoose.mongoose ||
+  { conn: null, promise: null };
+
+globalForMongoose.mongooseCache = cached;
 
 export async function connectDB() {
   if (cached.conn) return cached.conn;

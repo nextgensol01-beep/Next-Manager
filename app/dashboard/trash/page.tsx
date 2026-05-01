@@ -26,12 +26,14 @@ const TYPE_API_MAP: Record<string, string[]> = {
   annualReturn:      ["/api/annual-return"],
   uploadRecord:      ["/api/upload-records"],
   invoice:           ["/api/invoices"],
+  document:          ["/api/documents"],
 };
 
 const TYPE_LABELS: Record<string, string> = {
   client: "Client", contact: "Contact", creditTransaction: "Transaction",
   financialYear: "FY Record", billing: "Billing", payment: "Payment",
   annualReturn: "Annual Return", uploadRecord: "Upload Record", invoice: "Invoice",
+  document: "Document",
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -44,6 +46,7 @@ const TYPE_COLORS: Record<string, string> = {
   annualReturn:      "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
   uploadRecord:      "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
   invoice:           "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  document:          "bg-sky-500/10 text-sky-600 dark:text-sky-400",
 };
 
 function timeAgo(iso: string) {

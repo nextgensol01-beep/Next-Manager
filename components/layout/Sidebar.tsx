@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, Users, UserCircle, Calendar, ArrowLeftRight,
   Receipt, BarChart2, FileText, ClipboardCheck, Trash2, Mail, X, Settings2,
-  Upload, ChevronDown,
+  Upload, ChevronDown, ShieldCheck,
 } from "lucide-react";
 import { cachedFetch } from "@/lib/cache";
 import {
@@ -47,6 +47,7 @@ const navItems = [
   { href: "/dashboard/reports",             label: "Reports",             icon: BarChart2 },
   { href: "/dashboard/quotation",           label: "Quotation Generator", icon: FileText },
   { href: "/dashboard/settings",            label: "Settings",            icon: Settings2 },
+  { href: "/dashboard/sessions",            label: "Active Sessions",      icon: ShieldCheck },
 ];
 
 const portalOpsItems = [
@@ -601,7 +602,8 @@ export default function Sidebar({ open, onClose }: Props) {
       const navRect2 = nav.getBoundingClientRect();
       const pRect    = parent.getBoundingClientRect();
       setPillRect({
-        top: pRect.top - navRect2.top, left: pRect.left - navRect2.left,
+        top: pRect.top - navRect2.top + nav.scrollTop,
+        left: pRect.left - navRect2.left,
         width: pRect.width, height: pRect.height,
       });
       return;
@@ -609,7 +611,7 @@ export default function Sidebar({ open, onClose }: Props) {
 
     const navRect = nav.getBoundingClientRect();
     setPillRect({
-      top:    elRect.top    - navRect.top,
+      top:    elRect.top    - navRect.top + nav.scrollTop,
       left:   elRect.left   - navRect.left,
       width:  elRect.width,
       height: elRect.height,
@@ -672,11 +674,11 @@ export default function Sidebar({ open, onClose }: Props) {
 
   const content = (
     <aside
-      className="sidebar-panel w-[256px] flex-shrink-0 flex flex-col h-full"
+      className="sidebar-panel w-[256px] flex-shrink-0 flex flex-col h-full min-h-0"
       style={{ overflow: "hidden" }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-4 border-b sidebar-divider">
+      <div className="flex items-center justify-between px-4 py-4 border-b sidebar-divider flex-shrink-0">
         <div className="flex items-center gap-3">
           <div
             className="w-8 h-8 rounded-[9px] flex items-center justify-center flex-shrink-0"
@@ -700,7 +702,11 @@ export default function Sidebar({ open, onClose }: Props) {
       </div>
 
       {/* Nav — position:relative so SidebarPill can be absolutely positioned */}
-      <nav ref={navRef} className="flex-1 p-3 space-y-0.5 overflow-hidden" style={{ position: "relative" }}>
+      <nav
+        ref={navRef}
+        className="sidebar-nav-scroll flex-1 min-h-0 p-3 space-y-0.5 overflow-y-auto overflow-x-hidden"
+        style={{ position: "relative" }}
+      >
 
         {/* The sliding glass pill — sits at z-index 0, links at z-index 1 */}
         <SidebarPill
@@ -853,7 +859,7 @@ export default function Sidebar({ open, onClose }: Props) {
         </NavLink>
       </nav>
 
-      <div className="border-t sidebar-divider p-4">
+      <div className="border-t sidebar-divider p-4 flex-shrink-0">
         <p className="sidebar-text-faint text-xs text-center">v2.0.0 · Internal Use Only</p>
       </div>
     </aside>

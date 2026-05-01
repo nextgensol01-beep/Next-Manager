@@ -20,6 +20,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import type { ClientCustomFieldValues } from "@/lib/clientCustomFields";
 
 export interface Person {
   _id: string;
@@ -43,9 +44,10 @@ export interface Contact {
 }
 
 export interface Client {
-  _id: string; clientId: string; companyName: string; category: string;
+  _id: string; clientId: string; companyName: string; legalName?: string; category: string;
   state: string; address?: string; gstNumber?: string; registrationNumber?: string;
   cpcbLoginId?: string; cpcbPassword?: string; otpMobileNumber?: string;
+  customFields?: ClientCustomFieldValues;
   createdAt: string; updatedAt?: string; contacts?: Contact[];
 }
 
@@ -100,10 +102,12 @@ export interface UploadRecord {
   _id: string;
   clientId: string;
   financialYear: string;
+  uploadType?: "sale" | "purchase";
   cat1?: number;
   cat2?: number;
   cat3?: number;
   cat4?: number;
+  invoiceCount?: number;
   createdAt: string;
 }
 

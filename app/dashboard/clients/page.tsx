@@ -11,6 +11,8 @@ import EmptyState from "@/components/ui/EmptyState";
 import { STATES, CATEGORIES, formatDate } from "@/lib/utils";
 import { Plus, Search, Pencil, Trash2, Eye, UserPlus, X, Users, Wand2, RefreshCw, ChevronDown, MapPin, Calendar, Phone, Mail } from "lucide-react";
 import { useCache, invalidate } from "@/lib/useCache";
+import { CustomFieldInputs } from "@/components/clients/CustomFieldInputs";
+import type { ClientCustomFieldDefinition, ClientCustomFieldValues } from "@/lib/clientCustomFields";
 
 const DEFAULT_CLIENT_ID_PREVIEW = "Likely ID: --";
 
@@ -38,10 +40,11 @@ interface LinkedPerson extends Person {
 }
 
 interface Client {
-  _id: string; clientId: string; companyName: string; category: string;
+  _id: string; clientId: string; companyName: string; legalName?: string; category: string;
   state: string;
   address?: string; gstNumber?: string; registrationNumber?: string;
   cpcbLoginId?: string; cpcbPassword?: string; otpMobileNumber?: string;
+  customFields?: ClientCustomFieldValues;
   createdAt: string; contacts?: LinkedPerson[];
 }
 
@@ -115,9 +118,10 @@ const emptyPersonEntry = (): PersonEntry => ({
 // ── Client form ───────────────────────────────────────────────────────────────
 
 const emptyForm = {
-  companyName: "", category: "PWP",
+  companyName: "", legalName: "", category: "PWP",
   state: "", address: "", gstNumber: "", registrationNumber: "",
   cpcbLoginId: "", cpcbPassword: "", otpMobileNumber: "",
+  customFields: {} as ClientCustomFieldValues,
 };
 
 // ── PersonSearch: autocomplete for existing persons ───────────────────────────
@@ -493,9 +497,11 @@ export default function ClientsPage() {
     ...(stateFilter    !== "all" ? { state: stateFilter }       : {}),
   })}`;
   const { data: clients, loading, refetch: refetchClients } = useCache<Client[]>(clientsUrl, { initialData: [] });
+  const { data: customFieldDefinitions } = useCache<ClientCustomFieldDefinition[]>("/api/client-custom-fields", { initialData: [] });
+  const visibleCustomFieldDefinitions = customFieldDefinitions.filter((field) => field.key !== "legalName");
 
   const openAdd = () => {
-    setEditClient(null); setForm(emptyForm);
+    setEditClient(null); setForm({ ...emptyForm, customFields: {} });
     setPersons([emptyPersonEntry()]); setRemovedPersonIds([]);
     setClientIdPreview(DEFAULT_CLIENT_ID_PREVIEW);
     setActiveTab("basic"); setModalOpen(true); generateId("PWP");
@@ -504,10 +510,11 @@ export default function ClientsPage() {
   const openEdit = (c: Client) => {
     setEditClient(c);
     setForm({
-      companyName: c.companyName, category: c.category,
+      companyName: c.companyName, legalName: c.legalName || String(c.customFields?.legalName || ""), category: c.category,
       state: c.state, address: c.address || "",
       gstNumber: c.gstNumber || "", registrationNumber: c.registrationNumber || "",
       cpcbLoginId: c.cpcbLoginId || "", cpcbPassword: c.cpcbPassword || "", otpMobileNumber: c.otpMobileNumber || "",
+      customFields: c.customFields || {},
     });
     setClientIdPreview(c.clientId);
     const existingPersons: PersonEntry[] = (c.contacts || []).map((ct, i) => createPersonEntry({
@@ -802,6 +809,17 @@ export default function ClientsPage() {
                 <label className="label">Company Name *</label>
                 <input className="input-field" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} required />
               </div>
+
+              <div>
+                <label className="label">Legal Name</label>
+                <input className="input-field" value={form.legalName} onChange={(e) => setForm({ ...form, legalName: e.target.value })} />
+              </div>
+
+              <CustomFieldInputs
+                fields={visibleCustomFieldDefinitions}
+                values={form.customFields}
+                onChange={(customFields) => setForm({ ...form, customFields })}
+              />
 
               {/* ── Contacts section ── */}
               <div>

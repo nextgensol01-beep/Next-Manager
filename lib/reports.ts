@@ -30,8 +30,8 @@ export const REPORT_DEFINITIONS = [
   {
     id: "invoices",
     label: "Invoice Tracking",
-    description: "Invoice period records with company, FY, from and to dates, and duration",
-    summary: "Invoice period tracking per company",
+    description: "Sale and purchase invoice month coverage by client, with done and left months for the selected FY",
+    summary: "Sale and purchase month coverage, pending months, and entry details",
     filePrefix: "invoice-tracking",
   },
   {
@@ -71,6 +71,7 @@ export type CustomExportClientCategory = (typeof CUSTOM_EXPORT_CLIENT_CATEGORIES
 
 export const CUSTOM_CLIENT_EXPORT_FIELDS = [
   { id: "companyName", label: "Company Name", description: "Registered client/company name", group: "Client", width: 32 },
+  { id: "legalName", label: "Legal Name", description: "Legal entity name saved on the client", group: "Client", width: 34 },
   { id: "state", label: "State", description: "Primary operating state", group: "Client", width: 18 },
   { id: "gstNumber", label: "GST Number", description: "GST registration number", group: "Client", width: 22 },
   { id: "clientId", label: "Client ID", description: "Internal unique client ID", group: "Client", width: 14 },
@@ -136,12 +137,33 @@ export const CUSTOM_CLIENT_EXPORT_FIELDS = [
   { id: "fyLatestInvoiceFromDate", label: "FY Latest Invoice From", description: "Latest invoice from-date in the selected FY", group: "Invoices & Uploads", width: 20, fyScoped: true },
   { id: "fyLatestInvoiceToDate", label: "FY Latest Invoice To", description: "Latest invoice to-date in the selected FY", group: "Invoices & Uploads", width: 18, fyScoped: true },
   { id: "fyLatestInvoiceCreatedAt", label: "FY Latest Invoice Added", description: "Latest invoice creation date in the selected FY", group: "Invoices & Uploads", width: 20, fyScoped: true },
+  { id: "fySaleInvoiceMonthsDone", label: "FY Sale Invoice Months Done", description: "Number of Sale invoice months covered in the selected FY", group: "Invoices & Uploads", width: 24, fyScoped: true },
+  { id: "fySaleInvoiceMonthsLeft", label: "FY Sale Invoice Months Left", description: "Number of Sale invoice months still pending in the selected FY", group: "Invoices & Uploads", width: 23, fyScoped: true },
+  { id: "fySaleInvoiceDoneMonths", label: "FY Sale Invoice Done Months", description: "Sale invoice months covered in the selected FY", group: "Invoices & Uploads", width: 32, fyScoped: true },
+  { id: "fySaleInvoiceLeftMonths", label: "FY Sale Invoice Left Months", description: "Sale invoice months still pending in the selected FY", group: "Invoices & Uploads", width: 38, fyScoped: true },
+  { id: "fyPurchaseInvoiceMonthsDone", label: "FY Purchase Invoice Months Done", description: "Number of Purchase invoice months covered in the selected FY", group: "Invoices & Uploads", width: 28, fyScoped: true },
+  { id: "fyPurchaseInvoiceMonthsLeft", label: "FY Purchase Invoice Months Left", description: "Number of Purchase invoice months still pending in the selected FY", group: "Invoices & Uploads", width: 28, fyScoped: true },
+  { id: "fyPurchaseInvoiceDoneMonths", label: "FY Purchase Invoice Done Months", description: "Purchase invoice months covered in the selected FY", group: "Invoices & Uploads", width: 36, fyScoped: true },
+  { id: "fyPurchaseInvoiceLeftMonths", label: "FY Purchase Invoice Left Months", description: "Purchase invoice months still pending in the selected FY", group: "Invoices & Uploads", width: 42, fyScoped: true },
   { id: "fyUploadRecordCount", label: "FY Upload Record Count", description: "Number of upload records in the selected FY", group: "Invoices & Uploads", width: 18, fyScoped: true },
   { id: "fyUploadedCat1", label: "FY Uploaded CAT-I", description: "Uploaded CAT-I quantity in the selected FY", group: "Invoices & Uploads", width: 17, fyScoped: true },
   { id: "fyUploadedCat2", label: "FY Uploaded CAT-II", description: "Uploaded CAT-II quantity in the selected FY", group: "Invoices & Uploads", width: 17, fyScoped: true },
   { id: "fyUploadedCat3", label: "FY Uploaded CAT-III", description: "Uploaded CAT-III quantity in the selected FY", group: "Invoices & Uploads", width: 18, fyScoped: true },
   { id: "fyUploadedCat4", label: "FY Uploaded CAT-IV", description: "Uploaded CAT-IV quantity in the selected FY", group: "Invoices & Uploads", width: 17, fyScoped: true },
   { id: "fyUploadedTotal", label: "FY Uploaded Total", description: "Total uploaded quantity in the selected FY", group: "Invoices & Uploads", width: 17, fyScoped: true },
+  { id: "fySaleUploadedCat1", label: "FY Sale Uploaded CAT-I", description: "Sale uploaded CAT-I quantity in the selected FY", group: "Invoices & Uploads", width: 21, fyScoped: true },
+  { id: "fySaleUploadedCat2", label: "FY Sale Uploaded CAT-II", description: "Sale uploaded CAT-II quantity in the selected FY", group: "Invoices & Uploads", width: 21, fyScoped: true },
+  { id: "fySaleUploadedCat3", label: "FY Sale Uploaded CAT-III", description: "Sale uploaded CAT-III quantity in the selected FY", group: "Invoices & Uploads", width: 22, fyScoped: true },
+  { id: "fySaleUploadedCat4", label: "FY Sale Uploaded CAT-IV", description: "Sale uploaded CAT-IV quantity in the selected FY", group: "Invoices & Uploads", width: 21, fyScoped: true },
+  { id: "fySaleUploadedTotal", label: "FY Sale Uploaded Total", description: "Total Sale uploaded quantity in the selected FY", group: "Invoices & Uploads", width: 22, fyScoped: true },
+  { id: "fySaleUploadedInvoiceCount", label: "FY Sale Uploaded Invoice Count", description: "Number of Sale invoices uploaded in the selected FY", group: "Invoices & Uploads", width: 28, fyScoped: true },
+  { id: "fyPurchaseUploadedCat1", label: "FY Purchase Uploaded CAT-I", description: "Purchase uploaded CAT-I quantity in the selected FY", group: "Invoices & Uploads", width: 25, fyScoped: true },
+  { id: "fyPurchaseUploadedCat2", label: "FY Purchase Uploaded CAT-II", description: "Purchase uploaded CAT-II quantity in the selected FY", group: "Invoices & Uploads", width: 25, fyScoped: true },
+  { id: "fyPurchaseUploadedCat3", label: "FY Purchase Uploaded CAT-III", description: "Purchase uploaded CAT-III quantity in the selected FY", group: "Invoices & Uploads", width: 26, fyScoped: true },
+  { id: "fyPurchaseUploadedCat4", label: "FY Purchase Uploaded CAT-IV", description: "Purchase uploaded CAT-IV quantity in the selected FY", group: "Invoices & Uploads", width: 25, fyScoped: true },
+  { id: "fyPurchaseUploadedTotal", label: "FY Purchase Uploaded Total", description: "Total Purchase uploaded quantity in the selected FY", group: "Invoices & Uploads", width: 26, fyScoped: true },
+  { id: "fyPurchaseUploadedInvoiceCount", label: "FY Purchase Uploaded Invoice Count", description: "Number of Purchase invoices uploaded in the selected FY", group: "Invoices & Uploads", width: 32, fyScoped: true },
+  { id: "fyUploadedTotalInvoiceCount", label: "FY Uploaded Total Invoice Count", description: "Total number of Sale and Purchase invoices uploaded in the selected FY", group: "Invoices & Uploads", width: 29, fyScoped: true },
   { id: "fyLatestUploadDate", label: "FY Latest Upload Date", description: "Latest upload record date in the selected FY", group: "Invoices & Uploads", width: 19, fyScoped: true },
 
   { id: "documentCount", label: "Document Count", description: "Number of linked documents", group: "Documents", width: 15 },
@@ -159,7 +181,7 @@ export const CUSTOM_CLIENT_EXPORT_FIELDS = [
 ] as const satisfies readonly CustomClientExportFieldDefinition[];
 
 export type ReportType = (typeof REPORT_DEFINITIONS)[number]["id"];
-export type CustomClientExportField = (typeof CUSTOM_CLIENT_EXPORT_FIELDS)[number]["id"];
+export type CustomClientExportField = string;
 export type CustomExportSortBy =
   | "companyName"
   | "category"
@@ -280,7 +302,7 @@ export const VALID_REPORT_TYPES = new Set<ReportType>(
   REPORT_DEFINITIONS.map((report) => report.id)
 );
 
-export const VALID_CUSTOM_CLIENT_EXPORT_FIELDS = new Set<CustomClientExportField>(
+export const VALID_CUSTOM_CLIENT_EXPORT_FIELDS = new Set<string>(
   CUSTOM_CLIENT_EXPORT_FIELDS.map((field) => field.id)
 );
 
@@ -289,5 +311,5 @@ export function isReportType(value: string): value is ReportType {
 }
 
 export function isCustomClientExportField(value: string): value is CustomClientExportField {
-  return VALID_CUSTOM_CLIENT_EXPORT_FIELDS.has(value as CustomClientExportField);
+  return VALID_CUSTOM_CLIENT_EXPORT_FIELDS.has(value) || value.startsWith("custom:");
 }
