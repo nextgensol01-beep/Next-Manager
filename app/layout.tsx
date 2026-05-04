@@ -3,7 +3,7 @@ import "./globals.css";
 import Providers from "./providers";
 
 export const metadata: Metadata = {
-  title: "Nextgen Solutions ERP",
+  title: "Nextgen Solutions EPR",
   description: "Internal ERP for Nextgen Solutions - EPR Consultancy",
   icons: {
     icon: [

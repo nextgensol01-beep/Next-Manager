@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import React, { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Leaf, Recycle, X } from "lucide-react";
@@ -29,7 +29,7 @@ export interface FYRecord {
   achievedByType?: UsageEntry[];
 }
 
-// â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Constants -------------------------------------------------------------
 
 export const CAT_IDS = ["1", "2", "3", "4"] as const;
 export const CAT_DISPLAY: Record<string, string> = { "1": "CAT-I", "2": "CAT-II", "3": "CAT-III", "4": "CAT-IV" };
@@ -58,7 +58,7 @@ export function buildEntryValueMap(entries: Array<{ categoryId: string; type: "R
   return map;
 }
 
-// â”€â”€â”€ Table helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Table helpers ---------------------------------------------------------
 
 export const TH = ({ children, right, width, first, last }: {
   children?: React.ReactNode; right?: boolean; width?: string;
@@ -86,7 +86,7 @@ export const TD = ({ children, right, mono, dim }: {
   </td>
 );
 
-// â”€â”€â”€ Portal Tooltip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Portal Tooltip ---------------------------------------------------------
 
 export function RemainingTooltip({ rec, isPWP }: { rec: FYRecord; isPWP: boolean }) {
   const [open, setOpen] = useState(false);
@@ -367,7 +367,7 @@ export function RemainingTooltip({ rec, isPWP }: { rec: FYRecord; isPWP: boolean
   );
 }
 
-// â”€â”€â”€ Target Row Editor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Target Row Editor ------------------------------------------------------
 
 interface TargetRowProps {
   entry: TargetEntry;

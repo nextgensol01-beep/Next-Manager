@@ -9,6 +9,10 @@ function LoginForm() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get("callbackUrl");
+  const safeCallbackUrl = callbackUrl?.startsWith("/") && !callbackUrl.startsWith("//")
+    ? callbackUrl
+    : "/dashboard";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,8 +22,8 @@ function LoginForm() {
   const [hasGoogleProvider, setHasGoogleProvider] = useState(false);
 
   useEffect(() => {
-    if (session) router.push("/dashboard");
-  }, [session, router]);
+    if (session) router.push(safeCallbackUrl);
+  }, [session, router, safeCallbackUrl]);
 
   useEffect(() => {
     let mounted = true;
@@ -43,8 +47,19 @@ function LoginForm() {
 
   useEffect(() => {
     const err = searchParams.get("error");
-    if (err === "AccessDenied") setError("Your Google account is not authorised to access this system.");
-    else if (err) setError("Sign in failed. Please check your credentials.");
+    if (err === "AccessDenied") {
+      setError("Your Google account is waiting for admin approval or has been disabled.");
+    } else if (err === "OAuthSignin" || err === "OAuthCallback" || err === "OAuthCreateAccount") {
+      setError("Google sign in failed. Check your Google OAuth client ID, secret, and redirect URI.");
+    } else if (err === "OAuthAccountNotLinked") {
+      setError("This email already has a local login. Google linking is now enabled for allowed accounts; restart the server and try again.");
+    } else if (err === "Configuration") {
+      setError("Google sign in is not configured correctly. Check the server environment variables.");
+    } else if (err === "CredentialsSignin") {
+      setError("Invalid email or password.");
+    } else if (err) {
+      setError("Sign in failed. Please try again.");
+    }
   }, [searchParams]);
 
   if (status === "loading") {
@@ -60,17 +75,19 @@ function LoginForm() {
     setError("");
     setLoading(true);
     try {
-      const result = await signIn("credentials", {
-        email,
-        password,
-        redirect: false,
+      const response = await fetch("/api/auth/admin-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
       });
-      if (result?.error) {
-        setError("Invalid email or password.");
-      } else {
-        router.push("/dashboard");
-        router.refresh();
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        setError(body?.error || "Invalid email or password.");
+        return;
       }
+
+      router.push(safeCallbackUrl);
+      router.refresh();
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
@@ -119,16 +136,16 @@ function LoginForm() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
-                Email
+                Login ID or Email
               </label>
               <input
-                type="email"
+                type="text"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
                 placeholder="admin@nextgensolutions.com"
                 required
-                autoComplete="email"
+                autoComplete="username"
               />
             </div>
 
@@ -179,7 +196,7 @@ function LoginForm() {
                 <div className="flex-1 h-px bg-white/10" />
               </div>
               <button
-                onClick={() => { setError(""); signIn("google", { callbackUrl: "/dashboard" }); }}
+                onClick={() => { setError(""); signIn("google", { callbackUrl: safeCallbackUrl }); }}
                 className="w-full flex items-center justify-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 font-medium py-2.5 px-4 rounded-xl transition-all text-sm"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24">

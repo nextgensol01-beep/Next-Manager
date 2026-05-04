@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
 import Modal from "@/components/ui/Modal";
@@ -8,7 +8,7 @@ import TableWrapper from "@/components/ui/TableWrapper";
 import EmptyState from "@/components/ui/EmptyState";
 import { PaymentStatusBadge } from "@/components/ui/CategoryBadge";
 import { FINANCIAL_YEARS, formatCurrency, formatDate, PAYMENT_MODES, getPaymentPercentage } from "@/lib/utils";
-import { Plus, Send, FileText, ChevronDown, ChevronUp, Trash2, Search, X } from "lucide-react";
+import { Plus, Send, FileText, ChevronDown, ChevronUp, Trash2, Search, X, Wallet, CheckCircle2, AlertCircle, TrendingUp } from "lucide-react";
 import { useCache, invalidate } from "@/lib/useCache";
 import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearPreference, useFinancialYearState } from "@/app/providers";
@@ -18,6 +18,64 @@ interface Client { clientId: string; companyName: string; category: string; cont
 interface Billing { _id: string; clientId: string; financialYear: string; govtCharges: number; consultancyCharges: number; targetCharges: number; otherCharges: number; totalAmount: number; notes?: string; totalPaid: number; pendingAmount: number; paymentStatus: string; }
 interface Payment { _id: string; clientId: string; financialYear: string; amountPaid: number; paymentType?: "billing" | "advance"; paymentDate: string; paymentMode: string; referenceNumber?: string; notes?: string; }
 interface EmailOption { label: string; email: string; }
+type BillingFilter = "all" | "pending" | "paid" | "partial" | "unpaid" | "advance";
+type CreditType = "RECYCLING" | "EOL";
+interface TargetEntry { categoryId: string; type: CreditType; value: number; }
+interface FinancialYearRecord { targets?: TargetEntry[]; cat1Target?: number; cat2Target?: number; cat3Target?: number; cat4Target?: number; targetCat1?: number; targetCat2?: number; targetCat3?: number; targetCat4?: number; }
+interface CreditTransaction { creditType?: "Recycling" | "EOL"; rateCat1?: number; rateCat2?: number; rateCat3?: number; rateCat4?: number; rate?: number; date?: string; }
+interface TargetBillingRow {
+  key: string;
+  categoryId: string;
+  type: CreditType;
+  quantity: string;
+  rate: string;
+  gstPercent: string;
+  include: boolean;
+  rateSource: "transaction" | "manual";
+}
+
+const PIBO_CATEGORIES = new Set(["Producer", "Importer", "Brand Owner"]);
+const CATEGORY_LABELS: Record<string, string> = {
+  "1": "Category I",
+  "2": "Category II",
+  "3": "Category III",
+  "4": "Category IV",
+};
+
+function normalizeCreditType(value: unknown): CreditType {
+  return String(value).toUpperCase() === "EOL" ? "EOL" : "RECYCLING";
+}
+
+function targetEntriesFromRecord(record?: FinancialYearRecord | null): TargetEntry[] {
+  if (!record) return [];
+  if (Array.isArray(record.targets) && record.targets.length > 0) {
+    return record.targets
+      .map((target) => ({
+        categoryId: String(target.categoryId),
+        type: normalizeCreditType(target.type),
+        value: Number(target.value || 0),
+      }))
+      .filter((target) => target.value > 0);
+  }
+
+  return [1, 2, 3, 4]
+    .map((categoryId) => ({
+      categoryId: String(categoryId),
+      type: "RECYCLING" as CreditType,
+      value: Number(
+        record[`cat${categoryId}Target` as keyof FinancialYearRecord] ??
+        record[`targetCat${categoryId}` as keyof FinancialYearRecord] ??
+        0
+      ),
+    }))
+    .filter((target) => target.value > 0);
+}
+
+function rateForTarget(transactions: CreditTransaction[], target: TargetEntry) {
+  const rateField = `rateCat${target.categoryId}` as keyof CreditTransaction;
+  const match = transactions.find((tx) => normalizeCreditType(tx.creditType) === target.type && Number(tx[rateField] || tx.rate || 0) > 0);
+  return Number(match?.[rateField] || match?.rate || 0);
+}
 
 function restoreSuggestion(email: string, currentSuggestions: EmailOption[], catalog: EmailOption[]) {
   if (currentSuggestions.some((entry) => entry.email === email)) return currentSuggestions;
@@ -63,13 +121,14 @@ function buildLinkedContactEmailOptions(contacts: ClientContact[]) {
 }
 
 export default function BillingPage() {
-  const [fy, setFy] = useFinancialYearState();
+  const [fy, setFy, financialYearLoaded] = useFinancialYearState();
   const { effectiveFinancialYear } = useFinancialYearPreference();
   const [billingModal, setBillingModal] = useState(false);
   const [paymentModal, setPaymentModal] = useState(false);
   const [emailModal, setEmailModal] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<BillingFilter>("all");
   const [saving, setSaving] = useState(false);
 
   const [bForm, setBForm] = useState({ clientId: "", financialYear: effectiveFinancialYear, govtCharges: "0", consultancyCharges: "0", targetCharges: "0", otherCharges: "0", notes: "" });
@@ -90,23 +149,72 @@ export default function BillingPage() {
   const [customEmail, setCustomEmail] = useState("");
   const [activeBilling, setActiveBilling] = useState<Billing | null>(null);
   const [reminderPreviewHtml, setReminderPreviewHtml] = useState<string | null>(null);
+  const [targetRows, setTargetRows] = useState<TargetBillingRow[]>([]);
+  const [targetSuggestionsLoading, setTargetSuggestionsLoading] = useState(false);
+  const [targetSuggestionsError, setTargetSuggestionsError] = useState("");
+  const [useTransactionRates, setUseTransactionRates] = useState(true);
 
-  const { data: billings, loading: bLoading, refetch: refetchBillings } = useCache<Billing[]>(`/api/billing?fy=${fy}`, { initialData: [] });
-  const { data: payments, refetch: refetchPayments } = useCache<Payment[]>(`/api/payments?fy=${fy}`, { initialData: [] });
+  const { data: billings, loading: bLoading, refetch: refetchBillings } = useCache<Billing[]>(`/api/billing?fy=${fy}`, { enabled: financialYearLoaded, initialData: [] });
+  const { data: payments, refetch: refetchPayments } = useCache<Payment[]>(`/api/payments?fy=${fy}`, { enabled: financialYearLoaded, initialData: [] });
   const { data: clients } = useCache<Client[]>("/api/clients", { initialData: [] });
-  const loading = bLoading;
+  const loading = !financialYearLoaded || bLoading;
 
   const clientName = useCallback((id: string) => clients.find((c) => c.clientId === id)?.companyName || id, [clients]);
   const clientPayments = (id: string) => payments.filter((p) => p.clientId === id && p.paymentType !== "advance");
 
+  const advanceByClient = useMemo(() => {
+    const map = new Map<string, number>();
+    payments
+      .filter((payment) => payment.paymentType === "advance")
+      .forEach((payment) => {
+        map.set(payment.clientId, (map.get(payment.clientId) || 0) + Number(payment.amountPaid || 0));
+      });
+    return map;
+  }, [payments]);
+
+  const billingSummary = useMemo(() => {
+    const totalBilled = billings.reduce((sum, billing) => sum + Number(billing.totalAmount || 0), 0);
+    const totalCollected = billings.reduce((sum, billing) => sum + Number(billing.totalPaid || 0), 0);
+    const totalPending = billings.reduce((sum, billing) => sum + Number(billing.pendingAmount || 0), 0);
+    const totalAdvance = payments
+      .filter((payment) => payment.paymentType === "advance")
+      .reduce((sum, payment) => sum + Number(payment.amountPaid || 0), 0);
+    const paidCount = billings.filter((billing) => billing.pendingAmount <= 0 || billing.paymentStatus.toLowerCase() === "paid").length;
+    const partialCount = billings.filter((billing) => billing.pendingAmount > 0 && billing.totalPaid > 0).length;
+    const unpaidCount = billings.filter((billing) => billing.pendingAmount > 0 && billing.totalPaid <= 0).length;
+    const collectionPct = totalBilled > 0 ? Math.round((totalCollected / totalBilled) * 100) : 0;
+
+    return {
+      totalBilled,
+      totalCollected,
+      totalPending,
+      totalAdvance,
+      paidCount,
+      partialCount,
+      unpaidCount,
+      pendingCount: partialCount + unpaidCount,
+      collectionPct,
+    };
+  }, [billings, payments]);
+
   const filteredBillings = useMemo(() => {
-    if (!search.trim()) return billings;
     const q = search.toLowerCase();
     return billings.filter((b) => {
       const name = clientName(b.clientId).toLowerCase();
-      return name.includes(q) || b.clientId.toLowerCase().includes(q) || b.paymentStatus.toLowerCase().includes(q);
+      const matchesSearch = !search.trim() ||
+        name.includes(q) ||
+        b.clientId.toLowerCase().includes(q) ||
+        b.paymentStatus.toLowerCase().includes(q);
+      const matchesFilter =
+        statusFilter === "all" ||
+        (statusFilter === "pending" && b.pendingAmount > 0) ||
+        (statusFilter === "paid" && (b.pendingAmount <= 0 || b.paymentStatus.toLowerCase() === "paid")) ||
+        (statusFilter === "partial" && b.pendingAmount > 0 && b.totalPaid > 0) ||
+        (statusFilter === "unpaid" && b.pendingAmount > 0 && b.totalPaid <= 0) ||
+        (statusFilter === "advance" && (advanceByClient.get(b.clientId) || 0) > 0);
+      return matchesSearch && matchesFilter;
     });
-  }, [billings, search, clientName]);
+  }, [advanceByClient, billings, search, statusFilter, clientName]);
 
   const openBillingModal = () => {
     setBForm({
@@ -268,6 +376,70 @@ export default function BillingPage() {
   const bFormTotal = Number(bForm.govtCharges) + Number(bForm.consultancyCharges) + Number(bForm.targetCharges) + Number(bForm.otherCharges);
   const isAdvancePayment = pForm.paymentType === "advance";
   const selectedPaymentClient = clients.find((client) => client.clientId === pForm.clientId);
+  const selectedBillingClient = clients.find((client) => client.clientId === bForm.clientId);
+  const isPiboBillingClient = Boolean(selectedBillingClient && PIBO_CATEGORIES.has(selectedBillingClient.category));
+  const targetRowsTotal = useMemo(() => targetRows.reduce((sum, row) => {
+    if (!row.include) return sum;
+    const taxable = Number(row.quantity || 0) * Number(row.rate || 0);
+    const gstAmount = taxable * (Number(row.gstPercent || 0) / 100);
+    return sum + taxable + gstAmount;
+  }, 0), [targetRows]);
+
+  useEffect(() => {
+    if (!billingModal || !bForm.clientId || !bForm.financialYear || !isPiboBillingClient) {
+      setTargetRows([]);
+      setTargetSuggestionsError("");
+      return;
+    }
+
+    let cancelled = false;
+    const loadTargetSuggestions = async () => {
+      setTargetSuggestionsLoading(true);
+      setTargetSuggestionsError("");
+      try {
+        const [fyResponse, txResponse] = await Promise.all([
+          fetch(`/api/financial-year?clientId=${encodeURIComponent(bForm.clientId)}&fy=${encodeURIComponent(bForm.financialYear)}`, { cache: "no-store" }),
+          fetch(`/api/credit-transactions?toClientId=${encodeURIComponent(bForm.clientId)}&fy=${encodeURIComponent(bForm.financialYear)}`, { cache: "no-store" }),
+        ]);
+        const fyBody = await fyResponse.json().catch(() => null);
+        const txBody = await txResponse.json().catch(() => null);
+
+        if (!fyResponse.ok) throw new Error(fyBody?.error || "Failed to load target data");
+        if (!txResponse.ok) throw new Error(txBody?.error || "Failed to load transaction rates");
+
+        const record = Array.isArray(fyBody) ? fyBody[0] as FinancialYearRecord | undefined : null;
+        const targets = targetEntriesFromRecord(record);
+        const transactions = Array.isArray(txBody) ? txBody as CreditTransaction[] : [];
+
+        if (cancelled) return;
+        setTargetRows(targets.map((target) => {
+          const transactionRate = useTransactionRates ? rateForTarget(transactions, target) : 0;
+          return {
+            key: `${target.categoryId}-${target.type}`,
+            categoryId: target.categoryId,
+            type: target.type,
+            quantity: String(target.value),
+            rate: transactionRate > 0 ? String(transactionRate) : "",
+            gstPercent: "18",
+            include: true,
+            rateSource: transactionRate > 0 ? "transaction" : "manual",
+          };
+        }));
+      } catch (error) {
+        if (cancelled) return;
+        setTargetRows([]);
+        setTargetSuggestionsError(error instanceof Error ? error.message : "Failed to load target suggestions");
+      } finally {
+        if (!cancelled) setTargetSuggestionsLoading(false);
+      }
+    };
+
+    loadTargetSuggestions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [billingModal, bForm.clientId, bForm.financialYear, isPiboBillingClient, useTransactionRates]);
 
   const deleteBilling = async (id: string, clientId: string) => {
     if (!confirm(`Delete billing record for ${clientName(clientId)}? This will not delete payment records.`)) return;
@@ -290,6 +462,16 @@ export default function BillingPage() {
     setExpandedRows(newSet);
   };
 
+  const advanceClientCount = Array.from(advanceByClient.values()).filter((amount) => amount > 0).length;
+  const filterOptions: Array<{ value: BillingFilter; label: string; count: number }> = [
+    { value: "all", label: "All", count: billings.length },
+    { value: "pending", label: "Pending", count: billingSummary.pendingCount },
+    { value: "partial", label: "Partial", count: billingSummary.partialCount },
+    { value: "unpaid", label: "Unpaid", count: billingSummary.unpaidCount },
+    { value: "paid", label: "Paid", count: billingSummary.paidCount },
+    { value: "advance", label: "Has Advance", count: advanceClientCount },
+  ];
+
   return (
     <div>
       <PageHeader title="Billing & Payments" description="Manage invoices and payment collection">
@@ -300,6 +482,69 @@ export default function BillingPage() {
       </PageHeader>
 
       <FYTabBar value={fy} onChange={setFy} />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 mb-4">
+        <div className="bg-card border border-base rounded-2xl p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium text-faint">Total Billed</p>
+              <p className="text-xl font-bold text-default mt-2">{formatCurrency(billingSummary.totalBilled)}</p>
+              <p className="text-xs text-faint mt-1">{billings.length} billing records</p>
+            </div>
+            <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-900/25 dark:text-blue-300 flex items-center justify-center">
+              <FileText className="w-4 h-4" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-card border border-base rounded-2xl p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium text-faint">Collected</p>
+              <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-2">{formatCurrency(billingSummary.totalCollected)}</p>
+              <p className="text-xs text-faint mt-1">{billingSummary.collectionPct}% collection rate</p>
+            </div>
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-900/25 dark:text-emerald-300 flex items-center justify-center">
+              <TrendingUp className="w-4 h-4" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-card border border-base rounded-2xl p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium text-faint">Pending</p>
+              <p className="text-xl font-bold text-red-600 dark:text-red-400 mt-2">{formatCurrency(billingSummary.totalPending)}</p>
+              <p className="text-xs text-faint mt-1">{billingSummary.pendingCount} records need follow-up</p>
+            </div>
+            <div className="w-9 h-9 rounded-xl bg-red-50 text-red-600 dark:bg-red-900/25 dark:text-red-300 flex items-center justify-center">
+              <AlertCircle className="w-4 h-4" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-card border border-base rounded-2xl p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium text-faint">Advance</p>
+              <p className="text-xl font-bold text-amber-600 dark:text-amber-400 mt-2">{formatCurrency(billingSummary.totalAdvance)}</p>
+              <p className="text-xs text-faint mt-1">{advanceClientCount} clients with advance</p>
+            </div>
+            <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-900/25 dark:text-amber-300 flex items-center justify-center">
+              <Wallet className="w-4 h-4" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-card border border-base rounded-2xl p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium text-faint">Paid Records</p>
+              <p className="text-xl font-bold text-default mt-2">{billingSummary.paidCount}</p>
+              <p className="text-xs text-faint mt-1">{billingSummary.partialCount} partial, {billingSummary.unpaidCount} unpaid</p>
+            </div>
+            <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-600 dark:bg-teal-900/25 dark:text-teal-300 flex items-center justify-center">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Search */}
       <div className="bg-card border border-base rounded-2xl p-3 mb-4 shadow-sm flex items-center gap-2 transition-colors">
@@ -317,6 +562,26 @@ export default function BillingPage() {
         )}
       </div>
 
+      <div className="flex flex-wrap gap-2 mb-4">
+        {filterOptions.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => setStatusFilter(option.value)}
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+              statusFilter === option.value
+                ? "border-brand-300 bg-brand-50 text-brand-700 dark:border-brand-800 dark:bg-brand-900/25 dark:text-brand-300"
+                : "border-base bg-card text-muted hover:text-default"
+            }`}
+          >
+            {option.label}
+            <span className="rounded-full bg-surface border border-base px-1.5 py-0.5 text-[10px] text-faint">
+              {option.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {loading ? <LoadingSpinner /> : billings.length === 0 ? (
         <div className="bg-card rounded-2xl p-8 shadow-sm border border-base">
           <EmptyState message="No billing records for this FY" description="Add billing for a client to get started" />
@@ -324,7 +589,7 @@ export default function BillingPage() {
       ) : (
         <div className="space-y-3">
           {filteredBillings.length === 0 ? (
-            <div className="bg-card rounded-2xl p-8 shadow-sm border border-base"><EmptyState message={`No results for "${search}"`} description="Try a different search term" /></div>
+            <div className="bg-card rounded-2xl p-8 shadow-sm border border-base"><EmptyState message="No matching billing records" description="Try a different search or filter" /></div>
           ) : filteredBillings.map((billing) => {
             const expanded = expandedRows.has(billing._id);
             const cPayments = clientPayments(billing.clientId);
@@ -427,6 +692,127 @@ export default function BillingPage() {
               {FINANCIAL_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
+          {bForm.clientId && (
+            <div className="rounded-2xl border border-base bg-surface p-4">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
+                <div>
+                  <p className="text-sm font-semibold text-default">PIBO Target Suggestions</p>
+                  <p className="text-xs text-faint mt-1">
+                    {isPiboBillingClient
+                      ? "Targets come from Financial Year records. Rates can be pulled from received credit transactions and edited before applying."
+                      : "Available only for Producer, Importer, and Brand Owner clients."}
+                  </p>
+                </div>
+                {isPiboBillingClient && (
+                  <label className="inline-flex items-center gap-2 text-xs font-medium text-muted">
+                    <input
+                      type="checkbox"
+                      checked={useTransactionRates}
+                      onChange={(event) => setUseTransactionRates(event.target.checked)}
+                      className="h-4 w-4 rounded border-base"
+                    />
+                    Use transaction rates
+                  </label>
+                )}
+              </div>
+
+              {isPiboBillingClient && targetSuggestionsLoading ? (
+                <p className="text-sm text-muted">Loading target suggestions...</p>
+              ) : isPiboBillingClient && targetSuggestionsError ? (
+                <p className="text-sm text-red-500">{targetSuggestionsError}</p>
+              ) : isPiboBillingClient && targetRows.length === 0 ? (
+                <p className="text-sm text-muted">No target rows found for this client and FY.</p>
+              ) : isPiboBillingClient && (
+                <div className="space-y-3">
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[760px] text-sm">
+                      <thead>
+                        <tr className="text-left text-xs uppercase text-faint">
+                          <th className="py-2 pr-3">Use</th>
+                          <th className="py-2 pr-3">Category</th>
+                          <th className="py-2 pr-3">Type</th>
+                          <th className="py-2 pr-3">Target Qty</th>
+                          <th className="py-2 pr-3">Rate</th>
+                          <th className="py-2 pr-3">GST %</th>
+                          <th className="py-2 text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {targetRows.map((row) => {
+                          const taxable = Number(row.quantity || 0) * Number(row.rate || 0);
+                          const gstAmount = taxable * (Number(row.gstPercent || 0) / 100);
+                          const total = taxable + gstAmount;
+                          return (
+                            <tr key={row.key} className="border-t border-soft">
+                              <td className="py-2 pr-3">
+                                <input
+                                  type="checkbox"
+                                  checked={row.include}
+                                  onChange={(event) => setTargetRows((rows) => rows.map((entry) => entry.key === row.key ? { ...entry, include: event.target.checked } : entry))}
+                                  className="h-4 w-4 rounded border-base"
+                                />
+                              </td>
+                              <td className="py-2 pr-3 text-default">{CATEGORY_LABELS[row.categoryId] || `Category ${row.categoryId}`}</td>
+                              <td className="py-2 pr-3 text-muted">{row.type === "EOL" ? "EOL" : "Recycling"}</td>
+                              <td className="py-2 pr-3">
+                                <input
+                                  type="number"
+                                  className="input-field !py-1.5"
+                                  value={row.quantity}
+                                  min="0"
+                                  step="0.01"
+                                  onChange={(event) => setTargetRows((rows) => rows.map((entry) => entry.key === row.key ? { ...entry, quantity: event.target.value } : entry))}
+                                />
+                              </td>
+                              <td className="py-2 pr-3">
+                                <div className="space-y-1">
+                                  <input
+                                    type="number"
+                                    className="input-field !py-1.5"
+                                    value={row.rate}
+                                    min="0"
+                                    step="0.01"
+                                    placeholder="Manual"
+                                    onChange={(event) => setTargetRows((rows) => rows.map((entry) => entry.key === row.key ? { ...entry, rate: event.target.value, rateSource: "manual" } : entry))}
+                                  />
+                                  <p className="text-[10px] text-faint">{row.rateSource === "transaction" ? "From transaction" : "Editable"}</p>
+                                </div>
+                              </td>
+                              <td className="py-2 pr-3">
+                                <input
+                                  type="number"
+                                  className="input-field !py-1.5"
+                                  value={row.gstPercent}
+                                  min="0"
+                                  step="0.01"
+                                  onChange={(event) => setTargetRows((rows) => rows.map((entry) => entry.key === row.key ? { ...entry, gstPercent: event.target.value } : entry))}
+                                />
+                              </td>
+                              <td className="py-2 text-right font-semibold text-default">{formatCurrency(total)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-base bg-card p-3">
+                    <div>
+                      <p className="text-xs text-faint">GST-inclusive target suggestion</p>
+                      <p className="text-lg font-bold text-default">{formatCurrency(targetRowsTotal)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => setBForm((form) => ({ ...form, targetCharges: targetRowsTotal.toFixed(2) }))}
+                      disabled={targetRowsTotal <= 0}
+                    >
+                      Apply to Target Charges
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="label">Govt Charges</label><input type="number" className="input-field" value={bForm.govtCharges} onChange={(e) => setBForm({ ...bForm, govtCharges: e.target.value })} min="0" step="0.01" /></div>
             <div><label className="label">Consultancy Charges</label><input type="number" className="input-field" value={bForm.consultancyCharges} onChange={(e) => setBForm({ ...bForm, consultancyCharges: e.target.value })} min="0" step="0.01" /></div>

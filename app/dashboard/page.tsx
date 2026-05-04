@@ -58,9 +58,9 @@ function ProgressRow({
 
 export default function DashboardPage() {
   const { dark } = useContext(ThemeContext);
-  const [fy, setFy] = useFinancialYearState();
+  const [fy, setFy, financialYearLoaded] = useFinancialYearState();
 
-  const { data, loading } = useCache<DashboardData>(`/api/dashboard?fy=${fy}`);
+  const { data, loading } = useCache<DashboardData>(`/api/dashboard?fy=${fy}`, { enabled: financialYearLoaded });
 
   /* ── Chart colours that adapt to light/dark ── */
   const chartGrid    = dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
@@ -94,7 +94,7 @@ export default function DashboardPage() {
         </select>
       </PageHeader>
 
-      {loading ? (
+      {!financialYearLoaded || loading ? (
         <LoadingSpinner />
       ) : data && (
         <>

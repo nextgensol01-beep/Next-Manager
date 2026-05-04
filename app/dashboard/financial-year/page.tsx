@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import React, { useState } from "react";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
@@ -39,7 +39,7 @@ export default function FinancialYearPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
-  // Form state â€” generated fields (PWP) + targets[] (PIBO)
+  // Form state - generated fields (PWP) + targets[] (PIBO)
   const [genForm, setGenForm] = useState(() => createEmptyGeneratedForm(effectiveFinancialYear));
   const [generated, setGenerated] = useState<GeneratedEntry[]>([]);
   const [targets, setTargets] = useState<TargetEntry[]>([]);
@@ -61,7 +61,7 @@ export default function FinancialYearPage() {
     );
   });
 
-  // â”€â”€ Modal open helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Modal open helpers --------------------------------------------------
 
   const openAdd = () => {
     setEditRecord(null);
@@ -105,7 +105,7 @@ export default function FinancialYearPage() {
     setModalOpen(true);
   };
 
-  // â”€â”€ Target row mutations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Target row mutations ------------------------------------------------
 
   const handleGeneratedChange = (idx: number, updated: GeneratedEntry) => {
     setGenerated((prev) => prev.map((t, i) => (i === idx ? updated : t)));
@@ -158,10 +158,10 @@ export default function FinancialYearPage() {
   const hasTgtDupes = dupeIndices.size > 0;
   const hasDupes = hasGenDupes || hasTgtDupes;
 
-  // â”€â”€ Delete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Delete --------------------------------------------------------------
 
   const handleDelete = async (rec: FYRecord) => {
-    if (!confirm(`Delete FY record for ${getClientName(rec.clientId)} â€” ${rec.financialYear}?`)) return;
+    if (!confirm(`Delete FY record for ${getClientName(rec.clientId)} - ${rec.financialYear}?`)) return;
     setDeletingId(rec._id);
     const res = await fetch(`/api/financial-year/${rec._id}`, { method: "DELETE" });
     if (res.ok) { toast.success("Record deleted"); invalidate("/api/financial-year", "/api/dashboard"); refetchRecords(); }
@@ -169,7 +169,7 @@ export default function FinancialYearPage() {
     setDeletingId(null);
   };
 
-  // â”€â”€ Submit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Submit --------------------------------------------------------------
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -186,10 +186,10 @@ export default function FinancialYearPage() {
       };
 
       if (isPWP) {
-        // Include generated[] â€” backend derives flat cat1Generatedâ€¦cat4Generated
+        // Include generated[] - backend derives flat cat1Generated...cat4Generated
         payload.generated = generated.filter((t) => t.value > 0);
       } else {
-        // Include targets[] â€” backend derives flat cat1Targetâ€¦cat4Target
+        // Include targets[] - backend derives flat cat1Target...cat4Target
         payload.targets = targets.filter((t) => t.value > 0);
       }
 
@@ -245,7 +245,7 @@ export default function FinancialYearPage() {
       };
     }
 
-    // PIBO â€” targets with type breakdown
+    // PIBO - targets with type breakdown
     const entries = Array.isArray(rec.targets) && rec.targets.length > 0 ? rec.targets : null;
     if (entries) {
       const achievedMapFromTx = buildEntryValueMap(rec.achievedByType);
@@ -285,7 +285,7 @@ export default function FinancialYearPage() {
     };
   };
 
-  // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Render --------------------------------------------------------------
 
   return (
     <div>
@@ -301,7 +301,7 @@ export default function FinancialYearPage() {
           <Search className="w-4 h-4 text-faint flex-shrink-0" />
           <input
             type="text"
-            placeholder="Search by client name, ID or categoryâ€¦"
+            placeholder="Search by client name, ID or category..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="bg-transparent border-0 ring-0 outline-none flex-1 py-2 text-sm text-default placeholder:text-faint"
@@ -318,15 +318,15 @@ export default function FinancialYearPage() {
       <div className="flex flex-wrap gap-4 mb-4 px-1 text-xs text-[var(--color-text-muted)]">
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-          <span><b className="text-[var(--color-text)]">PWP</b> â€” credits remaining (more = better)</span>
+          <span><b className="text-[var(--color-text)]">PWP</b> - credits remaining (more = better)</span>
         </span>
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" />
-          <span><b className="text-[var(--color-text)]">PIBO</b> â€” target remaining (less = better; 0 = fully achieved)</span>
+          <span><b className="text-[var(--color-text)]">PIBO</b> - target remaining (less = better; 0 = fully achieved)</span>
         </span>
       </div>
 
-      {/* â”€â”€ DESKTOP TABLE â”€â”€ */}
+      {/* -- DESKTOP TABLE -- */}
       <div className="bg-card rounded-2xl shadow-sm border border-base hidden lg:block">
         {recLoading ? <LoadingSpinner /> : filteredRecords.length === 0 ? (
           <EmptyState message={search ? `No results for "${search}"` : "No records for this FY"} />
@@ -373,7 +373,7 @@ export default function FinancialYearPage() {
                     if (!hasTypedSplit) return null;
                     const source = hasTypedGenerated ? rec.generated! : rec.targets!;
                     const entries = source.filter((t) => t.categoryId === catId);
-                    if (entries.length === 0) return <span className="text-[var(--color-text-faint)] font-mono text-xs">â€”</span>;
+                    if (entries.length === 0) return <span className="text-[var(--color-text-faint)] font-mono text-xs">-</span>;
                     return (
                       <div className="text-right space-y-0.5">
                         {entries.map((e) => (
@@ -396,7 +396,7 @@ export default function FinancialYearPage() {
                       </TD>
                       <TD>{cat && <CategoryBadge category={cat} />}</TD>
                       {isSIMPRow ? (
-                        <TD><span className="text-xs italic text-[var(--color-text-faint)]">SIMP â€” no targets/credits tracked</span></TD>
+                        <TD><span className="text-xs italic text-[var(--color-text-faint)]">SIMP - no targets/credits tracked</span></TD>
                       ) : (
                         <>
                           <TD right mono>{hasTypedSplit ? typedCatCell("1") : cat1.toLocaleString()}</TD>
@@ -443,7 +443,7 @@ export default function FinancialYearPage() {
         )}
       </div>
 
-      {/* â”€â”€ MOBILE CARDS â”€â”€ */}
+      {/* -- MOBILE CARDS -- */}
       <div className="lg:hidden space-y-2">
         {recLoading ? <LoadingSpinner /> : filteredRecords.length === 0 ? (
           <EmptyState message={search ? `No results for "${search}"` : "No records for this FY"} />
@@ -492,7 +492,7 @@ export default function FinancialYearPage() {
               {isExp && (
                 <div className="card-expand px-4 pb-4 border-t border-soft pt-3 space-y-3">
                   {isSIMPRow ? (
-                    <p className="text-xs italic text-faint">SIMP â€” no targets/credits tracked</p>
+                    <p className="text-xs italic text-faint">SIMP - no targets/credits tracked</p>
                   ) : (
                     <>
                       <div className="grid grid-cols-2 gap-2 text-xs">
@@ -562,13 +562,13 @@ export default function FinancialYearPage() {
         })}
       </div>
 
-      {/* â”€â”€ Breakdown modal â”€â”€ */}
+      {/* -- Breakdown modal -- */}
       {breakdownRec && (() => {
         const _bCat = getCategory(breakdownRec.clientId);
         const _bProps = makeBreakdownProps(breakdownRec, _bCat);
         return (
           <Modal open={!!breakdownRec} onClose={() => setBreakdownRec(null)}
-            title={`${getClientName(breakdownRec.clientId)} â€” FY ${breakdownRec.financialYear}`} size="lg">
+            title={`${getClientName(breakdownRec.clientId)} - FY ${breakdownRec.financialYear}`} size="lg">
             <CategoryBreakdown
               clientType={_bCat === "PWP" ? "PWP" : "PIBO"}
               entries={_bProps.entries ?? undefined}
@@ -579,7 +579,7 @@ export default function FinancialYearPage() {
         );
       })()}
 
-      {/* â”€â”€ Add / Edit modal â”€â”€ */}
+      {/* -- Add / Edit modal -- */}
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -620,12 +620,12 @@ export default function FinancialYearPage() {
             </div>
           </div>
 
-          {/* â”€â”€ PWP: Credits Generated (per category + type) â”€â”€ */}
+          {/* -- PWP: Credits Generated (per category + type) -- */}
           {selectedCat && isPWP && (
             <div>
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs font-semibold text-muted uppercase tracking-wide">
-                  Credits Generated â€” Category &amp; Type
+                  Credits Generated - Category &amp; Type
                 </p>
                 <span className="text-[10px] text-faint">Same category can have both types</span>
               </div>
@@ -666,7 +666,7 @@ export default function FinancialYearPage() {
 
               {hasGenDupes && (
                 <p className="mt-2 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-                  <span>âš </span> Remove duplicate Category + Type combinations before saving.
+                  <span>Warning: </span> Remove duplicate Category + Type combinations before saving.
                 </p>
               )}
 
@@ -695,12 +695,12 @@ export default function FinancialYearPage() {
             </div>
           )}
 
-          {/* â”€â”€ PIBO: EPR Targets (multi-row with type) â”€â”€ */}
+          {/* -- PIBO: EPR Targets (multi-row with type) -- */}
           {selectedCat && !isPWP && !isSIMP && (
             <div>
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs font-semibold text-muted uppercase tracking-wide">
-                  EPR Targets â€” Category &amp; Type
+                  EPR Targets - Category &amp; Type
                 </p>
                 <span className="text-[10px] text-faint">
                   Same category can have both types
@@ -745,7 +745,7 @@ export default function FinancialYearPage() {
               {/* Duplicate warning */}
               {hasTgtDupes && (
                 <p className="mt-2 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-                  <span>âš </span> Remove duplicate Category + Type combinations before saving.
+                  <span>Warning: </span> Remove duplicate Category + Type combinations before saving.
                 </p>
               )}
 
@@ -779,7 +779,7 @@ export default function FinancialYearPage() {
           {isSIMP && (
             <div className="bg-pink-50 dark:bg-pink-900/20 border border-pink-200 dark:border-pink-800
                             rounded-xl p-3 text-sm text-pink-700 dark:text-pink-300">
-              SIMP clients are registered for compliance tracking only â€” no targets or credits needed.
+              SIMP clients are registered for compliance tracking only - no targets or credits needed.
             </div>
           )}
 

@@ -1,9 +1,11 @@
 "use client";
 import { useState, useCallback } from "react";
-import { Monitor, Smartphone, Globe, Shield, Trash2, RefreshCw, LogOut, Chrome } from "lucide-react";
+import { Globe, Shield, Trash2, RefreshCw, LogOut } from "lucide-react";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
 import { useCache, invalidate } from "@/lib/useCache";
+import { parseDevice as parseUserAgentDevice } from "@/lib/device";
+import { BrowserBrandIcon, DeviceOsIcon } from "@/components/ui/DeviceBrandIcon";
 import { formatDistanceToNow, format } from "date-fns";
 
 interface SessionRecord {
@@ -19,24 +21,21 @@ interface SessionRecord {
 }
 
 function parseDevice(userAgent: string): { label: string; icon: React.ReactNode } {
-  if (!userAgent) return { label: "Unknown device", icon: <Globe className="w-4 h-4" /> };
-  const ua = userAgent.toLowerCase();
-  if (ua.includes("mobile") || ua.includes("android") || ua.includes("iphone")) {
-    return { label: "Mobile browser", icon: <Smartphone className="w-4 h-4" /> };
-  }
-  if (ua.includes("chrome")) return { label: "Chrome", icon: <Chrome className="w-4 h-4" /> };
-  if (ua.includes("firefox")) return { label: "Firefox", icon: <Monitor className="w-4 h-4" /> };
-  if (ua.includes("safari")) return { label: "Safari", icon: <Monitor className="w-4 h-4" /> };
-  return { label: "Desktop browser", icon: <Monitor className="w-4 h-4" /> };
+  const device = parseUserAgentDevice(userAgent);
+  const icon = device.type === "unknown"
+    ? <Globe className="w-4 h-4" />
+    : <DeviceOsIcon device={device} className="w-4 h-4" />;
+
+  return { label: device.label, icon };
 }
 
 export default function SessionsPage() {
   const [revoking, setRevoking] = useState<string | null>(null);
   const [revokingAll, setRevokingAll] = useState(false);
 
-  const { data, loading, refetch } = useCache<{ sessions: SessionRecord[] }>(
+  const { data, loading, refetch } = useCache<SessionRecord[]>(
     "/api/sessions",
-    { initialData: { sessions: [] } }
+    { initialData: [] }
   );
 
   // Register the current session's UA + IP on first load
@@ -44,7 +43,7 @@ export default function SessionsPage() {
     fetch("/api/sessions", { method: "PATCH" }).catch(() => {});
   });
 
-  const sessions = data?.sessions ?? [];
+  const sessions = data ?? [];
   const activeSessions = sessions.filter((s) => new Date(s.expires) > new Date());
 
   const revokeSession = useCallback(async (id: string, isCurrent: boolean) => {
@@ -160,6 +159,7 @@ export default function SessionsPage() {
         ) : (
           <div className="space-y-2">
             {activeSessions.map((s) => {
+              const parsedDevice = parseUserAgentDevice(s.userAgent);
               const device = parseDevice(s.userAgent);
               const loginedAgo = formatDistanceToNow(new Date(s.createdAt), { addSuffix: true });
               const expiresAt = format(new Date(s.expires), "dd MMM yyyy, HH:mm");
@@ -196,6 +196,10 @@ export default function SessionsPage() {
                             : "bg-card text-muted border-base"
                         }`}>
                           {s.provider === "google" ? "Google" : "Password"}
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-[11px] rounded-full bg-card border border-base px-2 py-0.5 text-muted">
+                          <BrowserBrandIcon browser={parsedDevice.browser} className="w-3.5 h-3.5 text-emerald-500" />
+                          {parsedDevice.browser}
                         </span>
                       </div>
                       <p className="text-xs text-muted mt-0.5">{s.userEmail}</p>

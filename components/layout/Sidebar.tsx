@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, Users, UserCircle, Calendar, ArrowLeftRight,
   Receipt, BarChart2, FileText, ClipboardCheck, Trash2, Mail, X, Settings2,
-  Upload, ChevronDown, ShieldCheck,
+  Upload, ChevronDown,
 } from "lucide-react";
 import { cachedFetch } from "@/lib/cache";
 import {
@@ -47,7 +47,6 @@ const navItems = [
   { href: "/dashboard/reports",             label: "Reports",             icon: BarChart2 },
   { href: "/dashboard/quotation",           label: "Quotation Generator", icon: FileText },
   { href: "/dashboard/settings",            label: "Settings",            icon: Settings2 },
-  { href: "/dashboard/sessions",            label: "Active Sessions",      icon: ShieldCheck },
 ];
 
 const portalOpsItems = [

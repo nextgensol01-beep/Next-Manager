@@ -108,50 +108,88 @@ function AppClientProviders({ children, dark }: { children: React.ReactNode; dar
   );
 
   const [financialYearSettings, setFinancialYearSettings] = useState<FinancialYearSettings>(DEFAULT_FINANCIAL_YEAR_SETTINGS);
-  const [financialYearLoaded, setFinancialYearLoaded] = useState(false);
+  const [loadedFinancialYearStorageKey, setLoadedFinancialYearStorageKey] = useState<string | null>(null);
   const [showFinancialYearReminder, setShowFinancialYearReminder] = useState(false);
+  const financialYearLoaded = loadedFinancialYearStorageKey === storageKey;
 
   useEffect(() => {
     if (typeof window === "undefined" || status === "loading") return;
 
-    let parsed: unknown = null;
-    const raw = window.localStorage.getItem(storageKey);
+    let cancelled = false;
+    setLoadedFinancialYearStorageKey(null);
 
-    if (raw) {
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        parsed = null;
+    const loadSettings = async () => {
+      let parsed: unknown = null;
+      const raw = window.localStorage.getItem(storageKey);
+
+      if (raw) {
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          parsed = null;
+        }
       }
-    }
 
-    const nextSettings = normalizeFinancialYearSettings(parsed);
-    let shouldShowReminder = false;
+      const localSettings = normalizeFinancialYearSettings(parsed);
+      let nextSettings = localSettings;
 
-    if (
-      nextSettings.enabled &&
-      nextSettings.defaultFinancialYear &&
-      nextSettings.defaultFinancialYear !== CURRENT_FY
-    ) {
-      if (nextSettings.lastKnownCurrentFy && nextSettings.lastKnownCurrentFy !== CURRENT_FY) {
-        nextSettings.pendingReminderCurrentFy = CURRENT_FY;
-        shouldShowReminder = true;
-      } else if (nextSettings.pendingReminderCurrentFy === CURRENT_FY) {
-        shouldShowReminder = true;
+      if (status === "authenticated") {
+        try {
+          const response = await fetch("/api/financial-year-preference", { cache: "no-store" });
+          const body = await response.json().catch(() => null);
+          if (response.ok) {
+            const accountSettings = normalizeFinancialYearSettings(body?.settings);
+            nextSettings = accountSettings.enabled && accountSettings.defaultFinancialYear
+              ? accountSettings
+              : localSettings;
+          }
+        } catch {
+          // Keep the local cached settings when the account preference cannot be reached.
+        }
       }
-    }
 
-    nextSettings.lastKnownCurrentFy = CURRENT_FY;
+      let shouldShowReminder = false;
 
-    setFinancialYearSettings(normalizeFinancialYearSettings(nextSettings));
-    setShowFinancialYearReminder(shouldShowReminder);
-    setFinancialYearLoaded(true);
+      if (
+        nextSettings.enabled &&
+        nextSettings.defaultFinancialYear &&
+        nextSettings.defaultFinancialYear !== CURRENT_FY
+      ) {
+        if (nextSettings.lastKnownCurrentFy && nextSettings.lastKnownCurrentFy !== CURRENT_FY) {
+          nextSettings.pendingReminderCurrentFy = CURRENT_FY;
+          shouldShowReminder = true;
+        } else if (nextSettings.pendingReminderCurrentFy === CURRENT_FY) {
+          shouldShowReminder = true;
+        }
+      }
+
+      nextSettings.lastKnownCurrentFy = CURRENT_FY;
+
+      if (cancelled) return;
+      setFinancialYearSettings(normalizeFinancialYearSettings(nextSettings));
+      setShowFinancialYearReminder(shouldShowReminder);
+      setLoadedFinancialYearStorageKey(storageKey);
+    };
+
+    loadSettings();
+
+    return () => {
+      cancelled = true;
+    };
   }, [status, storageKey]);
 
   useEffect(() => {
     if (!financialYearLoaded || typeof window === "undefined") return;
     window.localStorage.setItem(storageKey, JSON.stringify(financialYearSettings));
-  }, [financialYearLoaded, financialYearSettings, storageKey]);
+
+    if (status === "authenticated") {
+      fetch("/api/financial-year-preference", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: financialYearSettings }),
+      }).catch(() => {});
+    }
+  }, [financialYearLoaded, financialYearSettings, status, storageKey]);
 
   const setFeatureEnabled = (enabled: boolean) => {
     setFinancialYearSettings((current) => normalizeFinancialYearSettings({
@@ -273,9 +311,12 @@ function AppClientProviders({ children, dark }: { children: React.ReactNode; dar
 }
 
 export function useFinancialYearState() {
-  const { effectiveFinancialYear } = useFinancialYearPreference();
+  const { effectiveFinancialYear, isLoaded } = useFinancialYearPreference();
   const previousDefaultRef = useRef(effectiveFinancialYear);
   const [financialYear, setFinancialYear] = useState(effectiveFinancialYear);
+  const displayFinancialYear = isLoaded && financialYear === previousDefaultRef.current
+    ? effectiveFinancialYear
+    : financialYear;
 
   useEffect(() => {
     setFinancialYear((current) => (
@@ -284,7 +325,7 @@ export function useFinancialYearState() {
     previousDefaultRef.current = effectiveFinancialYear;
   }, [effectiveFinancialYear]);
 
-  return [financialYear, setFinancialYear] as const;
+  return [displayFinancialYear, setFinancialYear, isLoaded] as const;
 }
 
 export default function Providers({ children }: { children: React.ReactNode }) {
