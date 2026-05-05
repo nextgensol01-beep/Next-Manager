@@ -4,6 +4,13 @@ function allowsPlainAdminPassword() {
   return process.env.NODE_ENV !== "production";
 }
 
+function getAdminPasswordHash() {
+  return (process.env.ADMIN_PASSWORD_HASH || "")
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replaceAll("\\$", "$");
+}
+
 export function getAdminEmail() {
   return process.env.ADMIN_EMAIL?.trim().toLowerCase() || "";
 }
@@ -13,11 +20,11 @@ export function getAdminName() {
 }
 
 export function hasAdminPasswordConfig() {
-  return Boolean(process.env.ADMIN_PASSWORD_HASH || (allowsPlainAdminPassword() && process.env.ADMIN_PASSWORD));
+  return Boolean(getAdminPasswordHash() || (allowsPlainAdminPassword() && process.env.ADMIN_PASSWORD));
 }
 
 export async function verifyAdminPassword(candidate: string): Promise<boolean> {
-  const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH;
+  const adminPasswordHash = getAdminPasswordHash();
   if (adminPasswordHash) {
     return bcrypt.compare(candidate, adminPasswordHash);
   }

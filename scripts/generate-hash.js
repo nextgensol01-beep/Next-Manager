@@ -19,6 +19,8 @@ if (password.length < 8) {
 bcrypt.hash(password, 12).then((hash) => {
   const envHash = hash.replaceAll("$", "\\$");
   console.log("\nPassword hash generated.\n");
-  console.log("Paste this into your .env.local:\n");
+  console.log("For .env.local / .env files, paste this:\n");
   console.log(`ADMIN_PASSWORD_HASH="${envHash}"\n`);
+  console.log("For Vercel Environment Variables, use name ADMIN_PASSWORD_HASH and paste this value only:\n");
+  console.log(`${hash}\n`);
 });

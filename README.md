@@ -66,6 +66,7 @@ node scripts/generate-hash.js yourpassword
 ```
 
 Paste the quoted `ADMIN_PASSWORD_HASH="\$..."` output into your environment file, then restart the dev server.
+In the Vercel dashboard, create an environment variable named `ADMIN_PASSWORD_HASH` and paste only the raw hash value (`$2a$...`), without `ADMIN_PASSWORD_HASH=`, quotes, or backslashes.
 Plain `ADMIN_PASSWORD` is only accepted outside production. Production deployments must set `ADMIN_PASSWORD_HASH`.
 
 ## Useful Scripts
