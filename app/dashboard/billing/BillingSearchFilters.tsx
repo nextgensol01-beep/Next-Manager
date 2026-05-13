@@ -16,6 +16,7 @@ interface BillingSearchFiltersProps {
   merged?: boolean;
   onHeightChange?: (height: number) => void;
   sticky?: boolean;
+  compact?: boolean;
   /**
    * px offset from top of scroll container (static portion).
    * Pass the measured height of BillingTopControls so this bar

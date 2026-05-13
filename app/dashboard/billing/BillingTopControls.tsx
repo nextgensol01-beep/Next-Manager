@@ -15,6 +15,7 @@ interface BillingTopControlsProps {
   onHeightChange?: (height: number) => void;
   merged?: boolean;
   sticky?: boolean;
+  compact?: boolean;
 }
 
 /**

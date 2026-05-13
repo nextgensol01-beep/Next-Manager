@@ -24,6 +24,7 @@ import {
   motion,
   useReducedMotion,
   useTransform,
+  type MotionStyle,
   type MotionValue,
 } from "framer-motion";
 import {
@@ -153,7 +154,7 @@ export default function BillingStickyHeader({
     </div>
   );
 
-  const AgingRow = ({ motionStyle }: { motionStyle?: React.CSSProperties }) => (
+  const AgingRow = ({ motionStyle }: { motionStyle?: MotionStyle }) => (
     <motion.div
       className="grid grid-cols-2 lg:grid-cols-4 gap-3"
       style={motionStyle}
