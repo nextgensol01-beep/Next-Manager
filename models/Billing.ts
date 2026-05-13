@@ -1,5 +1,18 @@
 import mongoose, { Schema, Document } from "mongoose";
 
+export interface IBillingTargetBreakdownRow {
+  categoryId: string;
+  categoryLabel: string;
+  type: "RECYCLING" | "EOL";
+  quantity: number;
+  rate: number;
+  taxableAmount: number;
+  gstPercent: number;
+  gstAmount: number;
+  totalAmount: number;
+  rateSource?: "transaction" | "manual";
+}
+
 export interface IBilling extends Document {
   clientId: string;
   financialYear: string;
@@ -8,9 +21,32 @@ export interface IBilling extends Document {
   targetCharges: number;
   otherCharges: number;
   totalAmount: number;
+  dueDate?: Date;
+  targetBreakdown?: IBillingTargetBreakdownRow[];
   notes?: string;
+  // Invoice tracking
+  invoiceCreated: boolean;
+  invoiceNumber?: string;
+  invoiceDate?: Date;
+  invoiceAmount?: number;
   createdAt: Date;
 }
+
+const BillingTargetBreakdownSchema = new Schema<IBillingTargetBreakdownRow>(
+  {
+    categoryId: { type: String, required: true },
+    categoryLabel: { type: String, default: "" },
+    type: { type: String, enum: ["RECYCLING", "EOL"], required: true },
+    quantity: { type: Number, default: 0 },
+    rate: { type: Number, default: 0 },
+    taxableAmount: { type: Number, default: 0 },
+    gstPercent: { type: Number, default: 0 },
+    gstAmount: { type: Number, default: 0 },
+    totalAmount: { type: Number, default: 0 },
+    rateSource: { type: String, enum: ["transaction", "manual"], default: "manual" },
+  },
+  { _id: false }
+);
 
 const BillingSchema = new Schema<IBilling>(
   {
@@ -21,7 +57,14 @@ const BillingSchema = new Schema<IBilling>(
     targetCharges: { type: Number, default: 0 },
     otherCharges: { type: Number, default: 0 },
     totalAmount: { type: Number, default: 0 },
+    dueDate: { type: Date, default: null },
+    targetBreakdown: { type: [BillingTargetBreakdownSchema], default: [] },
     notes: { type: String, default: "" },
+    // Invoice tracking
+    invoiceCreated: { type: Boolean, default: false },
+    invoiceNumber: { type: String, trim: true, default: "" },
+    invoiceDate: { type: Date, default: null },
+    invoiceAmount: { type: Number, default: null },
   },
   { timestamps: true }
 );

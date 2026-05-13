@@ -17,6 +17,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const { id } = await params;
     const existingPayment = await Payment.findById(id);
     if (!existingPayment) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (
+      existingPayment.source === "advance_application" ||
+      existingPayment.paymentMode === "Advance Applied" ||
+      /applied from advance/i.test(existingPayment.notes || "")
+    ) {
+      return NextResponse.json({
+        error: "Applied advance payments are locked. Apply/reversal needs a dedicated workflow to keep advance balances correct.",
+      }, { status: 400 });
+    }
 
     const clientId = typeof body.clientId === "string" && body.clientId.trim()
       ? body.clientId.trim()
@@ -120,6 +129,15 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     const { id } = await params;
     const payment = await Payment.findById(id);
     if (!payment) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (
+      payment.source === "advance_application" ||
+      payment.paymentMode === "Advance Applied" ||
+      /applied from advance/i.test(payment.notes || "")
+    ) {
+      return NextResponse.json({
+        error: "Applied advance payments are locked because deleting them would not restore the consumed advance balance.",
+      }, { status: 400 });
+    }
     await DeletedRecord.create({
       recordType: "payment",
       recordId: id,

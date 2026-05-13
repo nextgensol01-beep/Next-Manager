@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import StatCard from "@/components/ui/StatCard";
 import PageHeader from "@/components/ui/PageHeader";
-import LoadingSpinner from "@/components/ui/LoadingSpinner";
+import DashboardSkeleton from "@/components/ui/DashboardSkeleton";
 import { formatCurrency, FINANCIAL_YEARS } from "@/lib/utils";
 import { ThemeContext, useFinancialYearState } from "@/app/providers";
 import {
@@ -95,7 +95,7 @@ export default function DashboardPage() {
       </PageHeader>
 
       {!financialYearLoaded || loading ? (
-        <LoadingSpinner />
+        <DashboardSkeleton />
       ) : data && (
         <>
           {/* ── Row 1: 4 stat cards ── */}

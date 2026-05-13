@@ -856,3 +856,32 @@ tbody tr {
 }
 .glass-tray-scroll-track::-webkit-scrollbar { display: none; }
 .glass-tray-scroll-track:active { cursor: grabbing; }
+
+/* ── SKELETON LOADERS ── */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position: 600px 0; }
+}
+
+.skeleton {
+  border-radius: 6px;
+  background-color: var(--color-border-soft);
+  background-image: linear-gradient(
+    90deg,
+    var(--color-border-soft) 0px,
+    var(--color-border) 160px,
+    var(--color-border-soft) 320px
+  );
+  background-size: 600px 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.dark .skeleton {
+  background-color: rgba(255,255,255,0.06);
+  background-image: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.06) 0px,
+    rgba(255,255,255,0.11) 160px,
+    rgba(255,255,255,0.06) 320px
+  );
+}

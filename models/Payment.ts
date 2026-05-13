@@ -9,6 +9,7 @@ export interface IPayment extends Document {
   paymentMode: string;
   referenceNumber?: string;
   notes?: string;
+  source: "direct" | "advance_application";
   createdAt: Date;
 }
 
@@ -22,6 +23,7 @@ const PaymentSchema = new Schema<IPayment>(
     paymentMode: { type: String, required: true },
     referenceNumber: { type: String, default: "" },
     notes: { type: String, default: "" },
+    source: { type: String, enum: ["direct", "advance_application"], default: "direct" },
   },
   { timestamps: true }
 );

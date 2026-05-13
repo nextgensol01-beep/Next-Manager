@@ -114,6 +114,7 @@ export async function POST(req: NextRequest) {
       paymentMode,
       referenceNumber,
       notes,
+      source: "direct",
     });
 
     return NextResponse.json(payment, { status: 201 });
