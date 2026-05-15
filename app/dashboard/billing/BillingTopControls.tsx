@@ -16,6 +16,7 @@ interface BillingTopControlsProps {
   merged?: boolean;
   docked?: boolean;
   dockOffset?: number;
+  compact?: boolean;
 }
 
 /**
@@ -34,6 +35,7 @@ export default function BillingTopControls({
   merged = false,
   docked = false,
   dockOffset = 0,
+  compact = false,
 }: BillingTopControlsProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tabs = [
@@ -78,13 +80,13 @@ export default function BillingTopControls({
       style={{ position: "sticky", top: docked ? -dockOffset : 0, zIndex: 32 }}
     >
       {/* Row 1 — FY picker */}
-      <div className="px-1 py-1">
+      <div className={compact ? "px-1 py-0.5" : "px-1 py-1"}>
         <FYTabBar value={fy} onChange={onFyChange} />
       </div>
 
       {/* Row 2 — tab buttons */}
       <div className="border-t border-soft bg-surface/20">
-        <div className="flex items-center gap-1.5 px-3 py-2">
+        <div className={`flex items-center gap-1.5 px-3 ${compact ? "py-1.5" : "py-2"}`}>
           {tabs.map(({ value, label, count, Icon }) => (
             <button
               key={value}
