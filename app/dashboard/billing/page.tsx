@@ -3,7 +3,7 @@ import React, { useState, useMemo, useCallback } from "react";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
 import BillingSkeleton from "@/components/ui/BillingSkeleton";
-import { formatCurrency } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import {
   Plus, Download, Mail,
 } from "lucide-react";

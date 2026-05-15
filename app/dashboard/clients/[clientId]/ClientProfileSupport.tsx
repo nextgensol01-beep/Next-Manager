@@ -580,7 +580,10 @@ export function FilterRail<T extends string>({
   };
 
   return (
-    <div className="glass-tray-full" style={{ marginBottom: 0 }}>
+    <div
+      className="glass-tray-full"
+      style={{ marginBottom: 0, gap: dense ? "0.375rem" : undefined }}
+    >
       {/* Section label */}
       <span
         className="flex-shrink-0"
@@ -656,7 +659,9 @@ export function FilterRail<T extends string>({
                           color: "#ffffff",
                           boxShadow: "0 0 0 1px rgba(15,23,42,0.30), 0 4px 16px rgba(15,23,42,0.28)",
                         }
-                      : undefined
+                      : dense
+                        ? { minHeight: "1.75rem", paddingInline: "0.625rem" }
+                        : undefined
                   }
                 >
                   {option.label}

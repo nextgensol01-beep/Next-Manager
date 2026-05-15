@@ -73,7 +73,7 @@ export default function BillingSummaryStats({
       observer.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [billingSummary, billings.length, advanceClientCount]);
+  }, [billingSummary, billings.length, advanceClientCount, onContentHeightChange]);
 
   // ── Section collapse — maxHeight so it actually removes layout space ───
   const sectionHeight = useTransform(scrollProgress, [0, 1], [contentHeight, 0]);

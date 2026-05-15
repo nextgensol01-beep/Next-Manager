@@ -6,7 +6,9 @@ import BulkReminderJob from "@/models/BulkReminderJob";
 import EmailLog from "@/models/EmailLog";
 import { sendEmail } from "@/utils/email";
 import { PAYMENT_REMINDER } from "@/lib/templates";
-import Client from "@/models/Client";
+
+type BulkReminderJobStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+type BulkReminderJobStatusSnapshot = { status: BulkReminderJobStatus };
 
 function fmt(n: number) {
   return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -157,7 +159,9 @@ async function processBulkJob(jobId: string) {
 
     for (let i = 0; i < job.recipients.length; i++) {
       // Re-fetch to check for cancellation
-      const fresh = await BulkReminderJob.findById(jobId).select("status").lean();
+      const fresh = await BulkReminderJob.findById(jobId)
+        .select("status")
+        .lean<BulkReminderJobStatusSnapshot | null>();
       if (!fresh || fresh.status === "cancelled") break;
 
       const recipient = job.recipients[i];
@@ -234,7 +238,9 @@ async function processBulkJob(jobId: string) {
     }
 
     // Final status
-    const fresh2 = await BulkReminderJob.findById(jobId).select("status").lean();
+    const fresh2 = await BulkReminderJob.findById(jobId)
+      .select("status")
+      .lean<BulkReminderJobStatusSnapshot | null>();
     if (fresh2 && fresh2.status === "running") {
       job.status = job.failedCount > 0 && job.sentCount === 0 ? "failed" : "completed";
       job.completedAt = new Date();

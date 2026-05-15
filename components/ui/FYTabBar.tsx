@@ -18,7 +18,6 @@ const LEAD_SPRING    = { stiffness: 580, damping: 28, mass: 0.6  };
 const TRAIL_SPRING   = { stiffness: 260, damping: 26, mass: 1.5  };
 const VERT_SPRING    = { stiffness: 580, damping: 30, mass: 0.6  };
 const LIGHT_SPRING   = { stiffness: 50,  damping: 13, mass: 1.8  };
-const GLOSS_SPRING   = { stiffness: 70,  damping: 16, mass: 0.9  };
 const TILT_SPRING    = { stiffness: 150, damping: 24, mass: 0.55 };
 const SCALE_SPRING   = { stiffness: 380, damping: 32, mass: 0.55 };
 const SQUASH_SPRING  = { stiffness: 420, damping: 22, mass: 0.5  };
@@ -29,7 +28,6 @@ const SQUASH_SPRING  = { stiffness: 420, damping: 22, mass: 0.5  };
    behind the cursor, feeling like a real optical surface.
 ───────────────────────────────────────────────────────────── */
 // Specular highlight — medium lag
-const SPEC_SPRING    = { stiffness: 90,  damping: 18, mass: 1.0  };
 // Pointer ghost — slightly faster than specular
 const PTR_SPRING     = { stiffness: 120, damping: 20, mass: 0.85 };
 // Edge rim brightness — fast (edge reacts quickly to proximity)

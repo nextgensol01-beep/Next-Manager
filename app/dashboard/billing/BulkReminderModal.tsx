@@ -6,7 +6,7 @@ import Modal from "@/components/ui/Modal";
 import { formatCurrency } from "@/lib/utils";
 import {
   AlertTriangle, CheckCircle2, Clock, Mail, MailX,
-  Pause, Play, RefreshCw, Send, Shield, SkipForward, X, XCircle,
+  Pause, RefreshCw, Send, Shield, SkipForward, XCircle,
 } from "lucide-react";
 import type { Billing, Client } from "./types";
 
