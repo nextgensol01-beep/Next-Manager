@@ -29,6 +29,11 @@ interface BillingSummaryStatsProps {
    *  offset the billing list and prevent it sliding under the search bar
    *  before the collapse animation finishes. */
   onContentHeightChange?: (height: number) => void;
+  /** When true, skip the Phase-1 collapse animation and render a compact
+   *  mobile-friendly layout that scrolls naturally. */
+  isMobile?: boolean;
+  /** When controls are fully docked, remove this spacer from the merge stack. */
+  docked?: boolean;
 }
 
 export default function BillingSummaryStats({
@@ -37,6 +42,8 @@ export default function BillingSummaryStats({
   advanceClientCount,
   scrollProgress,
   onContentHeightChange,
+  isMobile = false,
+  docked = false,
 }: BillingSummaryStatsProps) {
   const prefersReduced = useReducedMotion();
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -139,6 +146,50 @@ export default function BillingSummaryStats({
     </motion.div>
   );
 
+  // ── Mobile: compact horizontal-scroll strip, no 3D deck animation ────
+  if (isMobile) {
+    return (
+      <div className="mb-3">
+        {/* Stat cards: horizontally scrollable strip on mobile */}
+        <div className="flex gap-2.5 overflow-x-auto pb-2 px-0.5 snap-x snap-mandatory scrollbar-none">
+          {statCards.map(({ label, value, sub, Icon, bg, ic, vc }) => (
+            <div
+              key={label}
+              className="flex-shrink-0 snap-start w-36 bg-card border border-base rounded-2xl p-3 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-1.5 mb-1.5">
+                <p className="text-[10px] font-medium text-faint uppercase tracking-wide leading-tight">{label}</p>
+                <div className={`w-6 h-6 rounded-lg ${bg} ${ic} flex items-center justify-center flex-shrink-0`}>
+                  <Icon className="w-3 h-3" />
+                </div>
+              </div>
+              <p className={`text-base font-bold ${vc} leading-none truncate`}>{value}</p>
+              <p className="text-[10px] text-faint mt-1 truncate">{sub}</p>
+            </div>
+          ))}
+        </div>
+        {/* Aging: 2-col grid, compact */}
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          {agingBuckets.map((b) => {
+            const pct = Math.round((b.amount / (billingSummary.totalPending || 1)) * 100);
+            return (
+              <div key={b.label} className="rounded-xl border border-base bg-card px-3 py-2.5 shadow-sm">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-[10px] font-medium text-faint">{b.label}</p>
+                  <p className={`text-[10px] font-medium ${b.tone}`}>{pct}%</p>
+                </div>
+                <p className={`text-sm font-bold ${b.tone}`}>{formatCurrency(b.amount)}</p>
+                <div className="w-full bg-surface rounded-full h-1 mt-1.5">
+                  <div className={`h-1 rounded-full ${b.bar}`} style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   // ── Reduced-motion: static, no animation ──────────────────────────────
   if (prefersReduced) {
     return (
@@ -154,10 +205,10 @@ export default function BillingSummaryStats({
     <motion.div
       className="mb-3 origin-top"
       style={{
-        height: sectionHeight,
-        opacity:   sectionOpacity,
+        height: docked ? 0 : sectionHeight,
+        opacity: docked ? 0 : sectionOpacity,
         overflow:  "hidden",
-        marginBottom: sectionMargin,
+        marginBottom: docked ? 0 : sectionMargin,
         perspective: "1100px",
       }}
     >

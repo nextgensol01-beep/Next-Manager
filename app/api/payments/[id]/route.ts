@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
+import { syncBillingTotalPaid } from "@/lib/billing-utils";
 import Payment from "@/models/Payment";
 import Client from "@/models/Client";
 import Billing from "@/models/Billing";
@@ -114,6 +115,16 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       { new: true }
     );
 
+    // Keep denormalized totalPaid on Billing in sync
+    if (paymentType !== "advance") {
+      await syncBillingTotalPaid(
+        Billing.collection,
+        Payment.collection,
+        clientId,
+        financialYear
+      );
+    }
+
     return NextResponse.json(updatedPayment);
   } catch (error) {
     console.error("PUT /api/payments/[id]:", error);
@@ -146,6 +157,17 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       data: payment.toObject(),
     });
     await Payment.findByIdAndDelete(id);
+
+    // Keep denormalized totalPaid on Billing in sync
+    if (payment.paymentType !== "advance") {
+      await syncBillingTotalPaid(
+        Billing.collection,
+        Payment.collection,
+        payment.clientId,
+        payment.financialYear
+      );
+    }
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("DELETE /api/payments/[id]:", error);

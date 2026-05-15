@@ -29,7 +29,7 @@ import {
 } from "./FinancialYearSupport";
 
 export default function FinancialYearPage() {
-  const [fy, setFy] = useFinancialYearState();
+  const [fy, setFy, financialYearLoaded] = useFinancialYearState();
   const { effectiveFinancialYear } = useFinancialYearPreference();
   const [modalOpen, setModalOpen] = useState(false);
   const [editRecord, setEditRecord] = useState<FYRecord | null>(null);
@@ -45,7 +45,7 @@ export default function FinancialYearPage() {
   const [targets, setTargets] = useState<TargetEntry[]>([]);
 
   const { data: records, loading: recLoading, refetch: refetchRecords } =
-    useCache<FYRecord[]>(`/api/financial-year?fy=${fy}`, { initialData: [] });
+    useCache<FYRecord[]>(`/api/financial-year?fy=${fy}`, { enabled: financialYearLoaded, initialData: [] });
   const { data: clients } = useCache<Client[]>("/api/clients", { initialData: [] });
 
   const getCategory = (id: string) => clients.find((c) => c.clientId === id)?.category || "";

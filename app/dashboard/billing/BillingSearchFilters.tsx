@@ -14,6 +14,8 @@ interface BillingSearchFiltersProps {
   onViewModeChange: (value: ViewMode) => void;
   filterOptions: BillingFilterOption[];
   merged?: boolean;
+  docked?: boolean;
+  dockOffset?: number;
   onHeightChange?: (height: number) => void;
   sticky?: boolean;
   compact?: boolean;
@@ -45,6 +47,8 @@ export default function BillingSearchFilters({
   onViewModeChange,
   filterOptions,
   merged = false,
+  docked = false,
+  dockOffset = 0,
   onHeightChange,
   sticky = true,
   stickyTop = 88,
@@ -79,8 +83,12 @@ export default function BillingSearchFilters({
   return (
     <motion.div
       ref={containerRef as React.Ref<HTMLDivElement>}
-      className={`mb-3 overflow-hidden border border-base bg-card/95 shadow-sm backdrop-blur-xl transition-[border-radius,border-color] duration-200 ${
-        merged ? "rounded-t-none rounded-b-2xl border-t-0" : "rounded-2xl"
+      className={`left-0 overflow-hidden border border-base bg-card/95 backdrop-blur-xl transition-all duration-300 ease-in-out ${
+        docked
+          ? "-mx-4 mb-0 w-[calc(100%+2rem)] rounded-none border-x-0 border-t-0 border-b shadow-sm md:-mx-6 md:w-[calc(100%+3rem)]"
+          : merged
+            ? "mb-3 w-full rounded-t-none rounded-b-2xl border-t-0 shadow-sm"
+            : "mb-3 w-full rounded-2xl shadow-sm"
       }`}
       style={
         sticky
@@ -90,7 +98,7 @@ export default function BillingSearchFilters({
               // topControlsHeight + animated stats height. When present,
               // framer-motion drives `top` directly without React re-renders,
               // so the bar smoothly tracks the collapsing stats section.
-              top: stickyTopOffset ?? stickyTop,
+              top: docked ? stickyTop - dockOffset : stickyTopOffset ?? stickyTop,
               zIndex: 31,
             }
           : undefined
@@ -101,7 +109,7 @@ export default function BillingSearchFilters({
         <Search className="w-4 h-4 flex-shrink-0 text-faint" />
         <input
           className="min-w-0 flex-1 border-0 bg-transparent py-1 text-sm text-default outline-none ring-0 placeholder:text-faint"
-          placeholder="Search by client name, ID, or status..."
+          placeholder="Search clients..."
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
         />
@@ -140,7 +148,7 @@ export default function BillingSearchFilters({
       </div>
 
       {/* Filter chips row */}
-      <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-2">
+      <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-2 scrollbar-none [-webkit-overflow-scrolling:touch]">
         {filterOptions.map((opt) => (
           <React.Fragment key={opt.value}>
             {opt.separator && (
@@ -149,7 +157,7 @@ export default function BillingSearchFilters({
             <button
               type="button"
               onClick={() => onStatusFilterChange(opt.value)}
-              className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors touch-manipulation ${
                 statusFilter === opt.value
                   ? "border-brand-300 bg-brand-50 text-brand-700 dark:border-brand-800 dark:bg-brand-900/25 dark:text-brand-300"
                   : "border-base bg-transparent text-muted hover:border-soft hover:text-default"

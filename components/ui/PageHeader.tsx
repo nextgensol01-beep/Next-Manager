@@ -12,7 +12,7 @@ export default function PageHeader({ title, description, action, children }: Pag
         </h1>
         {description && <p className="text-faint text-sm mt-1">{description}</p>}
       </div>
-      <div className="flex items-center gap-2 flex-shrink-0">{action}{children}</div>
+      <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">{action}{children}</div>
     </div>
   );
 }

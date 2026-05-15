@@ -32,6 +32,11 @@ export function getCached<T>(url: string): T | null {
   return null;
 }
 
+/** Stores fresh data for a cache key. Useful for optimistic UI updates. */
+export function setCached<T>(url: string, data: T) {
+  store.set(url, { data, at: Date.now() });
+}
+
 /**
  * Invalidate all cache entries whose key starts with any of the given prefixes.
  * Does NOT clear the data from memory — just marks it as stale by removing the entry.

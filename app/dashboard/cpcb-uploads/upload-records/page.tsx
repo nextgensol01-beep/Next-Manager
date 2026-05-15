@@ -120,7 +120,7 @@ const SummaryMetric = ({ label, value, accent = false }: { label: string; value:
 );
 
 export default function UploadRecordsPage() {
-  const [fy, setFy] = useFinancialYearState();
+  const [fy, setFy, financialYearLoaded] = useFinancialYearState();
   const [search, setSearch] = useState("");
   const [activeView, setActiveView] = useState<UploadViewMode>("summary");
   const [modalOpen, setModalOpen] = useState(false);
@@ -140,7 +140,7 @@ export default function UploadRecordsPage() {
   const { data: rawClients } = useCache<Client[]>("/api/clients");
   const clients = useMemo(() => (Array.isArray(rawClients) ? rawClients : []), [rawClients]);
 
-  const { data: rawUploads, loading, refetch } = useCache<UploadRecord[]>(`/api/upload-records?fy=${fy}`);
+  const { data: rawUploads, loading, refetch } = useCache<UploadRecord[]>(`/api/upload-records?fy=${fy}`, { enabled: financialYearLoaded });
   const uploads = useMemo(() => (Array.isArray(rawUploads) ? rawUploads : []), [rawUploads]);
 
   const clientName = useCallback(

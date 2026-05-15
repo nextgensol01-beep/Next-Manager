@@ -319,8 +319,9 @@ export function useFinancialYearState() {
     : financialYear;
 
   useEffect(() => {
+    const previousDefault = previousDefaultRef.current;
     setFinancialYear((current) => (
-      current === previousDefaultRef.current ? effectiveFinancialYear : current
+      current === previousDefault ? effectiveFinancialYear : current
     ));
     previousDefaultRef.current = effectiveFinancialYear;
   }, [effectiveFinancialYear]);

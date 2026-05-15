@@ -21,6 +21,8 @@ export interface IBilling extends Document {
   targetCharges: number;
   otherCharges: number;
   totalAmount: number;
+  /** Denormalized cache of sum of non-advance payments. Updated by Payment write routes. */
+  totalPaid: number;
   dueDate?: Date;
   targetBreakdown?: IBillingTargetBreakdownRow[];
   notes?: string;
@@ -57,6 +59,8 @@ const BillingSchema = new Schema<IBilling>(
     targetCharges: { type: Number, default: 0 },
     otherCharges: { type: Number, default: 0 },
     totalAmount: { type: Number, default: 0 },
+    /** Denormalized sum of non-advance payments. Kept in sync by Payment write routes. */
+    totalPaid: { type: Number, default: 0 },
     dueDate: { type: Date, default: null },
     targetBreakdown: { type: [BillingTargetBreakdownSchema], default: [] },
     notes: { type: String, default: "" },

@@ -995,8 +995,7 @@ export default function FYTabBar({ value, onChange }: FYTabBarProps) {
   useEffect(() => {
     const t = setTimeout(() => { scrollToSelected(value); updateFades(); }, 100);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [scrollToSelected, updateFades, value]);
 
   useEffect(() => {
     let raf: number;

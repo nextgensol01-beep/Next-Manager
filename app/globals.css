@@ -885,3 +885,42 @@ tbody tr {
     rgba(255,255,255,0.06) 320px
   );
 }
+
+/* ── Mobile billing stats horizontal scroller ──────────────────────────── */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Mobile billing page optimizations ─────────────────────────────────── */
+@media (max-width: 639px) {
+  /* Tighter page-level horizontal padding on small screens */
+  .billing-mobile-px {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  /* Make table-cell text slightly smaller in expanded sub-tables on mobile */
+  .table-cell {
+    font-size: 13px;
+  }
+
+  /* Ensure glass-tray wraps cleanly when forced onto desktop */
+  .glass-tray {
+    flex-wrap: wrap;
+  }
+
+  /* Compact modal padding on mobile */
+  .modal-mobile-compact {
+    padding: 16px !important;
+  }
+}
+
+/* Custom xs breakpoint (between default sm=640 and base) */
+@media (min-width: 480px) {
+  .xs\:inline { display: inline !important; }
+  .xs\:hidden { display: none !important; }
+}

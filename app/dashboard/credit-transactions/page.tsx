@@ -47,7 +47,7 @@ const CREDIT_TYPES = [
 ];
 
 export default function CreditTransactionsPage() {
-  const [fy, setFy] = useFinancialYearState();
+  const [fy, setFy, financialYearLoaded] = useFinancialYearState();
   const { effectiveFinancialYear } = useFinancialYearPreference();
   const [creditTypeFilter, setCreditTypeFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -131,7 +131,7 @@ export default function CreditTransactionsPage() {
     fy,
     ...(creditTypeFilter !== "all" ? { creditType: creditTypeFilter } : {}),
   })}`;
-  const { data: rawTx, loading: txLoading, refetch: refetchTransactions } = useCache<Transaction[]>(txUrl);
+  const { data: rawTx, loading: txLoading, refetch: refetchTransactions } = useCache<Transaction[]>(txUrl, { enabled: financialYearLoaded });
   const transactions = useMemo(() => (Array.isArray(rawTx) ? rawTx : []), [rawTx]);
 
   const clientName = useCallback((id?: string) => {

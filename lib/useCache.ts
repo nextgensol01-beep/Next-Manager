@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { cachedFetch, getCached, invalidate } from "./cache";
+import { cachedFetch, getCached, invalidate, setCached } from "./cache";
 
 export { invalidate };
 
@@ -8,19 +8,19 @@ export { invalidate };
 export function useCache<T>(
   url: string,
   options: { enabled?: boolean; initialData: T }
-): { data: T; loading: boolean; error: string | null; refetch: () => void };
+): { data: T; loading: boolean; error: string | null; refetch: () => void; mutate: (next: T | ((current: T) => T)) => void };
 
 // Overload 2: no initialData → data is T | null
 export function useCache<T>(
   url: string,
   options?: { enabled?: boolean; initialData?: undefined }
-): { data: T | null; loading: boolean; error: string | null; refetch: () => void };
+): { data: T | null; loading: boolean; error: string | null; refetch: () => void; mutate: (next: T | ((current: T | null) => T)) => void };
 
 // Implementation
 export function useCache<T>(
   url: string,
   { enabled = true, initialData }: { enabled?: boolean; initialData?: T } = {}
-): { data: T | null; loading: boolean; error: string | null; refetch: () => void } {
+): { data: T | null; loading: boolean; error: string | null; refetch: () => void; mutate: (next: T | ((current: T | null) => T)) => void } {
   // Stable ref for initialData — never changes after mount, avoids stale closure issues
   const initRef = useRef<T | null>(initialData !== undefined ? initialData : null);
   const mountedRef  = useRef(true);
@@ -42,6 +42,7 @@ export function useCache<T>(
   const load = useCallback(async (silent = false) => {
     if (!enabledRef.current || fetchingRef.current) return;
     fetchingRef.current = true;
+    const requestUrl = urlRef.current;
 
     if (!silent) {
       setState((s) => {
@@ -52,10 +53,12 @@ export function useCache<T>(
     }
 
     try {
-      const data = await cachedFetch<T>(urlRef.current);
-      if (mountedRef.current) setState({ data, loading: false, error: null });
+      const data = await cachedFetch<T>(requestUrl);
+      if (mountedRef.current && enabledRef.current && urlRef.current === requestUrl) {
+        setState({ data, loading: false, error: null });
+      }
     } catch (e) {
-      if (mountedRef.current)
+      if (mountedRef.current && enabledRef.current && urlRef.current === requestUrl)
         setState((s) => ({ ...s, loading: false, error: String(e) }));
     } finally {
       fetchingRef.current = false;
@@ -87,5 +90,15 @@ export function useCache<T>(
     load(true);
   }, [load]);
 
-  return { ...state, refetch };
+  const mutate = useCallback((next: T | ((current: T | null) => T)) => {
+    setState((currentState) => {
+      const nextData = typeof next === "function"
+        ? (next as (current: T | null) => T)(currentState.data)
+        : next;
+      setCached(urlRef.current, nextData);
+      return { data: nextData, loading: false, error: null };
+    });
+  }, []);
+
+  return { ...state, refetch, mutate };
 }

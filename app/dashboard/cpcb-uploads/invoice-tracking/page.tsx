@@ -349,7 +349,7 @@ const InvoiceEntriesCards = ({
 
 export default function InvoiceTrackingPage() {
   const prefersReducedMotion = useReducedMotion();
-  const [fy, setFy] = useFinancialYearState();
+  const [fy, setFy, financialYearLoaded] = useFinancialYearState();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [activeView, setActiveView] = useState<InvoiceViewMode>("coverage");
@@ -378,7 +378,7 @@ export default function InvoiceTrackingPage() {
     ? `/api/invoices?fy=${encodeURIComponent(fy)}&clientId=${encodeURIComponent(selectedClientId)}`
     : `/api/invoices?fy=${encodeURIComponent(fy)}${trimmedDebouncedSearch ? `&search=${encodedSearch}` : ""}`;
 
-  const { data: rawClientSummaries, loading: coverageLoading, refetch: refetchCoverage } = useCache<ClientInvoiceSummary[]>(coverageUrl);
+  const { data: rawClientSummaries, loading: coverageLoading, refetch: refetchCoverage } = useCache<ClientInvoiceSummary[]>(coverageUrl, { enabled: financialYearLoaded });
   const clientSummaries = useMemo(
     () => (Array.isArray(rawClientSummaries) ? rawClientSummaries : []),
     [rawClientSummaries]
@@ -386,7 +386,7 @@ export default function InvoiceTrackingPage() {
 
   const { data: rawInvoices, loading: entriesLoading, refetch: refetchEntries } = useCache<Invoice[]>(
     entriesUrl,
-    { enabled: entriesEnabled }
+    { enabled: financialYearLoaded && entriesEnabled }
   );
   const invoices = useMemo(() => (Array.isArray(rawInvoices) ? rawInvoices : []), [rawInvoices]);
   const showEntriesPanel = activeView === "entries" || Boolean(trimmedDebouncedSearch);

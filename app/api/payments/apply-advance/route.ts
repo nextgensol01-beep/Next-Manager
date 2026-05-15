@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
+import { syncBillingTotalPaid } from "@/lib/billing-utils";
 import Payment from "@/models/Payment";
 import Billing from "@/models/Billing";
 import DeletedRecord from "@/models/DeletedRecord";
@@ -170,6 +171,14 @@ export async function POST(req: NextRequest) {
         remaining = 0;
       }
     }
+
+    // Keep denormalized totalPaid on Billing in sync
+    await syncBillingTotalPaid(
+      Billing.collection,
+      Payment.collection,
+      clientId,
+      financialYear
+    );
 
     return NextResponse.json({ success: true, payment: newBillingPayment }, { status: 201 });
   } catch (error) {

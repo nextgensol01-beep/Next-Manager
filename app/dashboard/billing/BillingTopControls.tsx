@@ -14,8 +14,8 @@ interface BillingTopControlsProps {
   advanceCount: number;
   onHeightChange?: (height: number) => void;
   merged?: boolean;
-  sticky?: boolean;
-  compact?: boolean;
+  docked?: boolean;
+  dockOffset?: number;
 }
 
 /**
@@ -32,7 +32,8 @@ export default function BillingTopControls({
   advanceCount,
   onHeightChange,
   merged = false,
-  sticky = true,
+  docked = false,
+  dockOffset = 0,
 }: BillingTopControlsProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tabs = [
@@ -67,10 +68,14 @@ export default function BillingTopControls({
   return (
     <div
       ref={containerRef}
-      className={`overflow-hidden border border-base bg-card/95 shadow-sm backdrop-blur-xl transition-[border-radius,margin] duration-200 ${
-        merged ? "mb-0 rounded-t-2xl rounded-b-none" : "mb-3 rounded-2xl"
+      className={`left-0 overflow-hidden border border-base bg-card/95 backdrop-blur-xl transition-all duration-300 ease-in-out ${
+        docked
+          ? "-mx-4 mb-0 w-[calc(100%+2rem)] rounded-none border-x-0 border-t-0 border-b shadow-sm md:-mx-6 md:w-[calc(100%+3rem)]"
+          : merged
+            ? "mb-0 w-full rounded-t-2xl rounded-b-none shadow-sm"
+            : "mb-3 w-full rounded-2xl shadow-sm"
       }`}
-      style={sticky ? { position: "sticky", top: 0, zIndex: 32 } : undefined}
+      style={{ position: "sticky", top: docked ? -dockOffset : 0, zIndex: 32 }}
     >
       {/* Row 1 — FY picker */}
       <div className="px-1 py-1">
@@ -79,21 +84,22 @@ export default function BillingTopControls({
 
       {/* Row 2 — tab buttons */}
       <div className="border-t border-soft bg-surface/20">
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+        <div className="flex items-center gap-1.5 px-3 py-2">
           {tabs.map(({ value, label, count, Icon }) => (
             <button
               key={value}
               type="button"
               onClick={() => onTabChange(value)}
-              className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-colors flex-1 sm:flex-none justify-center sm:justify-start ${
                 activeTab === value
                   ? "bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300"
                   : "text-muted hover:bg-surface hover:text-default"
               }`}
             >
-              <Icon className="w-4 h-4" />
-              {label}
-              <span className={`rounded-full px-2 py-0.5 text-[11px] ${
+              <Icon className="w-4 h-4 flex-shrink-0" />
+              <span className="hidden xs:inline sm:inline">{label}</span>
+              <span className="xs:hidden sm:hidden">{value === "billing" ? "Billing" : "Advances"}</span>
+              <span className={`rounded-full px-1.5 py-0.5 text-[11px] flex-shrink-0 ${
                 activeTab === value
                   ? "bg-brand-100 text-brand-700 dark:bg-brand-800/70 dark:text-brand-100"
                   : "bg-surface border border-base text-faint"

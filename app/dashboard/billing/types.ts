@@ -59,6 +59,8 @@ export interface BillingSummary {
   totalPending: number;
   totalAdvance: number;
   invoiceGap: number;
+  invoicePendingCount: number;
+  invoiceCreatedCount: number;
   paidCount: number;
   partialCount: number;
   unpaidCount: number;

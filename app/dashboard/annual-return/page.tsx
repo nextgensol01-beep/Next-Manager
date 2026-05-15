@@ -89,7 +89,7 @@ function buildDraftEmailOptions(contacts: NonNullable<AnnualReturn["client"]>["c
 }
 
 export default function AnnualReturnPage() {
-  const [fy, setFy]             = useFinancialYearState();
+  const [fy, setFy, financialYearLoaded] = useFinancialYearState();
   const { effectiveFinancialYear } = useFinancialYearPreference();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch]     = useState("");
@@ -125,7 +125,7 @@ export default function AnnualReturnPage() {
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
     ...(search ? { search } : {}),
   })}`;
-  const { data: rawRecords, loading, refetch: refetchRecords } = useCache<AnnualReturn[]>(arUrl);
+  const { data: rawRecords, loading, refetch: refetchRecords } = useCache<AnnualReturn[]>(arUrl, { enabled: financialYearLoaded });
   const records = Array.isArray(rawRecords) ? rawRecords : [];
   const { data: rawClients } = useCache<Client[]>("/api/clients");
   const clients = Array.isArray(rawClients) ? rawClients : [];
