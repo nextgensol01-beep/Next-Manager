@@ -20,16 +20,17 @@ body {
 }
 
 .dashboard-shell {
-  min-height: 100dvh;
-  overflow: visible;
+  height: 100dvh;
+  overflow: hidden;
 }
 .dashboard-content {
-  min-height: 100dvh;
-  overflow: visible;
+  height: 100dvh;
+  overflow: hidden;
 }
 .dashboard-main {
   min-height: 0;
-  overflow: visible;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding-bottom: calc(1rem + env(safe-area-inset-bottom));
 }
 .dashboard-topbar {
@@ -924,3 +925,25 @@ tbody tr {
   .xs\:inline { display: inline !important; }
   .xs\:hidden { display: none !important; }
 }
+
+/* ── Settings panel animations ────────────────────────────────────────── */
+@keyframes slideInFromRight {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes slideOutToLeft {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-100%); }
+}
+@keyframes slideInFromLeft {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes slideOutToRight {
+  from { transform: translateX(0); }
+  to   { transform: translateX(100%); }
+}
+.panel-enter  { animation: slideInFromRight 0.28s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+.panel-exit   { animation: slideOutToLeft  0.28s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+.panel-enter-back { animation: slideInFromLeft 0.28s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+.panel-exit-back  { animation: slideOutToRight 0.28s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
