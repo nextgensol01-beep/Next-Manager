@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import SettingsSidebar, { SETTINGS_TABS } from "./SettingsSidebar";
 import GeneralPanel from "./GeneralPanel";
@@ -10,21 +11,41 @@ const PANELS = [GeneralPanel, AccessPanel, CustomFieldsPanel];
 const ANIM_DURATION = 280;
 const LARGE_TITLE_THRESHOLD = 52;
 
+// Map tab index <-> URL param value
+const TAB_SLUGS = ["general", "access", "custom-fields"];
+
 export default function SettingsShell() {
-  const [activeTab, setActiveTab] = useState(0);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // ── Desktop: local state only (URL param ignored) ──
+  const [desktopTab, setDesktopTab] = useState(0);
   const [exitingTab, setExitingTab] = useState<number | null>(null);
-  const [mobileView, setMobileView] = useState<"list" | "detail">("list");
-  const [listScrollY, setListScrollY] = useState(0);
   const animatingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Mobile: derive active tab + view from URL param ──
+  const tabParam = searchParams.get("tab");
+  const mobileTabIndex = TAB_SLUGS.indexOf(tabParam ?? "");
+  const activeTabMobile = mobileTabIndex >= 0 ? mobileTabIndex : 0;
+  const mobileView = tabParam ? "detail" : "list";
+
+  // ── Scroll tracking for large title ──
+  const [listScrollY, setListScrollY] = useState(0);
   const listScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
-  const handleListScroll = useCallback(() => {
-    if (listScrollRef.current) {
-      setListScrollY(listScrollRef.current.scrollTop);
+  // Reset scroll when going back to list
+  useEffect(() => {
+    if (!tabParam && listScrollRef.current) {
+      listScrollRef.current.scrollTop = 0;
+      setListScrollY(0);
     }
+  }, [tabParam]);
+
+  const handleListScroll = useCallback(() => {
+    if (listScrollRef.current) setListScrollY(listScrollRef.current.scrollTop);
   }, []);
 
   const largeTitleOpacity = Math.max(0, 1 - listScrollY / LARGE_TITLE_THRESHOLD);
@@ -32,22 +53,29 @@ export default function SettingsShell() {
   const largeTitleTranslate = Math.min(16, listScrollY * 0.3);
   const isScrolled = listScrollY > 0;
 
-  const selectTab = (index: number) => {
-    setMobileView("detail");
-    if (animatingRef.current || index === activeTab) return;
+  // ── Desktop tab selection (local state + animation) ──
+  const selectDesktopTab = (index: number) => {
+    if (animatingRef.current || index === desktopTab) return;
     animatingRef.current = true;
-    setExitingTab(activeTab);
-    setActiveTab(index);
+    setExitingTab(desktopTab);
+    setDesktopTab(index);
     timerRef.current = setTimeout(() => {
       setExitingTab(null);
       animatingRef.current = false;
     }, ANIM_DURATION);
   };
 
-  const goBack = () => setMobileView("list");
+  // ── Mobile tab selection (push URL param → browser history) ──
+  const selectMobileTab = (index: number) => {
+    router.push(`?tab=${TAB_SLUGS[index]}`);
+  };
 
-  const ActivePanel = PANELS[activeTab];
-  const ExitingPanel = exitingTab !== null ? PANELS[exitingTab] : null;
+  // ── Mobile go back (pop URL → browser back) ──
+  const goBack = () => router.back();
+
+  const DesktopActivePanel = PANELS[desktopTab];
+  const DesktopExitingPanel = exitingTab !== null ? PANELS[exitingTab] : null;
+  const MobileActivePanel = PANELS[activeTabMobile];
 
   return (
     <>
@@ -57,25 +85,25 @@ export default function SettingsShell() {
           <p className="px-4 pt-1 pb-2 text-[11px] font-semibold uppercase tracking-widest text-faint">
             Settings
           </p>
-          <SettingsSidebar activeTab={activeTab} onSelect={selectTab} />
+          <SettingsSidebar activeTab={desktopTab} onSelect={selectDesktopTab} />
         </div>
         <div className="flex-1 min-w-0 overflow-y-auto bg-[var(--color-surface)]">
           <div className="relative overflow-hidden min-h-full">
-            {ExitingPanel && (
+            {DesktopExitingPanel && (
               <div
                 key={`exit-${exitingTab}`}
                 className="panel-exit absolute inset-0 px-6 py-5"
                 style={{ pointerEvents: "none" }}
               >
-                <ExitingPanel />
+                <DesktopExitingPanel />
               </div>
             )}
             <div
-              key={`enter-${activeTab}`}
+              key={`enter-${desktopTab}`}
               className={exitingTab !== null ? "panel-enter" : ""}
               style={{ padding: "20px 24px 32px" }}
             >
-              <ActivePanel />
+              <DesktopActivePanel />
             </div>
           </div>
         </div>
@@ -91,14 +119,13 @@ export default function SettingsShell() {
           }`}
           style={{ zIndex: mobileView === "list" ? 10 : 5, backgroundColor: "var(--color-surface)" }}
         >
-          {/* Scroll area fills full container, scrolls under the floating nav bar */}
+          {/* Scroll area */}
           <div
             ref={listScrollRef}
             onScroll={handleListScroll}
             className="absolute inset-0 overflow-y-auto overflow-x-hidden"
             style={{ WebkitOverflowScrolling: "touch" }}
           >
-            {/* 44px top spacer so content starts below the nav bar */}
             <div style={{ height: "44px" }} />
 
             {/* Large title */}
@@ -115,10 +142,10 @@ export default function SettingsShell() {
               </h1>
             </div>
 
-            <SettingsSidebar activeTab={activeTab} onSelect={selectTab} mobile />
+            <SettingsSidebar activeTab={activeTabMobile} onSelect={selectMobileTab} mobile />
           </div>
 
-          {/* Floating nav bar — absolutely overlaid, zero layout cost */}
+          {/* Floating nav bar */}
           <div
             className="absolute top-0 left-0 right-0 flex items-center justify-center"
             style={{
@@ -129,9 +156,7 @@ export default function SettingsShell() {
                 : "transparent",
               backdropFilter: isScrolled ? "blur(16px)" : "none",
               WebkitBackdropFilter: isScrolled ? "blur(16px)" : "none",
-              borderBottom: isScrolled
-                ? "1px solid var(--color-border)"
-                : "1px solid transparent",
+              borderBottom: isScrolled ? "1px solid var(--color-border)" : "1px solid transparent",
               transition: "background-color 150ms ease, border-color 150ms ease",
             }}
           >
@@ -170,13 +195,13 @@ export default function SettingsShell() {
               Settings
             </button>
             <span className="absolute left-1/2 -translate-x-1/2 text-[15px] font-semibold text-default pointer-events-none">
-              {SETTINGS_TABS[activeTab]?.label}
+              {SETTINGS_TABS[activeTabMobile]?.label}
             </span>
           </div>
 
           <div className="flex-1 overflow-y-auto overflow-x-hidden" style={{ WebkitOverflowScrolling: "touch" }}>
             <div className="px-0 py-2">
-              <ActivePanel />
+              <MobileActivePanel />
             </div>
           </div>
         </div>
