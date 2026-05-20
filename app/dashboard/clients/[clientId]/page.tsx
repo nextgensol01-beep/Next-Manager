@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { formatCurrency, formatDate, PAYMENT_MODES } from "@/lib/utils";
@@ -7,6 +7,7 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { invalidate, useCache } from "@/lib/useCache";
+import { usePendingList } from "@/lib/usePendingList";
 import type { ClientCustomFieldDefinition, ClientCustomFieldValues } from "@/lib/clientCustomFields";
 import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearState } from "@/app/providers";
@@ -96,10 +97,10 @@ export default function ClientProfilePage() {
 
   const [client, setClient] = useState<Client | null>(null);
   const [fyRecords, setFyRecords] = useState<FYRecord[]>([]);
-  const [allBillings, setAllBillings] = useState<Billing[]>([]);
-  const [allPayments, setAllPayments] = useState<Payment[]>([]);
-  const [allInvoices, setAllInvoices] = useState<InvoiceTrackingRecord[]>([]);
-  const [allUploadRecords, setAllUploadRecords] = useState<UploadRecord[]>([]);
+  const { items: allBillings, setAll: setAllBillings, addItem: addBillingItem, editItem: editBillingItem, deleteItem: deleteBillingItem } = usePendingList<Billing>();
+  const { items: allPayments, setAll: setAllPayments, addItem: addPaymentItem, editItem: editPaymentItem, deleteItem: deletePaymentItem } = usePendingList<Payment>();
+  const { items: allInvoices, setAll: setAllInvoices, addItem: addInvoiceItem } = usePendingList<InvoiceTrackingRecord>();
+  const { items: allUploadRecords, setAll: setAllUploadRecords, addItem: addUploadItem } = usePendingList<UploadRecord>();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [activitiesTotal, setActivitiesTotal] = useState(0);
@@ -561,8 +562,14 @@ export default function ClientProfilePage() {
         return;
       }
 
+      const saved = await response.json();
+      setDocuments((prev) => {
+        if (editingDocumentId) {
+          return prev.map((d) => d._id === editingDocumentId ? saved : d);
+        }
+        return [...prev, saved];
+      });
       closeDocumentModal();
-      await loadData();
       toast.success(editingDocumentId ? "Document updated!" : "Document added!");
     } finally {
       setInlineSaving(false);
@@ -578,8 +585,8 @@ export default function ClientProfilePage() {
         toast.error("Failed to remove document.");
         return;
       }
+      setDocuments((prev) => prev.filter((d) => d._id !== id));
       invalidate("/api/trash", "/api/documents");
-      await loadData();
       toast.success("Document moved to recycle bin");
     } finally {
       setBusyAction(null);
@@ -611,15 +618,20 @@ export default function ClientProfilePage() {
   const saveInvoiceTracking = async (e: React.FormEvent) => {
     e.preventDefault();
     setInlineSaving(true);
+    const payload = {
+      clientId,
+      financialYear: invoiceForm.financialYear,
+      invoiceType: invoiceForm.invoiceType,
+      receivedVia: invoiceForm.receivedVia,
+      fromDate: invoiceForm.fromDate,
+      toDate: invoiceForm.toDate,
+    };
+
+    const { commit, rollback } = addInvoiceItem({ ...payload, _id: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    closeInvoiceModal();
+    setSelectedFy(payload.financialYear);
+
     try {
-      const payload = {
-        clientId,
-        financialYear: invoiceForm.financialYear,
-        invoiceType: invoiceForm.invoiceType,
-        receivedVia: invoiceForm.receivedVia,
-        fromDate: invoiceForm.fromDate,
-        toDate: invoiceForm.toDate,
-      };
       const response = await fetch("/api/invoices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -628,15 +640,18 @@ export default function ClientProfilePage() {
 
       if (!response.ok) {
         const data = await response.json().catch(() => null);
+        rollback();
         toast.error(data?.error || "Failed to add invoice tracking.");
         return;
       }
 
-      closeInvoiceModal();
+      const saved = await response.json();
+      commit(saved);
       invalidate("/api/invoices");
-      await loadData();
-      setSelectedFy(payload.financialYear);
       toast.success("Invoice tracking added!");
+    } catch {
+      rollback();
+      toast.error("Something went wrong saving invoice.");
     } finally {
       setInlineSaving(false);
     }
@@ -671,17 +686,22 @@ export default function ClientProfilePage() {
   const saveUploadRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     setInlineSaving(true);
+    const payload = {
+      clientId,
+      financialYear: uploadForm.financialYear,
+      uploadType: uploadForm.uploadType,
+      cat1: Number(uploadForm.cat1) || 0,
+      cat2: Number(uploadForm.cat2) || 0,
+      cat3: Number(uploadForm.cat3) || 0,
+      cat4: Number(uploadForm.cat4) || 0,
+      invoiceCount: Number(uploadForm.invoiceCount) || 0,
+    };
+
+    const { commit, rollback } = addUploadItem({ ...payload, _id: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    closeUploadModal();
+    setSelectedFy(payload.financialYear);
+
     try {
-      const payload = {
-        clientId,
-        financialYear: uploadForm.financialYear,
-        uploadType: uploadForm.uploadType,
-        cat1: Number(uploadForm.cat1) || 0,
-        cat2: Number(uploadForm.cat2) || 0,
-        cat3: Number(uploadForm.cat3) || 0,
-        cat4: Number(uploadForm.cat4) || 0,
-        invoiceCount: Number(uploadForm.invoiceCount) || 0,
-      };
       const response = await fetch("/api/upload-records", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -690,15 +710,18 @@ export default function ClientProfilePage() {
 
       if (!response.ok) {
         const data = await response.json().catch(() => null);
+        rollback();
         toast.error(data?.error || "Failed to add upload record.");
         return;
       }
 
-      closeUploadModal();
+      const saved = await response.json();
+      commit(saved);
       invalidate("/api/upload-records");
-      await loadData();
-      setSelectedFy(payload.financialYear);
       toast.success("Upload record added!");
+    } catch {
+      rollback();
+      toast.error("Something went wrong saving upload record.");
     } finally {
       setInlineSaving(false);
     }
@@ -745,16 +768,40 @@ export default function ClientProfilePage() {
   const saveBilling = async (e: React.FormEvent) => {
     e.preventDefault();
     setInlineSaving(true);
+    const payload = {
+      clientId,
+      financialYear: billingForm.financialYear,
+      govtCharges: Number(billingForm.govtCharges) || 0,
+      consultancyCharges: Number(billingForm.consultancyCharges) || 0,
+      targetCharges: Number(billingForm.targetCharges) || 0,
+      otherCharges: Number(billingForm.otherCharges) || 0,
+      notes: billingForm.notes.trim(),
+    };
+
+    // Optimistically update UI before API call
+    const optimisticBilling = {
+      ...payload,
+      _id: editingBillingId || "",
+      totalAmount: payload.govtCharges + payload.consultancyCharges + payload.targetCharges + payload.otherCharges,
+      totalPaid: editingBillingId ? (allBillings.find((b) => b._id === editingBillingId)?.totalPaid ?? 0) : 0,
+      pendingAmount: editingBillingId ? (allBillings.find((b) => b._id === editingBillingId)?.pendingAmount ?? 0) : 0,
+      paymentStatus: (editingBillingId ? (allBillings.find((b) => b._id === editingBillingId)?.paymentStatus) : "pending") as Billing["paymentStatus"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    let ops: ReturnType<typeof editBillingItem> | ReturnType<typeof addBillingItem> | null = null;
+
+    if (editingBillingId) {
+      ops = editBillingItem(editingBillingId, optimisticBilling);
+    } else {
+      ops = addBillingItem(optimisticBilling);
+    }
+
+    closeBillingModal();
+    setSelectedFy(payload.financialYear);
+
     try {
-      const payload = {
-        clientId,
-        financialYear: billingForm.financialYear,
-        govtCharges: Number(billingForm.govtCharges) || 0,
-        consultancyCharges: Number(billingForm.consultancyCharges) || 0,
-        targetCharges: Number(billingForm.targetCharges) || 0,
-        otherCharges: Number(billingForm.otherCharges) || 0,
-        notes: billingForm.notes.trim(),
-      };
       const response = await fetch(
         editingBillingId ? `/api/billing/${editingBillingId}` : "/api/billing",
         {
@@ -766,14 +813,17 @@ export default function ClientProfilePage() {
 
       if (!response.ok) {
         const data = await response.json().catch(() => null);
+        ops?.rollback?.();
         toast.error(data?.error || `Failed to ${editingBillingId ? "update" : "save"} billing.`);
         return;
       }
 
-      closeBillingModal();
-      await loadData();
-      setSelectedFy(payload.financialYear);
+      const saved = await response.json();
+      ops?.commit?.(saved);
       toast.success(editingBillingId ? "Billing updated!" : "Billing saved!");
+    } catch {
+      ops?.rollback?.();
+      toast.error("Something went wrong saving billing.");
     } finally {
       setInlineSaving(false);
     }
@@ -781,17 +831,19 @@ export default function ClientProfilePage() {
 
   const deleteBilling = async (record: Billing) => {
     if (!confirm(`Move billing for FY ${record.financialYear} to recycle bin?`)) return;
-    setBusyAction(`billing-${record._id}`);
+    const { commit, rollback } = deleteBillingItem(record._id);
     try {
       const response = await fetch(`/api/billing/${record._id}`, { method: "DELETE" });
       if (!response.ok) {
+        rollback();
         toast.error("Failed to remove billing.");
         return;
       }
-      await loadData();
+      commit();
       toast.success("Billing moved to recycle bin");
-    } finally {
-      setBusyAction(null);
+    } catch {
+      rollback();
+      toast.error("Something went wrong deleting billing.");
     }
   };
 
@@ -839,17 +891,36 @@ export default function ClientProfilePage() {
   const savePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setInlineSaving(true);
+    const payload = {
+      clientId,
+      financialYear: paymentForm.financialYear,
+      paymentType: paymentForm.paymentType,
+      amountPaid: Number(paymentForm.amountPaid),
+      paymentDate: paymentForm.paymentDate,
+      paymentMode: paymentForm.paymentMode,
+      referenceNumber: paymentForm.referenceNumber.trim(),
+      notes: paymentForm.notes.trim(),
+    };
+
+    const optimisticPayment = {
+      ...payload,
+      _id: editingPaymentId || "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    let ops: ReturnType<typeof editPaymentItem> | ReturnType<typeof addPaymentItem> | null = null;
+
+    if (editingPaymentId) {
+      ops = editPaymentItem(editingPaymentId, optimisticPayment);
+    } else {
+      ops = addPaymentItem(optimisticPayment);
+    }
+
+    closePaymentModal();
+    setSelectedFy(payload.financialYear);
+
     try {
-      const payload = {
-        clientId,
-        financialYear: paymentForm.financialYear,
-        paymentType: paymentForm.paymentType,
-        amountPaid: Number(paymentForm.amountPaid),
-        paymentDate: paymentForm.paymentDate,
-        paymentMode: paymentForm.paymentMode,
-        referenceNumber: paymentForm.referenceNumber.trim(),
-        notes: paymentForm.notes.trim(),
-      };
       const response = await fetch(
         editingPaymentId ? `/api/payments/${editingPaymentId}` : "/api/payments",
         {
@@ -861,14 +932,17 @@ export default function ClientProfilePage() {
 
       if (!response.ok) {
         const data = await response.json().catch(() => null);
+        ops?.rollback?.();
         toast.error(data?.error || `Failed to ${editingPaymentId ? "update" : "record"} payment.`);
         return;
       }
 
-      closePaymentModal();
-      await loadData();
-      setSelectedFy(payload.financialYear);
+      const saved = await response.json();
+      ops?.commit?.(saved);
       toast.success(editingPaymentId ? "Payment updated!" : "Payment recorded!");
+    } catch {
+      ops?.rollback?.();
+      toast.error("Something went wrong saving payment.");
     } finally {
       setInlineSaving(false);
     }
@@ -876,17 +950,19 @@ export default function ClientProfilePage() {
 
   const deletePayment = async (paymentId: string) => {
     if (!confirm("Move this payment to recycle bin?")) return;
-    setBusyAction(`payment-${paymentId}`);
+    const { commit, rollback } = deletePaymentItem(paymentId);
     try {
       const response = await fetch(`/api/payments/${paymentId}`, { method: "DELETE" });
       if (!response.ok) {
+        rollback();
         toast.error("Failed to remove payment.");
         return;
       }
-      await loadData();
+      commit();
       toast.success("Payment moved to recycle bin");
-    } finally {
-      setBusyAction(null);
+    } catch {
+      rollback();
+      toast.error("Something went wrong deleting payment.");
     }
   };
 
@@ -947,8 +1023,15 @@ export default function ClientProfilePage() {
         return;
       }
 
+      const saved = await response.json();
+      // Update only fyRecords in state — no full page reload
+      setFyRecords((prev) => {
+        const exists = prev.some((r) => r.financialYear === saved.financialYear);
+        return exists
+          ? prev.map((r) => r.financialYear === saved.financialYear ? saved : r)
+          : [...prev, saved];
+      });
       closeFyModal();
-      await loadData();
       setSelectedFy(payload.financialYear);
       invalidate("/api/financial-year", "/api/dashboard", "/api/activities");
       toast.success(isPWP ? "Credit data saved!" : "FY data saved!");
@@ -1086,7 +1169,6 @@ export default function ClientProfilePage() {
       }
 
       closeReminderModal();
-      await loadData();
       toast.success(`Reminder sent to ${reminderRecipients.length} recipient${reminderRecipients.length === 1 ? "" : "s"}!`);
     } finally {
       setReminderSending(false);
@@ -2000,7 +2082,6 @@ export default function ClientProfilePage() {
             billing={billing}
             payments={payments}
             billingLastUpdated={billingLastUpdated}
-            busyAction={busyAction}
             hasFyData={Boolean(fyData)}
             isPWP={isPWP}
             openReminderModal={openReminderModal}

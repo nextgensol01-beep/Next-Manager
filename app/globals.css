@@ -29,9 +29,16 @@ body {
 }
 .dashboard-main {
   min-height: 0;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+
+/* Hide scrollbars on mobile for iOS-native feel */
+@media (max-width: 767px) {
+  .settings-scroll::-webkit-scrollbar {
+    display: none;
+  }
 }
 .dashboard-topbar {
   position: sticky;

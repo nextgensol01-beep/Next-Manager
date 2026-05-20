@@ -1,15 +1,16 @@
-﻿"use client";
+"use client";
 import { PaymentStatusBadge } from "@/components/ui/CategoryBadge";
+import { PendingChip, pendingRowClass } from "@/components/ui/PendingIndicator";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import type { WithPending } from "@/lib/usePendingList";
 import { Pencil, Plus, Send, Trash2 } from "lucide-react";
 import { formatDateTime, type Billing, type Payment } from "./ClientProfileSupport";
 
 type ClientProfileBillingPaymentsProps = {
   selectedFy: string;
-  billing: Billing | null;
-  payments: Payment[];
+  billing: WithPending<Billing> | null;
+  payments: WithPending<Payment>[];
   billingLastUpdated: string;
-  busyAction: string | null;
   hasFyData: boolean;
   isPWP: boolean;
   openReminderModal: (billing?: Billing) => void;
@@ -25,7 +26,6 @@ export default function ClientProfileBillingPayments({
   billing,
   payments,
   billingLastUpdated,
-  busyAction,
   hasFyData,
   isPWP,
   openReminderModal,
@@ -35,26 +35,29 @@ export default function ClientProfileBillingPayments({
   openPaymentModalForRecord,
   deletePayment,
 }: ClientProfileBillingPaymentsProps) {
+  const billingIsPending = billing?._status === "pending";
+
   return (
     <>
     <div className="bg-card rounded-2xl p-5 shadow-sm border border-base">
       <div className="flex items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <h3 className="font-semibold text-default">Billing - FY {selectedFy}</h3>
           {billing && <PaymentStatusBadge status={billing.paymentStatus} />}
+          {billing && <PendingChip status={billing._status} />}
         </div>
         <div className="flex items-center gap-2">
           {billing ? (
             <div className="glass-tray" style={{ gap: "3px" }}>
               {billing.pendingAmount > 0 && (
-                <button type="button" className="glass-pill" onClick={() => openReminderModal(billing)}>
+                <button type="button" className="glass-pill" disabled={billingIsPending} onClick={() => openReminderModal(billing)}>
                   <Send className="w-3 h-3" /> Reminder
                 </button>
               )}
-              <button type="button" className="glass-pill" onClick={() => openBillingModalForRecord(billing)}>
+              <button type="button" className="glass-pill" disabled={billingIsPending} onClick={() => openBillingModalForRecord(billing)}>
                 <Pencil className="w-3 h-3" /> Edit
               </button>
-              <button type="button" className="glass-pill" style={{ color: "#ff3b30" }} disabled={busyAction === `billing-${billing._id}`} onClick={() => deleteBilling(billing)}>
+              <button type="button" className="glass-pill" style={{ color: "#ff3b30" }} disabled={billingIsPending} onClick={() => deleteBilling(billing)}>
                 <Trash2 className="w-3 h-3" /> Delete
               </button>
             </div>
@@ -67,7 +70,7 @@ export default function ClientProfileBillingPayments({
       </div>
       {billingLastUpdated && <p className="text-xs text-faint mb-4">Last updated {formatDateTime(billingLastUpdated)}</p>}
       {billing ? (
-        <>
+        <div className={`transition-opacity duration-200 ${billingIsPending ? "opacity-60" : ""}`}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
             <div className="bg-surface rounded-xl p-3"><p className="text-xs text-muted">Govt Charges</p><p className="font-semibold">{formatCurrency(billing.govtCharges)}</p></div>
             <div className="bg-surface rounded-xl p-3"><p className="text-xs text-muted">Consultancy</p><p className="font-semibold">{formatCurrency(billing.consultancyCharges)}</p></div>
@@ -80,7 +83,7 @@ export default function ClientProfileBillingPayments({
             <div className="text-center"><p className="text-xs text-muted">Paid</p><p className="font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(billing.totalPaid)}</p></div>
             <div className="text-center"><p className="text-xs text-muted">Pending</p><p className="font-bold text-red-500">{formatCurrency(billing.pendingAmount)}</p></div>
           </div>
-        </>
+        </div>
       ) : (
         <div className="text-center py-6">
           <p className="text-sm font-medium text-default">No billing recorded for FY {selectedFy}</p>
@@ -100,7 +103,7 @@ export default function ClientProfileBillingPayments({
         </div>
       )}
     </div>
-    
+
     <div className="bg-card rounded-2xl shadow-sm border border-base overflow-hidden">
       <div className="p-4 border-b border-base flex items-center justify-between gap-3">
         <h3 className="font-semibold text-default">Payment History - FY {selectedFy}</h3>
@@ -110,10 +113,25 @@ export default function ClientProfileBillingPayments({
       </div>
       {payments.length > 0 ? (
         <table className="w-full min-w-[400px]">
-          <thead><tr><th className="table-header">Date</th><th className="table-header">Amount</th><th className="table-header">Type</th><th className="table-header">Mode</th><th className="table-header">Reference</th><th className="table-header">Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th className="table-header">Date</th>
+              <th className="table-header">Amount</th>
+              <th className="table-header">Type</th>
+              <th className="table-header">Mode</th>
+              <th className="table-header">Reference</th>
+              <th className="table-header">Status</th>
+              <th className="table-header">Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {payments.map((p) => (
-              <tr key={p._id} className="hover:bg-surface border-t border-soft">
+              <tr
+                key={p._id}
+                className={`border-t border-soft transition-all duration-200 ${
+                  p._status ? pendingRowClass(p._status) : "hover:bg-surface"
+                }`}
+              >
                 <td className="table-cell">{formatDate(p.paymentDate)}</td>
                 <td className="table-cell font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrency(p.amountPaid)}</td>
                 <td className="table-cell">
@@ -124,11 +142,24 @@ export default function ClientProfileBillingPayments({
                 <td className="table-cell">{p.paymentMode}</td>
                 <td className="table-cell text-faint">{p.referenceNumber || "-"}</td>
                 <td className="table-cell">
+                  <PendingChip status={p._status} />
+                </td>
+                <td className="table-cell">
                   <div className="flex items-center gap-1">
-                    <button type="button" onClick={() => openPaymentModalForRecord(p)} className="p-1.5 text-faint hover:text-brand-600 hover:bg-brand-50 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => openPaymentModalForRecord(p)}
+                      disabled={!!p._status}
+                      className="p-1.5 text-faint hover:text-brand-600 hover:bg-brand-50 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
-                    <button type="button" disabled={busyAction === `payment-${p._id}`} onClick={() => deletePayment(p._id)} className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg disabled:opacity-60">
+                    <button
+                      type="button"
+                      disabled={!!p._status}
+                      onClick={() => deletePayment(p._id)}
+                      className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
