@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
@@ -8,17 +8,16 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import TableWrapper from "@/components/ui/TableWrapper";
 import EmptyState from "@/components/ui/EmptyState";
 import { STATES, CATEGORIES, formatDate } from "@/lib/utils";
-import { Plus, Search, Pencil, Trash2, Eye, UserPlus, X, ChevronDown, MapPin, Calendar, Phone, Mail } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, Eye, UserPlus, ChevronDown, MapPin, Calendar, Phone, Mail } from "lucide-react";
 import { useCache, invalidate } from "@/lib/useCache";
 import {
-  syncEntrySelections,
   normalizePhoneList,
   normalizeEmailList,
   type PersonEntry,
 } from "@/app/dashboard/clients/[clientId]/ClientProfileSupport";
 import ClientFormModal from "@/components/clients/ClientFormModal";
 import type { ClientFormData } from "@/components/clients/ClientFormModal";
-import { CustomFieldInputs } from "@/components/clients/CustomFieldInputs";
+import type { ClientCustomFieldDefinition, ClientCustomFieldValues } from "@/lib/clientCustomFields";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -134,7 +133,6 @@ export default function ClientsPage() {
     ...(stateFilter    !== "all" ? { state: stateFilter }       : {})})}`;
   const { data: clients, loading, refetch: refetchClients } = useCache<Client[]>(clientsUrl, { initialData: [] });
   const { data: customFieldDefinitions } = useCache<ClientCustomFieldDefinition[]>("/api/client-custom-fields", { initialData: [] });
-  const visibleCustomFieldDefinitions = customFieldDefinitions.filter((field) => field.key !== "legalName");
 
   const openAdd = () => {
     setEditClient(null);

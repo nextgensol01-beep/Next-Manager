@@ -1,5 +1,5 @@
 "use client";
-import React, { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useSettingsSearch } from "./SettingsSearchContext";
 import { useSession } from "next-auth/react";
@@ -8,11 +8,11 @@ import toast from "react-hot-toast";
 import {
   UserPlus, Shield, RefreshCw, Trash2, Power, PowerOff,
   CheckCircle2, XCircle, KeyRound, ChevronRight, MoreHorizontal,
-  MapPin, Monitor, Clock,
+  MapPin, Clock,
 } from "lucide-react";
 import { invalidate, useCache } from "@/lib/useCache";
-import { parseDevice, type ParsedDevice } from "@/lib/device";
-import { DeviceOsIcon, BrowserBrandIcon } from "@/components/ui/DeviceBrandIcon";
+import { parseDevice } from "@/lib/device";
+import { DeviceOsIcon } from "@/components/ui/DeviceBrandIcon";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 
 type ActiveSession = {
@@ -164,7 +164,6 @@ const emptyUserForm = {
   password: "",
   loginMethod: "password" as "password" | "google",
 };
-
 
 /**
  * Apple-level action sheet:
@@ -664,7 +663,10 @@ export default function AccessPanel() {
 
   const { data: managedUsersData, loading: usersLoading, refetch: refetchManagedUsers } =
     useCache<{ users: ManagedUser[] }>("/api/users", { enabled: isAdmin, initialData: { users: [] } });
-  const managedUsers = useMemo(() => isAdmin ? managedUsersData.users : [], [isAdmin, managedUsersData.users]);
+  const managedUsers = useMemo(
+    () => (isAdmin ? managedUsersData.users : []),
+    [isAdmin, managedUsersData.users]
+  );
   const { setUsers } = useSettingsSearch();
   useEffect(() => {
     if (managedUsers.length > 0) {

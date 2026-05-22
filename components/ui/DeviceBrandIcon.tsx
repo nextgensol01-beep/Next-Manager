@@ -1,13 +1,15 @@
 import { Chrome, Compass, Globe } from "lucide-react";
+import type { CSSProperties } from "react";
 import type { ParsedDevice } from "@/lib/device";
 
 type IconProps = {
   className?: string;
+  style?: CSSProperties;
 };
 
-function WindowsLogo({ className }: IconProps) {
+function WindowsLogo({ className, style }: IconProps) {
   return (
-    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+    <svg className={className} style={style} viewBox="0 0 24 24" aria-hidden="true">
       <path fill="#00A4EF" d="M3 4.6 10.8 3.5v7.9H3V4.6Z" />
       <path fill="#00A4EF" d="M12.2 3.3 21 2v9.4h-8.8V3.3Z" />
       <path fill="#00A4EF" d="M3 12.6h7.8v7.9L3 19.4v-6.8Z" />
@@ -16,9 +18,9 @@ function WindowsLogo({ className }: IconProps) {
   );
 }
 
-function AppleLogo({ className }: IconProps) {
+function AppleLogo({ className, style }: IconProps) {
   return (
-    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+    <svg className={className} style={style} viewBox="0 0 24 24" aria-hidden="true">
       <path
         fill="currentColor"
         d="M16.4 13.1c0-2.2 1.8-3.2 1.9-3.3-1-1.5-2.6-1.7-3.2-1.7-1.4-.1-2.6.8-3.3.8-.7 0-1.7-.8-2.8-.8-1.5 0-2.9.9-3.6 2.2-1.6 2.7-.4 6.7 1.1 8.9.7 1.1 1.6 2.3 2.8 2.2 1.1 0 1.5-.7 2.8-.7s1.7.7 2.9.7c1.2 0 1.9-1.1 2.7-2.2.8-1.2 1.1-2.3 1.1-2.4 0-.1-2.4-1-2.4-3.7ZM14.3 6.7c.6-.8 1.1-1.8 1-2.9-1 .1-2.1.7-2.8 1.5-.6.7-1.1 1.8-1 2.8 1.1.1 2.2-.6 2.8-1.4Z"
@@ -27,9 +29,9 @@ function AppleLogo({ className }: IconProps) {
   );
 }
 
-function AndroidLogo({ className }: IconProps) {
+function AndroidLogo({ className, style }: IconProps) {
   return (
-    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+    <svg className={className} style={style} viewBox="0 0 24 24" aria-hidden="true">
       <path fill="#3DDC84" d="M7.1 9.2h9.8c1 0 1.8.8 1.8 1.8v5.5c0 1-.8 1.8-1.8 1.8H7.1c-1 0-1.8-.8-1.8-1.8V11c0-1 .8-1.8 1.8-1.8Z" />
       <path fill="#3DDC84" d="M7 8.2c.2-1.6 1.3-3 2.8-3.7L8.9 3.1a.5.5 0 0 1 .8-.5l1 1.6c.4-.1.8-.1 1.3-.1s.9 0 1.3.1l1-1.6a.5.5 0 1 1 .8.5l-.9 1.4c1.5.7 2.6 2.1 2.8 3.7H7Z" />
       <path fill="#fff" d="M9.1 6.7a.7.7 0 1 0 0-1.4.7.7 0 0 0 0 1.4ZM14.9 6.7a.7.7 0 1 0 0-1.4.7.7 0 0 0 0 1.4Z" />
@@ -38,9 +40,9 @@ function AndroidLogo({ className }: IconProps) {
   );
 }
 
-function EdgeLogo({ className }: IconProps) {
+function EdgeLogo({ className, style }: IconProps) {
   return (
-    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+    <svg className={className} style={style} viewBox="0 0 24 24" aria-hidden="true">
       <defs>
         <linearGradient id="edge-a" x1="4" x2="20" y1="6" y2="18" gradientUnits="userSpaceOnUse">
           <stop stopColor="#0AA8F2" />
@@ -55,31 +57,30 @@ function EdgeLogo({ className }: IconProps) {
   );
 }
 
-function FirefoxLogo({ className }: IconProps) {
+function FirefoxLogo({ className, style }: IconProps) {
   return (
-    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+    <svg className={className} style={style} viewBox="0 0 24 24" aria-hidden="true">
       <path fill="#FF7139" d="M20.8 8.7c.5 1 .7 2.1.7 3.3a9.5 9.5 0 1 1-17.9-4.4c-.2 1.3.1 2.7.9 3.8C5.6 7.8 9 5.2 12.9 5.2c1.2 0 2.3.2 3.3.7-.7-.8-1.5-1.4-2.5-1.8 2.8.1 5.4 1.8 7.1 4.6Z" />
       <path fill="#FFB000" d="M6.6 13.2c0 3 2.4 5.4 5.4 5.4s5.4-2.4 5.4-5.4c0-1.4-.5-2.7-1.4-3.7 1.7.6 2.8 2.2 2.8 4.1 0 3.4-3 6.1-6.8 6.1-3.9 0-7-2.9-7-6.6 0-.6.1-1.2.2-1.7.3.7.8 1.3 1.4 1.8Z" />
     </svg>
   );
 }
 
-function OperaLogo({ className }: IconProps) {
+function OperaLogo({ className, style }: IconProps) {
   return (
-    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+    <svg className={className} style={style} viewBox="0 0 24 24" aria-hidden="true">
       <path fill="#FF1B2D" d="M12 2.5A9.5 9.5 0 1 0 12 21.5 9.5 9.5 0 0 0 12 2.5Zm0 3c2.2 0 4 2.9 4 6.5s-1.8 6.5-4 6.5-4-2.9-4-6.5 1.8-6.5 4-6.5Z" />
     </svg>
   );
 }
 
-export function DeviceOsIcon({ device, className }: { device: ParsedDevice; className?: string }) {
-  if (device.os === "Windows") return <WindowsLogo className={className} />;
-  if (device.os === "Android") return <AndroidLogo className={className} />;
-  if (device.os === "macOS" || device.os === "iPhone" || device.os === "iPad") return <AppleLogo className={className} />;
-  return <Globe className={className} />;
+export function DeviceOsIcon({ device, className, style }: { device: ParsedDevice; className?: string; style?: CSSProperties }) {
+  if (device.os === "Windows") return <WindowsLogo className={className} style={style} />;
+  if (device.os === "Android") return <AndroidLogo className={className} style={style} />;
+  if (device.os === "macOS" || device.os === "iPhone" || device.os === "iPad") return <AppleLogo className={className} style={style} />;
+  return <Globe className={className} style={style} />;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function BrowserBrandIcon({ browser, className }: { browser: string; className?: string }) {
   if (browser === "Edge") return <EdgeLogo className={className} />;
   if (browser === "Chrome") return <Chrome className={className} />;

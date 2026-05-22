@@ -80,6 +80,9 @@ const RECEIVED_VIA_OPTIONS = [
   { id: "whatsapp", label: "WhatsApp" },
 ] as const;
 
+type InvoiceType = (typeof INVOICE_TYPE_OPTIONS)[number]["id"];
+type ReceivedVia = (typeof RECEIVED_VIA_OPTIONS)[number]["id"];
+
 const CUSTOM_FIELD_ICON_COMPONENTS = {
   fileText: FileText,
   building: Building2,
@@ -131,7 +134,13 @@ export default function ClientProfilePage() {
   const [docModalMode, setDocModalMode] = useState<"create" | "edit">("create");
   const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null);
   const [invoiceModal, setInvoiceModal] = useState(false);
-  const [invoiceForm, setInvoiceForm] = useState({
+  const [invoiceForm, setInvoiceForm] = useState<{
+    financialYear: string;
+    invoiceType: InvoiceType | "";
+    receivedVia: ReceivedVia | "";
+    fromDate: string;
+    toDate: string;
+  }>({
     financialYear: selectedFy,
     invoiceType: "",
     receivedVia: "",
@@ -610,8 +619,13 @@ export default function ClientProfilePage() {
 
   const saveInvoiceTracking = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!invoiceForm.invoiceType || !invoiceForm.receivedVia) {
+      toast.error("Please select invoice type and source.");
+      return;
+    }
+
     setInlineSaving(true);
-    const payload = {
+    const payload: Omit<InvoiceTrackingRecord, "_id" | "createdAt"> = {
       clientId,
       financialYear: invoiceForm.financialYear,
       invoiceType: invoiceForm.invoiceType,
@@ -620,7 +634,7 @@ export default function ClientProfilePage() {
       toDate: invoiceForm.toDate,
     };
 
-    const { commit, rollback } = addInvoiceItem({ ...payload, _id: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    const { commit, rollback } = addInvoiceItem({ ...payload, _id: "", createdAt: new Date().toISOString() });
     closeInvoiceModal();
     setSelectedFy(payload.financialYear);
 
@@ -690,7 +704,7 @@ export default function ClientProfilePage() {
       invoiceCount: Number(uploadForm.invoiceCount) || 0,
     };
 
-    const { commit, rollback } = addUploadItem({ ...payload, _id: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    const { commit, rollback } = addUploadItem({ ...payload, _id: "", createdAt: new Date().toISOString() });
     closeUploadModal();
     setSelectedFy(payload.financialYear);
 
@@ -1219,6 +1233,7 @@ export default function ClientProfilePage() {
     setEditInitialTab(tab);
     setEditModal(true);
   };
+  const openBasicEdit = () => openEdit();
 
   const handleSaveClient = async (
     data: ClientFormData,
@@ -1351,7 +1366,7 @@ export default function ClientProfilePage() {
     !hasLinkedContacts
       ? {
           label: "Link Contact",
-          onClick: openEdit,
+          onClick: openBasicEdit,
           tone: "secondary" as const,
         }
       : null,
@@ -1598,7 +1613,7 @@ export default function ClientProfilePage() {
           </div>
         </div>
         {/* Edit button in header */}
-        <button onClick={openEdit} className="glass-btn">
+        <button onClick={openBasicEdit} className="glass-btn">
           <Pencil className="w-4 h-4" /> Edit Client
         </button>
       </div>
@@ -1784,7 +1799,7 @@ export default function ClientProfilePage() {
                     <p className="text-xs text-faint">Added {formatDate(client.createdAt)}</p>
                     <p className="text-[11px] text-faint mt-0.5">Last updated {formatDateTime(getLatestTimestamp(client.updatedAt, client.createdAt))}</p>
                   </div>
-                  <button onClick={openEdit} className="text-xs text-brand-600 hover:underline flex items-center gap-1">
+                  <button onClick={openBasicEdit} className="text-xs text-brand-600 hover:underline flex items-center gap-1">
                     <Pencil className="w-3 h-3" /> Edit
                   </button>
                 </div>
@@ -1954,7 +1969,7 @@ export default function ClientProfilePage() {
                       <div className="glass-tray">
                         <button type="button" className="glass-pill glass-pill-active" onClick={openCreateDocument}>Add Document</button>
                         {!hasLinkedContacts && (
-                          <button type="button" className="glass-pill" onClick={openEdit}>Link Contact</button>
+                          <button type="button" className="glass-pill" onClick={openBasicEdit}>Link Contact</button>
                         )}
                       </div>
                     </div>
@@ -2090,7 +2105,7 @@ export default function ClientProfilePage() {
               <select
                 className="input-field"
                 value={invoiceForm.invoiceType}
-                onChange={(e) => setInvoiceForm((current) => ({ ...current, invoiceType: e.target.value }))}
+                onChange={(e) => setInvoiceForm((current) => ({ ...current, invoiceType: e.target.value as InvoiceType | "" }))}
                 required
               >
                 <option value="">Select type</option>
@@ -2104,7 +2119,7 @@ export default function ClientProfilePage() {
               <select
                 className="input-field"
                 value={invoiceForm.receivedVia}
-                onChange={(e) => setInvoiceForm((current) => ({ ...current, receivedVia: e.target.value }))}
+                onChange={(e) => setInvoiceForm((current) => ({ ...current, receivedVia: e.target.value as ReceivedVia | "" }))}
                 required
               >
                 <option value="">Select source</option>

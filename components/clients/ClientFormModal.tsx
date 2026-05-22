@@ -214,7 +214,7 @@ function InsetGroup({
   footer?: string;
   animDelay?: number;
   allowOverflow?: boolean;
-  sectionRef?: React.RefObject<HTMLDivElement>;
+  sectionRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   return (
     <div ref={sectionRef} className="cfm-section" style={{ animationDelay: `${animDelay}ms` }}>
