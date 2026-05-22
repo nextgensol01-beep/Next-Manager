@@ -114,6 +114,70 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// ── Shared helper: fetch a single billing doc through the full aggregation pipeline
+// so every write response has the same shape as GET (totalPaid, pendingAmount, etc.)
+async function fetchBillingAggregated(id: unknown) {
+  const { ObjectId } = await import("mongodb");
+  const _id = typeof id === "string" ? new ObjectId(id) : id;
+  const [doc] = await Billing.collection
+    .aggregate([
+      { $match: { _id } },
+      {
+        $lookup: {
+          from: Payment.collection.name,
+          let: { billingClientId: "$clientId", billingFinancialYear: "$financialYear" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$clientId", "$$billingClientId"] },
+                    { $eq: ["$financialYear", "$$billingFinancialYear"] },
+                    { $ne: ["$paymentType", "advance"] },
+                  ],
+                },
+              },
+            },
+            { $group: { _id: null, totalPaid: { $sum: "$amountPaid" } } },
+          ],
+          as: "paymentTotals",
+        },
+      },
+      {
+        $addFields: {
+          totalPaid: { $ifNull: [{ $first: "$paymentTotals.totalPaid" }, 0] },
+        },
+      },
+      { $unset: "paymentTotals" },
+      {
+        $addFields: {
+          pendingAmount: { $max: [0, { $subtract: ["$totalAmount", "$totalPaid"] }] },
+          paymentPercentage: {
+            $cond: [
+              { $gt: ["$totalAmount", 0] },
+              { $min: [100, { $multiply: [{ $divide: ["$totalPaid", "$totalAmount"] }, 100] }] },
+              0,
+            ],
+          },
+          paymentStatus: {
+            $switch: {
+              branches: [
+                {
+                  case: { $lte: [{ $max: [0, { $subtract: ["$totalAmount", "$totalPaid"] }] }, 0] },
+                  then: "Paid",
+                },
+                { case: { $gt: ["$totalPaid", 0] }, then: "Partial" },
+              ],
+              default: "Unpaid",
+            },
+          },
+        },
+      },
+    ])
+    .toArray();
+  return doc ?? null;
+}
+
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -129,21 +193,18 @@ export async function POST(req: NextRequest) {
     const now = new Date();
 
     if (existing) {
-      const updated = await Billing.collection.findOneAndUpdate(
+      await Billing.collection.updateOne(
         { clientId: body.clientId, financialYear: body.financialYear },
-        { $set: { ...body, updatedAt: now } },
-        { returnDocument: "after" }
+        { $set: { ...body, updatedAt: now } }
       );
-      return NextResponse.json(updated);
+      const full = await fetchBillingAggregated(existing._id);
+      return NextResponse.json(full);
     }
 
-    const insertedBilling = {
-      ...body,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const billing = await Billing.collection.insertOne(insertedBilling);
-    return NextResponse.json({ ...insertedBilling, _id: billing.insertedId }, { status: 201 });
+    const insertedBilling = { ...body, createdAt: now, updatedAt: now };
+    const result = await Billing.collection.insertOne(insertedBilling);
+    const full = await fetchBillingAggregated(result.insertedId);
+    return NextResponse.json(full, { status: 201 });
   } catch (error) {
     console.error("POST /api/billing:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

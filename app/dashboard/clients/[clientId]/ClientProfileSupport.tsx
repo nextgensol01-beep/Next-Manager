@@ -10,6 +10,7 @@ import {
   Copy,
   Mail,
   MailCheck,
+  Pencil,
   Phone,
   Plus,
   Receipt,
@@ -710,7 +711,7 @@ export function PersonSearch({
       try {
         const response = await fetch(`/api/persons?search=${encodeURIComponent(query)}`);
         const data = await response.json();
-        const nextResults = Array.isArray(data) ? data : [];
+        const nextResults = (Array.isArray(data) ? data : []).slice(0, 5);
         setResults(nextResults);
         setOpen(nextResults.length > 0);
       } catch {
@@ -780,6 +781,7 @@ export function PersonEntryCard({
   onChange,
   onRemove,
   onSetPrimary,
+  initiallyExpanded = true,
 }: {
   entry: PersonEntry;
   index: number;
@@ -787,7 +789,9 @@ export function PersonEntryCard({
   onChange: (updated: PersonEntry) => void;
   onRemove: () => void;
   onSetPrimary: () => void;
+  initiallyExpanded?: boolean;
 }) {
+  const [isExpanded, setIsExpanded] = useState(initiallyExpanded);
   const remapSelectedValue = (
     currentSelected: string[],
     previousValue: string,
@@ -886,123 +890,302 @@ export function PersonEntryCard({
     }));
   };
 
+  // Number badge — ① ② ③ etc.
+  const numberBadge = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨","⑩"][index] ?? `${index + 1}`;
+
   return (
-    <div className="border border-base rounded-xl p-3 space-y-3 bg-surface">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-muted uppercase tracking-wide">
-            Contact {index + 1}
-            {entry.isPrimaryContact && <span className="ml-1.5 text-brand-600">(Primary)</span>}
-          </span>
+    <div
+      className="rounded-2xl"
+      style={{
+        backgroundColor: "var(--color-card)",
+        border: `1px solid ${entry.isPrimaryContact ? "rgba(0,113,227,0.25)" : "var(--color-border)"}`,
+        boxShadow: entry.isPrimaryContact
+          ? "0 0 0 2px rgba(0,113,227,0.08), 0 1px 4px rgba(0,0,0,0.06)"
+          : "0 1px 3px rgba(0,0,0,0.04)",
+        transition: "box-shadow 0.2s ease, border-color 0.2s ease",
+        overflow: "visible",
+      }}
+    >
+      {/* ── Card header — flat, no background fill ── */}
+      <div
+        className="flex items-center justify-between px-4 py-2.5 border-b"
+        style={{ borderColor: "var(--color-border-soft)" }}
+      >
+        <div className="flex items-center gap-2.5">
+          {/* Avatar initial circle */}
+          <div
+            className="w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-semibold flex-shrink-0"
+            style={{
+              backgroundColor: entry.isPrimaryContact ? "rgba(0,113,227,0.12)" : "var(--color-surface)",
+              color: entry.isPrimaryContact ? "#0071e3" : "var(--color-text-faint)",
+            }}
+          >
+            {entry.name ? entry.name.trim()[0].toUpperCase() : (index + 1)}
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-[14px] font-medium leading-tight" style={{ color: "var(--color-text)" }}>
+              {entry.name || `Contact ${index + 1}`}
+            </span>
+            {entry.designation && (
+              <span className="text-[12px]" style={{ color: "var(--color-text-faint)" }}>
+                {entry.designation}
+              </span>
+            )}
+          </div>
+          {entry.isPrimaryContact && (
+            <span
+              className="text-[11px] font-medium px-2 py-0.5 rounded-full"
+              style={{
+                backgroundColor: "rgba(0,113,227,0.10)",
+                color: "#0071e3",
+              }}
+            >
+              Primary
+            </span>
+          )}
           {entry.personId && (
-            <span className="text-[10px] bg-brand-50 dark:bg-brand-900/30 text-brand-600 px-1.5 py-0.5 rounded-full font-medium">existing</span>
+            <span
+              className="text-[11px] font-medium px-2 py-0.5 rounded-full"
+              style={{
+                backgroundColor: "var(--color-surface)",
+                color: "var(--color-text-faint)",
+                border: "1px solid var(--color-border)",
+              }}
+            >
+              linked
+            </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+
+        <div className="flex items-center gap-1">
           {!entry.isPrimaryContact && total > 1 && (
-            <button type="button" onClick={onSetPrimary} className="text-xs text-brand-600 hover:underline">
+            <button
+              type="button"
+              onClick={onSetPrimary}
+              className="text-[12px] font-medium px-2.5 py-1 rounded-lg transition-all active:scale-95"
+              style={{ color: "#0071e3", backgroundColor: "transparent" }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = "rgba(0,113,227,0.07)")}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = "transparent")}
+            >
               Set primary
             </button>
           )}
-          <button type="button" onClick={onRemove} className="p-1 text-faint hover:text-red-500 rounded transition-colors">
-            <X className="w-3.5 h-3.5" />
-          </button>
+          {/* Edit / Done toggle */}
+          {isExpanded ? (
+            <button
+              type="button"
+              onClick={() => setIsExpanded(false)}
+              className="text-[12px] font-medium px-2.5 py-1 rounded-lg transition-all active:scale-95 flex items-center gap-1"
+              style={{ color: "#0071e3", backgroundColor: "transparent" }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = "rgba(0,113,227,0.07)")}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = "transparent")}
+            >
+              Done
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsExpanded(true)}
+              className="text-[12px] font-medium px-2.5 py-1 rounded-lg transition-all active:scale-95 flex items-center gap-1"
+              style={{ color: "#0071e3", backgroundColor: "transparent" }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = "rgba(0,113,227,0.07)")}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = "transparent")}
+            >
+              <Pencil className="w-3 h-3" />
+              Edit
+            </button>
+          )}
+          {total > 1 && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="w-7 h-7 flex items-center justify-center rounded-full transition-all active:scale-90"
+              style={{ color: "var(--color-text-faint)", backgroundColor: "transparent" }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor = "rgba(239,68,68,0.08)";
+                (e.currentTarget as HTMLButtonElement).style.color = "#ef4444";
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent";
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-faint)";
+              }}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
-      <div>
-        <label className="text-xs text-faint block mb-1">Name *</label>
-        <PersonSearch
-          value={entry.name}
-          onChange={(value) => onChange({ ...entry, name: value, personId: undefined })}
-          onSelect={handleSelect}
-        />
-      </div>
-
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <label className="text-xs text-faint flex items-center gap-1"><Phone className="w-3 h-3" />Phone Numbers</label>
-          <button type="button" onClick={() => onChange({ ...entry, phoneNumbers: [...entry.phoneNumbers, ""] })} className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-0.5">
-            <Plus className="w-3 h-3" /> Add
-          </button>
-        </div>
-        <p className="text-[11px] text-faint mb-2">Only checked numbers will be used for this company.</p>
-        <div className="space-y-1.5">
-          {entry.phoneNumbers.map((phone, phoneIndex) => (
-            <div key={phoneIndex} className="flex gap-2 items-center">
-              <label className="flex items-center gap-1.5 text-[11px] text-muted whitespace-nowrap">
-                <input
-                  type="checkbox"
-                  className="rounded border-base"
-                  checked={entry.selectedPhones.includes(normalizePhoneValue(phone))}
-                  disabled={!normalizePhoneValue(phone)}
-                  onChange={() => toggleSelectedPhone(phone)}
-                />
-                Use
-              </label>
-              <input
-                className="input-field flex-1 font-mono text-sm !py-1.5"
-                placeholder="+91 98765 43210"
-                value={phone}
-                onChange={(event) => updatePhone(phoneIndex, event.target.value)}
-              />
-              {entry.phoneNumbers.length > 1 && (
-                <button type="button" onClick={() => removePhone(phoneIndex)} className="p-1 text-faint hover:text-red-500 rounded flex-shrink-0">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
+      {/* ── Summary view (collapsed) ── */}
+      {!isExpanded && (
+        <div className="px-4 py-3 flex flex-wrap gap-x-5 gap-y-1.5">
+          {entry.designation && (
+            <span className="text-[12px]" style={{ color: "var(--color-text-faint)" }}>
+              {entry.designation}
+            </span>
+          )}
+          {normalizePhoneList(entry.selectedPhones.length ? entry.selectedPhones : entry.phoneNumbers).map((ph, i) => (
+            <span key={i} className="flex items-center gap-1 text-[12px] font-mono" style={{ color: "var(--color-text)" }}>
+              <Phone className="w-3 h-3 flex-shrink-0" style={{ color: "var(--color-text-faint)" }} />
+              {ph}
+            </span>
           ))}
-        </div>
-      </div>
-
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <label className="text-xs text-faint flex items-center gap-1"><Mail className="w-3 h-3" />Email Addresses</label>
-          <button type="button" onClick={() => onChange({ ...entry, emails: [...entry.emails, ""] })} className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-0.5">
-            <Plus className="w-3 h-3" /> Add
-          </button>
-        </div>
-        <p className="text-[11px] text-faint mb-2">Only checked email addresses will be used for this company.</p>
-        <div className="space-y-1.5">
-          {entry.emails.map((email, emailIndex) => (
-            <div key={emailIndex} className="flex gap-2 items-center">
-              <label className="flex items-center gap-1.5 text-[11px] text-muted whitespace-nowrap">
-                <input
-                  type="checkbox"
-                  className="rounded border-base"
-                  checked={entry.selectedEmails.includes(normalizeEmailValue(email))}
-                  disabled={!normalizeEmailValue(email)}
-                  onChange={() => toggleSelectedEmail(email)}
-                />
-                Use
-              </label>
-              <input
-                type="email"
-                className="input-field flex-1 text-sm !py-1.5"
-                placeholder="john@company.com"
-                value={email}
-                onChange={(event) => updateEmail(emailIndex, event.target.value)}
-              />
-              {entry.emails.length > 1 && (
-                <button type="button" onClick={() => removeEmail(emailIndex)} className="p-1 text-faint hover:text-red-500 rounded flex-shrink-0">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
+          {normalizeEmailList(entry.selectedEmails.length ? entry.selectedEmails : entry.emails).map((em, i) => (
+            <span key={i} className="flex items-center gap-1 text-[12px]" style={{ color: "var(--color-text)" }}>
+              <Mail className="w-3 h-3 flex-shrink-0" style={{ color: "var(--color-text-faint)" }} />
+              {em}
+            </span>
           ))}
+          {!entry.designation &&
+            !normalizePhoneList(entry.phoneNumbers).length &&
+            !normalizeEmailList(entry.emails).length && (
+            <span className="text-[12px]" style={{ color: "var(--color-text-faint)" }}>No details added yet</span>
+          )}
+        </div>
+      )}
+
+      {/* ── Form view (expanded) ── */}
+      {isExpanded && (
+      <div className="p-4 space-y-4">
+        {/* Name + Designation — side by side */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] font-medium uppercase tracking-wide block mb-1.5" style={{ color: "var(--color-text-faint)" }}>Name *</label>
+            <PersonSearch
+              value={entry.name}
+              onChange={(value) => onChange({ ...entry, name: value, personId: undefined })}
+              onSelect={handleSelect}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-medium uppercase tracking-wide block mb-1.5" style={{ color: "var(--color-text-faint)" }}>Designation</label>
+            <input
+              className="input-field text-[13px] !py-2"
+              placeholder="e.g. Director, Manager"
+              value={entry.designation}
+              onChange={(event) => onChange({ ...entry, designation: event.target.value })}
+            />
+          </div>
+        </div>
+
+        {/* Phone Numbers */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-[11px] font-medium uppercase tracking-wide flex items-center gap-1.5" style={{ color: "var(--color-text-faint)" }}>
+              <Phone className="w-3 h-3" /> Phone Numbers
+            </label>
+            <button
+              type="button"
+              onClick={() => onChange({ ...entry, phoneNumbers: [...entry.phoneNumbers, ""] })}
+              className="text-[12px] font-medium flex items-center gap-0.5 transition-colors"
+              style={{ color: "#0071e3" }}
+            >
+              <Plus className="w-3 h-3" /> Add
+            </button>
+          </div>
+          <div className="space-y-2">
+            {entry.phoneNumbers.map((phone, phoneIndex) => {
+              const isActive = entry.selectedPhones.includes(normalizePhoneValue(phone));
+              const hasValue = Boolean(normalizePhoneValue(phone));
+              return (
+                <div key={phoneIndex} className="flex gap-2 items-center">
+                  <button
+                    type="button"
+                    disabled={!hasValue}
+                    onClick={() => toggleSelectedPhone(phone)}
+                    title={isActive ? "Active for this company" : "Inactive — click to activate"}
+                    className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                      isActive
+                        ? "border-brand-500 bg-brand-500 text-white"
+                        : "border-base text-transparent hover:border-brand-400"
+                    } disabled:opacity-40 disabled:cursor-not-allowed`}
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 12 12">
+                      <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                  <input
+                    className={`input-field flex-1 font-mono text-sm !py-1.5 transition-opacity ${!isActive && hasValue ? "opacity-50" : ""}`}
+                    placeholder="+91 98765 43210"
+                    value={phone}
+                    onChange={(event) => updatePhone(phoneIndex, event.target.value)}
+                  />
+                  {entry.phoneNumbers.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removePhone(phoneIndex)}
+                      className="p-1 text-faint hover:text-red-500 rounded flex-shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[11px] mt-2 leading-relaxed" style={{ color: "var(--color-text-faint)" }}>Active numbers will be used for reminders and communications.</p>
+        </div>
+
+        {/* Email Addresses */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-[11px] font-medium uppercase tracking-wide flex items-center gap-1.5" style={{ color: "var(--color-text-faint)" }}>
+              <Mail className="w-3 h-3" /> Email Addresses
+            </label>
+            <button
+              type="button"
+              onClick={() => onChange({ ...entry, emails: [...entry.emails, ""] })}
+              className="text-[12px] font-medium flex items-center gap-0.5 transition-colors"
+              style={{ color: "#0071e3" }}
+            >
+              <Plus className="w-3 h-3" /> Add
+            </button>
+          </div>
+          <div className="space-y-2">
+            {entry.emails.map((email, emailIndex) => {
+              const isActive = entry.selectedEmails.includes(normalizeEmailValue(email));
+              const hasValue = Boolean(normalizeEmailValue(email));
+              return (
+                <div key={emailIndex} className="flex gap-2 items-center">
+                  <button
+                    type="button"
+                    disabled={!hasValue}
+                    onClick={() => toggleSelectedEmail(email)}
+                    title={isActive ? "Active for this company" : "Inactive — click to activate"}
+                    className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                      isActive
+                        ? "border-brand-500 bg-brand-500 text-white"
+                        : "border-base text-transparent hover:border-brand-400"
+                    } disabled:opacity-40 disabled:cursor-not-allowed`}
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 12 12">
+                      <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                  <input
+                    type="email"
+                    className={`input-field flex-1 text-sm !py-1.5 transition-opacity ${!isActive && hasValue ? "opacity-50" : ""}`}
+                    placeholder="john@company.com"
+                    value={email}
+                    onChange={(event) => updateEmail(emailIndex, event.target.value)}
+                  />
+                  {entry.emails.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeEmail(emailIndex)}
+                      className="p-1 text-faint hover:text-red-500 rounded flex-shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[11px] mt-2 leading-relaxed" style={{ color: "var(--color-text-faint)" }}>Active emails will be used for reminders and communications.</p>
         </div>
       </div>
-
-      <div>
-        <label className="text-xs text-faint block mb-1">Designation</label>
-        <input
-          className="input-field text-sm !py-1.5"
-          placeholder="e.g. Director, Manager"
-          value={entry.designation}
-          onChange={(event) => onChange({ ...entry, designation: event.target.value })}
-        />
-      </div>
+      )}
     </div>
   );
 }

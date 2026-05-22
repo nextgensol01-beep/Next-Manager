@@ -2,21 +2,17 @@
 
 import React from "react";
 import { Plus, Send, Users } from "lucide-react";
-import { formatCurrency, FINANCIAL_YEARS, PAYMENT_MODES, STATES, CATEGORIES } from "@/lib/utils";
+import { formatCurrency, FINANCIAL_YEARS, PAYMENT_MODES, STATES } from "@/lib/utils";
 import { CategoryBreakdown } from "@/components/ui/CategoryBreakdown";
 import Modal from "@/components/ui/Modal";
-import { CustomFieldInputs } from "@/components/clients/CustomFieldInputs";
-import type { ClientCustomFieldDefinition, ClientCustomFieldValues } from "@/lib/clientCustomFields";
 import {
   CAT_IDS,
   CATS,
   CREDIT_TYPES,
-  PersonEntryCard,
   type Client,
   type EmailOption,
   type FYEntryForm,
   type FYRecord,
-  type PersonEntry,
 } from "./ClientProfileSupport";
 
 type SetState<T> = React.Dispatch<React.SetStateAction<T>>;
@@ -45,19 +41,6 @@ type FyForm = {
   targets: FYEntryForm[];
 };
 type ReminderForm = { subject: string; message: string };
-type EditForm = {
-  companyName: string;
-  legalName: string;
-  category: string;
-  state: string;
-  address: string;
-  gstNumber: string;
-  registrationNumber: string;
-  cpcbLoginId: string;
-  cpcbPassword: string;
-  otpMobileNumber: string;
-  customFields: ClientCustomFieldValues;
-};
 type BreakdownProps = {
   entries?: Array<{ categoryId: string; type: "RECYCLING" | "EOL"; value: number }>;
   achievedMap?: Record<string, number>;
@@ -113,21 +96,7 @@ interface ClientProfileModalsProps {
   breakdownRec: FYRecord | null;
   setBreakdownRec: SetState<FYRecord | null>;
   makeBreakdownProps: (record: FYRecord) => BreakdownProps;
-  editModal: boolean;
-  setEditModal: (open: boolean) => void;
-  handleSaveClient: (event: React.FormEvent) => void;
-  editTab: "basic" | "portal";
-  setEditTab: (tab: "basic" | "portal") => void;
-  editForm: EditForm;
-  setEditForm: SetState<EditForm>;
-  customFieldDefinitions: ClientCustomFieldDefinition[];
-  persons: PersonEntry[];
-  addPerson: () => void;
-  updatePerson: (index: number, updated: PersonEntry) => void;
-  removePerson: (index: number) => void;
-  setPrimary: (index: number) => void;
-  showEditPassword: boolean;
-  setShowEditPassword: (show: boolean) => void;
+
   saving: boolean;
   inlineSaving: boolean;
 }
@@ -181,25 +150,10 @@ export default function ClientProfileModals({
   breakdownRec,
   setBreakdownRec,
   makeBreakdownProps,
-  editModal,
-  setEditModal,
-  handleSaveClient,
-  editTab,
-  setEditTab,
-  editForm,
-  setEditForm,
-  customFieldDefinitions,
-  persons,
-  addPerson,
-  updatePerson,
-  removePerson,
-  setPrimary,
-  showEditPassword,
-  setShowEditPassword,
+
   saving,
   inlineSaving,
 }: ClientProfileModalsProps) {
-  const visibleCustomFieldDefinitions = customFieldDefinitions.filter((field) => field.key !== "legalName");
 
   return (
     <>
@@ -461,133 +415,6 @@ export default function ClientProfileModals({
         </Modal>
       )}
 
-      <Modal open={editModal} onClose={() => setEditModal(false)} title="Edit Client" size="lg">
-        <form onSubmit={handleSaveClient} className="space-y-4">
-          <div className="flex gap-1 bg-surface p-1 rounded-xl">
-            {(["basic", "portal"] as const).map((tab) => (
-              <button key={tab} type="button" onClick={() => setEditTab(tab)}
-                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-colors capitalize ${editTab === tab ? "bg-card shadow-sm text-brand-700 dark:text-brand-400" : "text-faint hover:text-muted"}`}>
-                {tab === "basic" ? "Basic Info" : "Portal Credentials"}
-              </button>
-            ))}
-          </div>
-
-          {editTab === "basic" && (
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Client ID</label>
-                  <input className="input-field font-mono bg-surface text-faint" value={client.clientId} disabled />
-                </div>
-                <div>
-                  <label className="label">Category *</label>
-                  <select className="input-field bg-surface text-faint cursor-not-allowed" value={editForm.category} disabled aria-readonly="true">
-                    {CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
-                  </select>
-                  <p className="text-[11px] text-faint mt-1">Category is fixed after creation so the Client ID prefix stays consistent.</p>
-                </div>
-              </div>
-              <div>
-                <label className="label">Company Name *</label>
-                <input className="input-field" value={editForm.companyName} onChange={(e) => setEditForm({ ...editForm, companyName: e.target.value })} required />
-              </div>
-              <div>
-                <label className="label">Legal Name</label>
-                <input className="input-field" value={editForm.legalName} onChange={(e) => setEditForm({ ...editForm, legalName: e.target.value })} />
-              </div>
-
-              <CustomFieldInputs
-                fields={visibleCustomFieldDefinitions}
-                values={editForm.customFields}
-                onChange={(customFields) => setEditForm({ ...editForm, customFields })}
-              />
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="label flex items-center gap-1.5"><Users className="w-3 h-3" />Contacts</label>
-                  <button
-                    type="button"
-                    onClick={addPerson}
-                    className="text-xs font-medium text-brand-600 hover:text-brand-700 flex items-center gap-1"
-                  >
-                    <Plus className="w-3 h-3" />
-                    Add Contact
-                  </button>
-                </div>
-                <div className="space-y-3">
-                  {persons.map((entry, index) => (
-                    <PersonEntryCard
-                      key={`${entry.personId || "new"}-${index}`}
-                      entry={entry}
-                      index={index}
-                      total={persons.length}
-                      onChange={(updated) => updatePerson(index, updated)}
-                      onRemove={() => removePerson(index)}
-                      onSetPrimary={() => setPrimary(index)}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="label">State *</label>
-                  <select className="input-field" value={editForm.state} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} required>
-                    <option value="">Select State</option>
-                    {STATES.map((state) => <option key={state} value={state}>{state}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">GST Number</label>
-                  <input className="input-field font-mono text-sm" value={editForm.gstNumber} onChange={(e) => setEditForm({ ...editForm, gstNumber: e.target.value })} placeholder="22AAAAA0000A1Z5" />
-                </div>
-              </div>
-              <div>
-                <label className="label">Address</label>
-                <textarea className="input-field" rows={2} value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} />
-              </div>
-              <div>
-                <label className="label">Registration Number</label>
-                <input className="input-field font-mono text-sm" value={editForm.registrationNumber} onChange={(e) => setEditForm({ ...editForm, registrationNumber: e.target.value })} />
-              </div>
-            </div>
-          )}
-
-          {editTab === "portal" && (
-            <div className="space-y-3">
-              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-xs text-amber-700 dark:text-amber-400">
-                Warning: These credentials are stored securely and only visible to admins.
-              </div>
-              <div>
-                <label className="label">CPCB Login ID</label>
-                <input className="input-field font-mono text-sm" value={editForm.cpcbLoginId} onChange={(e) => setEditForm({ ...editForm, cpcbLoginId: e.target.value })} placeholder="e.g. username@cpcb" />
-              </div>
-              <div>
-                <label className="label">CPCB Password</label>
-                <div className="relative">
-                  <input type={showEditPassword ? "text" : "password"} className="input-field font-mono text-sm pr-16"
-                    value={editForm.cpcbPassword} onChange={(e) => setEditForm({ ...editForm, cpcbPassword: e.target.value })} />
-                  <button type="button" onClick={() => setShowEditPassword(!showEditPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-brand-600 font-medium">
-                    {showEditPassword ? "Hide" : "Show"}
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="label">OTP Mobile Number</label>
-                <input className="input-field font-mono text-sm" value={editForm.otpMobileNumber} onChange={(e) => setEditForm({ ...editForm, otpMobileNumber: e.target.value })} placeholder="+91 XXXXX XXXXX" />
-              </div>
-            </div>
-          )}
-
-          <div className="flex gap-2 pt-2 border-t border-base">
-            <button type="submit" className="btn-primary flex-1 justify-center" disabled={saving}>
-              {saving ? "Saving..." : "Save Changes"}
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => setEditModal(false)}>Cancel</button>
-          </div>
-        </form>
-      </Modal>
     </>
   );
 }

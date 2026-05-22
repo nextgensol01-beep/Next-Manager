@@ -7,6 +7,8 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { invalidate, useCache } from "@/lib/useCache";
+import ClientFormModal from "@/components/clients/ClientFormModal";
+import type { ClientFormData } from "@/components/clients/ClientFormModal";
 import { usePendingList } from "@/lib/usePendingList";
 import type { ClientCustomFieldDefinition, ClientCustomFieldValues } from "@/lib/clientCustomFields";
 import FYTabBar from "@/components/ui/FYTabBar";
@@ -196,19 +198,10 @@ export default function ClientProfilePage() {
     recentActivity: true,
   });
 
-  // Edit client state
+  // Edit client modal
   const [editModal, setEditModal] = useState(false);
-  const [editTab, setEditTab] = useState<"basic" | "portal">("basic");
+  const [editInitialTab, setEditInitialTab] = useState<"basic" | "portal">("basic");
   const [saving, setSaving] = useState(false);
-  const [persons, setPersons] = useState<PersonEntry[]>([emptyPersonEntry()]);
-  const [removedPersonIds, setRemovedPersonIds] = useState<string[]>([]);
-  const [editForm, setEditForm] = useState({
-    companyName: "", legalName: "", category: "", state: "", address: "",
-    gstNumber: "", registrationNumber: "",
-    cpcbLoginId: "", cpcbPassword: "", otpMobileNumber: "",
-    customFields: {} as ClientCustomFieldValues,
-  });
-  const [showEditPassword, setShowEditPassword] = useState(false);
 
   // Breakdown modal
   const [breakdownRec, setBreakdownRec] = useState<FYRecord | null>(null);
@@ -819,7 +812,15 @@ export default function ClientProfilePage() {
       }
 
       const saved = await response.json();
-      ops?.commit?.(saved);
+      // Defensive merge: ensure totalPaid / pendingAmount / paymentStatus are always
+      // numbers even if the API ever returns a partial document (prevents ₹NaN).
+      const safeCommit = {
+        ...saved,
+        totalPaid:     typeof saved.totalPaid     === "number" ? saved.totalPaid     : 0,
+        pendingAmount: typeof saved.pendingAmount === "number" ? saved.pendingAmount : (saved.totalAmount ?? optimisticBilling.totalAmount) - 0,
+        paymentStatus: saved.paymentStatus ?? "Unpaid",
+      };
+      ops?.commit?.(safeCommit);
       toast.success(editingBillingId ? "Billing updated!" : "Billing saved!");
     } catch {
       ops?.rollback?.();
@@ -1213,48 +1214,28 @@ export default function ClientProfilePage() {
   };
 
   // Open edit modal pre-filled with current client data
-  const openEdit = () => {
+  const openEdit = (tab: "basic" | "portal" = "basic") => {
     if (!client) return;
-    setEditForm({
-      companyName: client.companyName,
-      legalName: client.legalName || String(client.customFields?.legalName || ""),
-      category: client.category,
-      state: client.state,
-      address: client.address || "",
-      gstNumber: client.gstNumber || "",
-      registrationNumber: client.registrationNumber || "",
-      cpcbLoginId: client.cpcbLoginId || "",
-      cpcbPassword: client.cpcbPassword || "",
-      otpMobileNumber: client.otpMobileNumber || "",
-      customFields: client.customFields || {},
-    });
-    const existingPersons = (client.contacts || []).map((contact, index) => createPersonEntry({
-      ...contact,
-      personId: contact.personId || contact._id,
-      designation: contact.designation || "",
-      isPrimaryContact: contact.isPrimaryContact || index === 0,
-    }));
-    setPersons(existingPersons.length > 0 ? existingPersons : [emptyPersonEntry()]);
-    setRemovedPersonIds([]);
-    setEditTab("basic");
-    setShowEditPassword(false);
+    setEditInitialTab(tab);
     setEditModal(true);
   };
 
-  const handleSaveClient = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveClient = async (
+    data: ClientFormData,
+    formPersons: PersonEntry[],
+    removedIds: string[]
+  ) => {
     setSaving(true);
     try {
       const validPersons: PersonEntry[] = [];
 
-      for (const person of persons) {
+      for (const person of formPersons) {
         const hasAnyContent = Boolean(
           person.name.trim() ||
           person.designation.trim() ||
           person.phoneNumbers.some((phone) => phone.trim()) ||
           person.emails.some((email) => email.trim())
         );
-
         if (!hasAnyContent) continue;
 
         const prepared = syncEntrySelections({
@@ -1266,37 +1247,24 @@ export default function ClientProfilePage() {
           selectedEmails: person.selectedEmails,
         });
 
-        if (!prepared.name) {
-          toast.error("Each linked contact needs a name.");
-          return;
-        }
-
+        if (!prepared.name) { toast.error("Each linked contact needs a name."); return; }
         if (prepared.phoneNumbers.length === 0 && prepared.emails.length === 0) {
-          toast.error(`Contact "${prepared.name}" needs at least one phone number or email.`);
-          return;
+          toast.error(`Contact "${prepared.name}" needs at least one phone number or email.`); return;
         }
-
         if (prepared.selectedPhones.length === 0 && prepared.selectedEmails.length === 0) {
-          toast.error(`Select at least one phone or email for "${prepared.name}".`);
-          return;
+          toast.error(`Select at least one phone or email for "${prepared.name}".`); return;
         }
-
         validPersons.push(prepared);
       }
 
       const r = await fetch(`/api/clients/${clientId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...editForm, persons: validPersons, removedPersonIds }),
+        body: JSON.stringify({ ...data, persons: validPersons, removedPersonIds: removedIds }),
       });
       if (!r.ok) { toast.error("Failed to save"); return; }
-      const updated = await r.json();
-      // Merge updated fields into client state - no reload needed
-      setClient((prev) => prev ? { ...prev, ...updated } : prev);
-      // If contacts changed, refetch full client to get populated contacts array
       const refreshed = await fetch(`/api/clients/${clientId}`).then((x) => x.json());
       setClient(refreshed);
-      // Invalidate clients list cache so list page shows updated name/category
       invalidate("/api/clients");
       setEditModal(false);
       toast.success("Client updated!");
@@ -1305,43 +1273,7 @@ export default function ClientProfilePage() {
     }
   };
 
-  const addPerson = () => {
-    setPersons((prev) => {
-      const hasPrimary = prev.some((entry) => entry.isPrimaryContact);
-      return [...prev, { ...emptyPersonEntry(), isPrimaryContact: !hasPrimary }];
-    });
-  };
 
-  const removePerson = (index: number) => {
-    setPersons((prev) => {
-      const target = prev[index];
-      if (target?.personId) {
-        setRemovedPersonIds((current) => (
-          current.includes(target.personId!) ? current : [...current, target.personId!]
-        ));
-      }
-
-      const next = prev.filter((_, currentIndex) => currentIndex !== index);
-      if (next.length === 0) return [emptyPersonEntry()];
-      if (!next.some((entry) => entry.isPrimaryContact)) {
-        next[0] = { ...next[0], isPrimaryContact: true };
-      }
-      return next;
-    });
-  };
-
-  const updatePerson = (index: number, updated: PersonEntry) => {
-    setPersons((prev) => prev.map((entry, currentIndex) => (
-      currentIndex === index ? syncEntrySelections(updated) : entry
-    )));
-  };
-
-  const setPrimary = (index: number) => {
-    setPersons((prev) => prev.map((entry, currentIndex) => ({
-      ...entry,
-      isPrimaryContact: currentIndex === index,
-    })));
-  };
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><LoadingSpinner /></div>;
   if (loadError && !client) return (
@@ -1872,7 +1804,7 @@ export default function ClientProfilePage() {
                 {!client.cpcbLoginId && !client.cpcbPassword && !client.otpMobileNumber ? (
                   <div className="text-center py-4">
                     <p className="text-sm text-faint mb-3">No portal credentials saved.</p>
-                    <button onClick={() => { openEdit(); setEditTab("portal"); }}
+                    <button onClick={() => openEdit("portal")}
                       className="glass-btn">
                       <Plus className="w-3 h-3" /> Add Credentials
                     </button>
@@ -1927,7 +1859,7 @@ export default function ClientProfilePage() {
                   </>
                 )}
                 <div className="pt-3 border-t border-soft">
-                  <button onClick={() => { openEdit(); setTimeout(() => setEditTab("portal"), 50); }}
+                  <button onClick={() => openEdit("portal")}
                     className="text-xs text-brand-600 hover:underline flex items-center gap-1">
                     <Pencil className="w-3 h-3" /> Edit credentials
                   </button>
@@ -2317,23 +2249,19 @@ export default function ClientProfilePage() {
         breakdownRec={breakdownRec}
         setBreakdownRec={setBreakdownRec}
         makeBreakdownProps={makeBreakdownProps}
-        editModal={editModal}
-        setEditModal={setEditModal}
-        handleSaveClient={handleSaveClient}
-        editTab={editTab}
-        setEditTab={setEditTab}
-        editForm={editForm}
-        setEditForm={setEditForm}
-        customFieldDefinitions={customFieldDefinitions}
-        persons={persons}
-        addPerson={addPerson}
-        updatePerson={updatePerson}
-        removePerson={removePerson}
-        setPrimary={setPrimary}
-        showEditPassword={showEditPassword}
-        setShowEditPassword={setShowEditPassword}
         saving={saving}
         inlineSaving={inlineSaving}
+      />
+
+      {/* ── Unified Add/Edit Client Modal ── */}
+      <ClientFormModal
+        open={editModal}
+        onClose={() => setEditModal(false)}
+        client={client}
+        customFieldDefinitions={customFieldDefinitions}
+        onSave={handleSaveClient}
+        saving={saving}
+        initialTab={editInitialTab}
       />
     </div>
   );

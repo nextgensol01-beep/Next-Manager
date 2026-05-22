@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import React, { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useSettingsSearch } from "./SettingsSearchContext";
 import { useSession } from "next-auth/react";
@@ -56,6 +56,107 @@ type ActionSheetAction = {
   danger?: boolean;
   onClick: () => void;
 };
+
+/** Returns true when viewport width is below the md breakpoint (768px) */
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+  return isMobile;
+}
+
+/**
+ * Desktop dropdown menu — anchored to the trigger button.
+ * Appears with a subtle scale+fade animation, closes on outside click or Escape.
+ */
+function DesktopDropdown({
+  actions,
+  anchor,
+  onClose,
+}: {
+  actions: ActionSheetAction[];
+  anchor: DOMRect;
+  onClose: () => void;
+}) {
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  const pos = {
+    top: anchor.bottom + 6,
+    left: Math.max(8, anchor.right - 200),
+  };
+
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 10);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return null;
+
+  return createPortal(
+    <div
+      ref={dropdownRef}
+      style={{
+        position: "fixed",
+        top: pos.top,
+        left: pos.left,
+        zIndex: 9000,
+        width: "200px",
+        transformOrigin: "top right",
+        transform: visible ? "scale(1)" : "scale(0.92)",
+        opacity: visible ? 1 : 0,
+        transition: "transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1), opacity 120ms ease",
+        willChange: "transform, opacity",
+      }}
+    >
+      <div
+        className="rounded-xl overflow-hidden bg-card border border-[var(--color-border)]"
+        style={{ boxShadow: "0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10)" }}
+      >
+        {actions.map((action, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => { action.onClick(); onClose(); }}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 text-[13px] font-medium text-left transition-colors hover:bg-[var(--color-hover)] ${
+              action.danger ? "text-[#FF3B30]" : "text-default"
+            } ${i > 0 ? "border-t border-[var(--color-border)]" : ""}`}
+          >
+            <span className={`flex-shrink-0 ${action.danger ? "text-[#FF3B30]" : "text-muted"}`}>
+              {action.icon}
+            </span>
+            {action.label}
+          </button>
+        ))}
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 const emptyUserForm = {
   name: "",
@@ -564,6 +665,8 @@ export default function AccessPanel() {
   const [passwordInput, setPasswordInput] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [actionSheet, setActionSheet] = useState<{ actions: ActionSheetAction[] } | null>(null);
+  const [desktopDropdown, setDesktopDropdown] = useState<{ actions: ActionSheetAction[]; anchor: DOMRect } | null>(null);
+  const isMobile = useIsMobile();
 
   const { data: managedUsersData, loading: usersLoading, refetch: refetchManagedUsers } =
     useCache<{ users: ManagedUser[] }>("/api/users", { enabled: isAdmin, initialData: { users: [] } });
@@ -750,7 +853,7 @@ export default function AccessPanel() {
   };
 
   /** Open the iOS-style action sheet for a user */
-  const openUserActions = (entry: ManagedUser) => {
+  const openUserActions = (entry: ManagedUser, _anchorRect: DOMRect) => {
     const actions: ActionSheetAction[] = [];
 
     if (entry.googleStatus === "pending") {
@@ -797,7 +900,12 @@ export default function AccessPanel() {
       onClick: () => deleteUser(entry),
     });
 
-    setActionSheet({ actions });
+    if (isMobile) {
+      setActionSheet({ actions });
+    } else {
+      // Desktop: use the anchor rect captured at call time
+      setDesktopDropdown({ actions, anchor: _anchorRect });
+    }
   };
 
   const formatDate = (value?: string | null) => {
@@ -868,7 +976,7 @@ export default function AccessPanel() {
                       {/* ··· action button — replaces all the inline buttons */}
                       <button
                         type="button"
-                        onClick={() => openUserActions(entry)}
+                        onClick={(e) => openUserActions(entry, (e.currentTarget as HTMLButtonElement).getBoundingClientRect())}
                         disabled={isBusy}
                         className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-[var(--color-hover)] text-faint transition-colors disabled:opacity-40"
                       >
@@ -991,9 +1099,9 @@ export default function AccessPanel() {
           <div className="px-4 py-6 text-center text-sm text-muted">No active sessions found.</div>
         ) : (
           sessions.map((entry) => (
-            <>
+            <React.Fragment key={entry.id}>
               {/* Desktop: compact single-row */}
-              <div key={entry.id + "-desktop"} className="hidden md:block">
+              <div className="hidden md:block">
                 <SessionCard
                   entry={entry}
                   onRevoke={() => revokeSession(entry.id)}
@@ -1002,23 +1110,32 @@ export default function AccessPanel() {
                 />
               </div>
               {/* Mobile: stacked layout */}
-              <div key={entry.id + "-mobile"} className="md:hidden">
+              <div className="md:hidden">
                 <SessionCard
                   entry={entry}
                   onRevoke={() => revokeSession(entry.id)}
                   revoking={revokingSessionId === entry.id}
                 />
               </div>
-            </>
+            </React.Fragment>
           ))
         )}
       </SettingsGroup>
 
-      {/* iOS Action Sheet */}
+      {/* iOS Action Sheet — mobile only */}
       {actionSheet && (
         <ActionSheet
           actions={actionSheet.actions}
           onClose={() => setActionSheet(null)}
+        />
+      )}
+
+      {/* Desktop dropdown — shown when 3-dot is clicked on desktop */}
+      {desktopDropdown && (
+        <DesktopDropdown
+          actions={desktopDropdown.actions}
+          anchor={desktopDropdown.anchor}
+          onClose={() => setDesktopDropdown(null)}
         />
       )}
 

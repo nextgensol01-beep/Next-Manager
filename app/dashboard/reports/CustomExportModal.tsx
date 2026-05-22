@@ -134,7 +134,7 @@ export default function CustomExportModal({
   toggleClientSelection,
   downloadCustomExport,
 }: CustomExportModalProps) {
-  return (    <Modal open={customExportOpen} onClose={() => !customDownloading && setCustomExportOpen(false)} title="Custom Client Export" size="xl">
+  return (    <Modal open={customExportOpen} onClose={() => !customDownloading && setCustomExportOpen(false)} title="Custom Client Export" size="2xl" className="!max-w-[1100px]" bgColor="var(--color-card)">
       <div className="space-y-4">
         <div className="rounded-2xl border border-base bg-surface/60 p-4">
           <h4 className="text-sm font-semibold text-default mb-1">Choose the client fields you want in the sheet</h4>
@@ -245,7 +245,7 @@ export default function CustomExportModal({
             ))}
           </div>
     
-          <div className="xl:sticky xl:top-24 xl:self-start xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto xl:pr-1 space-y-4">
+          <div className="xl:sticky xl:top-0 xl:self-start space-y-4">
             <div className="rounded-2xl border border-base bg-card p-4">
               <div className="text-xs uppercase tracking-wide text-faint mb-3">Quick Actions</div>
               <div className="glass-tray" style={{ flexWrap: "wrap" }}>

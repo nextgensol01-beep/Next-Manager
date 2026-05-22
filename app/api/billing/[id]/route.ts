@@ -4,7 +4,73 @@ import { authOptions } from "@/lib/auth";
 import { normalizeBillingBody } from "@/lib/billing-utils";
 import { connectDB } from "@/lib/mongoose";
 import Billing from "@/models/Billing";
+import Payment from "@/models/Payment";
 import DeletedRecord from "@/models/DeletedRecord";
+
+
+// ── Re-fetch a billing doc through the full aggregation pipeline so the
+// response always has the same shape as GET (totalPaid, pendingAmount, etc.)
+async function fetchBillingAggregated(id: unknown) {
+  const { ObjectId } = await import("mongodb");
+  const _id = typeof id === "string" ? new ObjectId(id) : id;
+  const [doc] = await Billing.collection
+    .aggregate([
+      { $match: { _id } },
+      {
+        $lookup: {
+          from: Payment.collection.name,
+          let: { billingClientId: "$clientId", billingFinancialYear: "$financialYear" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$clientId", "$$billingClientId"] },
+                    { $eq: ["$financialYear", "$$billingFinancialYear"] },
+                    { $ne: ["$paymentType", "advance"] },
+                  ],
+                },
+              },
+            },
+            { $group: { _id: null, totalPaid: { $sum: "$amountPaid" } } },
+          ],
+          as: "paymentTotals",
+        },
+      },
+      {
+        $addFields: {
+          totalPaid: { $ifNull: [{ $first: "$paymentTotals.totalPaid" }, 0] },
+        },
+      },
+      { $unset: "paymentTotals" },
+      {
+        $addFields: {
+          pendingAmount: { $max: [0, { $subtract: ["$totalAmount", "$totalPaid"] }] },
+          paymentPercentage: {
+            $cond: [
+              { $gt: ["$totalAmount", 0] },
+              { $min: [100, { $multiply: [{ $divide: ["$totalPaid", "$totalAmount"] }, 100] }] },
+              0,
+            ],
+          },
+          paymentStatus: {
+            $switch: {
+              branches: [
+                {
+                  case: { $lte: [{ $max: [0, { $subtract: ["$totalAmount", "$totalPaid"] }] }, 0] },
+                  then: "Paid",
+                },
+                { case: { $gt: ["$totalPaid", 0] }, then: "Partial" },
+              ],
+              default: "Unpaid",
+            },
+          },
+        },
+      },
+    ])
+    .toArray();
+  return doc ?? null;
+}
 
 // PATCH — lightweight update for invoice status only
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -41,7 +107,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const { id } = await params;
     const record = await Billing.findByIdAndUpdate(id, { ...body, updatedAt: new Date() }, { new: true, runValidators: true });
     if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json(record);
+    // Re-fetch through aggregation pipeline so response includes totalPaid, pendingAmount, paymentStatus
+    const full = await fetchBillingAggregated(record._id);
+    return NextResponse.json(full ?? record);
   } catch (error) {
     console.error("PUT /api/billing/[id]:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
