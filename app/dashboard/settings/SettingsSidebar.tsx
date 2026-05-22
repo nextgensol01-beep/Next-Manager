@@ -258,7 +258,7 @@ export default function SettingsSidebar({ activeTab, onSelect, mobile = false }:
           >
             {results.length === 0 ? (
               <div className="px-4 py-5 text-center">
-                <p className="text-[13px] text-faint">No results for "{search}"</p>
+                <p className="text-[13px] text-faint">No results for &quot;{search}&quot;</p>
               </div>
             ) : (
               <div className="py-1.5 max-h-[320px] overflow-y-auto">

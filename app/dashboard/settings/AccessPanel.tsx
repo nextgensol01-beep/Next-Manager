@@ -13,7 +13,6 @@ import {
 import { invalidate, useCache } from "@/lib/useCache";
 import { parseDevice, type ParsedDevice } from "@/lib/device";
 import { DeviceOsIcon, BrowserBrandIcon } from "@/components/ui/DeviceBrandIcon";
-import { Wifi } from "lucide-react";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 
 type ActiveSession = {
@@ -166,11 +165,6 @@ const emptyUserForm = {
   loginMethod: "password" as "password" | "google",
 };
 
-function formatIpAddress(ip?: string | null) {
-  if (!ip) return "";
-  if (ip === "::1" || ip === "127.0.0.1") return `Localhost (${ip})`;
-  return ip;
-}
 
 /**
  * Apple-level action sheet:
@@ -670,7 +664,7 @@ export default function AccessPanel() {
 
   const { data: managedUsersData, loading: usersLoading, refetch: refetchManagedUsers } =
     useCache<{ users: ManagedUser[] }>("/api/users", { enabled: isAdmin, initialData: { users: [] } });
-  const managedUsers = isAdmin ? managedUsersData.users : [];
+  const managedUsers = useMemo(() => isAdmin ? managedUsersData.users : [], [isAdmin, managedUsersData.users]);
   const { setUsers } = useSettingsSearch();
   useEffect(() => {
     if (managedUsers.length > 0) {

@@ -2,12 +2,6 @@
 import { CheckCircle2, Loader2, AlertCircle } from "lucide-react";
 import type { PendingStatus } from "@/lib/usePendingList";
 
-interface PendingIndicatorProps {
-  status?: PendingStatus;
-  /** For table rows: applies opacity + border styling to a <tr>. Default: false (inline chip mode). */
-  asRowClass?: false;
-}
-
 /**
  * Inline chip shown next to a record while it's being saved/confirmed/errored.
  * Disappears automatically after "confirmed" fades out.

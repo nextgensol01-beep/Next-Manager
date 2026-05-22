@@ -11,8 +11,6 @@ import {
   emptyPersonEntry,
   createPersonEntry,
   syncEntrySelections,
-  normalizePhoneList,
-  normalizeEmailList,
   type PersonEntry,
 } from "@/app/dashboard/clients/[clientId]/ClientProfileSupport";
 import type {

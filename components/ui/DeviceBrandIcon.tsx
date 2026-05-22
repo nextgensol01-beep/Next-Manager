@@ -79,6 +79,7 @@ export function DeviceOsIcon({ device, className }: { device: ParsedDevice; clas
   return <Globe className={className} />;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function BrowserBrandIcon({ browser, className }: { browser: string; className?: string }) {
   if (browser === "Edge") return <EdgeLogo className={className} />;
   if (browser === "Chrome") return <Chrome className={className} />;
