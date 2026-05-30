@@ -29,7 +29,8 @@
     "recharts": "^2.13.0",
     "swr": "^2.3.0",
     "tailwind-merge": "^3.3.0",
-    "uuid": "file:vendor/uuid-safe"
+    "uuid": "file:vendor/uuid-safe",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

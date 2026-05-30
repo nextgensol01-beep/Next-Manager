@@ -16,6 +16,12 @@ export interface ConfirmModalProps {
   /** Visual intent of the confirm button */
   variant?: "danger" | "warning";
   loading?: boolean;
+  /**
+   * When set, the confirm button stays disabled until the user types this
+   * exact string into an input. Use for irreversible destructive actions.
+   * The input placeholder will read: Type "…" to confirm
+   */
+  confirmText?: string;
 }
 
 export default function ConfirmModal({
@@ -29,14 +35,17 @@ export default function ConfirmModal({
   cancelLabel = "Cancel",
   variant = "danger",
   loading = false,
+  confirmText,
 }: ConfirmModalProps) {
   const [visible, setVisible] = useState(false);
   const [rendered, setRendered] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [typedValue, setTypedValue] = useState("");
 
   useEffect(() => {
     if (open) {
       setRendered(true);
+      setTypedValue("");
       requestAnimationFrame(() => requestAnimationFrame(() => setVisible(true)));
     } else {
       setVisible(false);
@@ -57,6 +66,8 @@ export default function ConfirmModal({
   if (!rendered) return null;
 
   const isLoading = loading || busy;
+  const typedOk = !confirmText || typedValue === confirmText;
+  const confirmDisabled = isLoading || !typedOk;
 
   const handleConfirm = async () => {
     setBusy(true);
@@ -132,6 +143,21 @@ export default function ConfirmModal({
                   {note}
                 </p>
               )}
+              {confirmText && (
+                <div className="mt-3">
+                  <p className="text-xs text-muted mb-1.5">
+                    Type <span className="font-mono font-semibold text-default">&quot;{confirmText}&quot;</span> to confirm
+                  </p>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={typedValue}
+                    onChange={(e) => setTypedValue(e.target.value)}
+                    placeholder={`Type "${confirmText}" to confirm`}
+                    className="w-full text-sm rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] text-default px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-400/30 focus:border-red-400 transition font-mono"
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -141,7 +167,7 @@ export default function ConfirmModal({
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={isLoading}
+            disabled={confirmDisabled}
             className={cn(
               "flex-1 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all",
               "disabled:opacity-60 disabled:cursor-not-allowed",

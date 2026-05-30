@@ -741,7 +741,7 @@ export async function listClientSummaries(options: {
   }
 
   const clientQuery = Client.find(query)
-    .select("clientId companyName legalName category state")
+    .select("clientId companyName legalName category state address gstNumber")
     .sort({ companyName: 1 })
     .lean();
 
@@ -758,6 +758,8 @@ export async function listClientSummaries(options: {
       legalName: typeof client.legalName === "string" ? client.legalName : "",
       category: typeof client.category === "string" ? client.category : "",
       state: typeof client.state === "string" ? client.state : "",
+      address: typeof client.address === "string" ? client.address : "",
+      gstNumber: typeof client.gstNumber === "string" ? client.gstNumber : "",
     }))
     .filter((client) => client.clientId && client.companyName);
 }

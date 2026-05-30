@@ -4,6 +4,17 @@ import { authOptions } from "@/lib/auth";
 import { google } from "googleapis";
 import { connectDB } from "@/lib/mongoose";
 import EmailLog from "@/models/EmailLog";
+import { z } from "zod";
+
+const createDraftSchema = z.object({
+  to: z.union([z.string().trim().email(), z.array(z.string().trim().email()).min(1)]),
+  subject: z.string().trim().min(1).max(200),
+  html: z.string().min(1),
+  logType: z.enum(["quotation", "payment_reminder", "annual_return_draft", "custom"]).default("annual_return_draft"),
+  logClientId: z.string().trim().max(120).optional(),
+  logClientName: z.string().trim().max(200).optional(),
+  logFy: z.string().trim().max(20).optional(),
+});
 
 function buildRawEmail(
   to: string,
@@ -50,12 +61,11 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await req.json();
-  const { to, subject, html, logClientId, logClientName, logFy } = body;
-
-  if (!to || !subject || !html) {
-    return NextResponse.json({ error: "to, subject, and html are required" }, { status: 400 });
+  const parsedBody = createDraftSchema.safeParse(await req.json());
+  if (!parsedBody.success) {
+    return NextResponse.json({ error: parsedBody.error.issues.map((issue) => issue.message).join("; ") }, { status: 400 });
   }
+  const { to, subject, html, logType, logClientId, logClientName, logFy } = parsedBody.data;
 
   const clientId     = process.env.GMAIL_OAUTH_CLIENT_ID;
   const clientSecret = process.env.GMAIL_OAUTH_CLIENT_SECRET;
@@ -95,7 +105,7 @@ export async function POST(req: NextRequest) {
     try {
       await connectDB();
       await EmailLog.create({
-        type: "annual_return_draft",
+        type: logType,
         to: toList,
         subject,
         clientId: logClientId || "",

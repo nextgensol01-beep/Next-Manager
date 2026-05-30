@@ -45,7 +45,7 @@ const navItems = [
   { href: "/dashboard/annual-return",       label: "EPR Annual Return",   icon: ClipboardCheck },
   { href: "/dashboard/billing",             label: "Billing & Payments",  icon: Receipt },
   { href: "/dashboard/reports",             label: "Reports",             icon: BarChart2 },
-  { href: "/dashboard/quotation",           label: "Quotation Generator", icon: FileText },
+  { href: "/dashboard/quotations",          label: "Quotations",           icon: FileText },
   { href: "/dashboard/settings",            label: "Settings",            icon: Settings2 },
 ];
 
@@ -565,7 +565,9 @@ export default function Sidebar({ open, onClose }: Props) {
 
     // Check main nav items
     for (const item of navItems) {
-      const isActive = item.href === "/dashboard" ? pathname === item.href : pathname.startsWith(item.href);
+      const isActive = item.href === "/dashboard" || (item as { exact?: boolean }).exact
+        ? pathname === item.href
+        : pathname.startsWith(item.href);
       if (isActive) { activeHref = item.href; break; }
     }
 
@@ -720,8 +722,9 @@ export default function Sidebar({ open, onClose }: Props) {
           Navigation
         </p>
 
-        {navItems.map(({ href, label, icon: Icon }) => {
-          const isActive = href === "/dashboard" ? pathname === href : pathname.startsWith(href);
+        {navItems.map(({ href, label, icon: Icon, ...rest }) => {
+          const exact = (rest as { exact?: boolean }).exact;
+          const isActive = href === "/dashboard" || exact ? pathname === href : pathname.startsWith(href);
           return (
             <NavLink
               key={href}
@@ -859,7 +862,7 @@ export default function Sidebar({ open, onClose }: Props) {
       </nav>
 
       <div className="border-t sidebar-divider p-4 flex-shrink-0">
-        <p className="sidebar-text-faint text-xs text-center">v2.0.0 · Internal Use Only</p>
+        <p className="sidebar-text-faint text-xs text-center">v2.0.0 - Internal Use Only</p>
       </div>
     </aside>
   );

@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Modal from "@/components/ui/Modal";
 import ConfirmModal from "@/components/ui/ConfirmModal";
-import { CustomFieldInputs } from "@/components/clients/CustomFieldInputs";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
 import { STATES, CATEGORIES } from "@/lib/utils";
 import {
@@ -17,7 +16,7 @@ import type {
   ClientCustomFieldDefinition,
   ClientCustomFieldValues,
 } from "@/lib/clientCustomFields";
-import { Wand2, RefreshCw, Lock, UserPlus, AlertCircle, X, Users } from "lucide-react";
+import { Wand2, RefreshCw, Lock, UserPlus, AlertCircle, X, Users, ClipboardList, ChevronDown, ChevronUp, CheckCircle2 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -246,11 +245,614 @@ function InsetGroup({
   );
 }
 
-// ── ContactsEmptyState ────────────────────────────────────────────────────────
-function ContactsEmptyState({ onAdd }: { onAdd: () => void }) {
+// ── Paste import helpers ───────────────────────────────────────────────────────
+
+/** One parsed row from a pasted spreadsheet / CSV block */
+export interface ParsedContactRow {
+  name: string;
+  designation: string;
+  phone: string;
+  email: string;
+}
+
+/**
+ * Accepts a raw paste string (tab-separated or comma-separated, one row per line)
+ * and returns an array of ParsedContactRow objects.
+ *
+ * Expected column order (flexible, extra columns ignored):
+ *   Name | Designation | Phone | Email
+ *
+ * A row is skipped when it has no recognisable name after trimming.
+ */
+export function parsePastedContacts(raw: string): ParsedContactRow[] {
+  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return [];
+
+  // Detect delimiter: if any line contains a tab use TSV, else CSV
+  const delimiter = lines.some((l) => l.includes("\t")) ? "\t" : ",";
+
+  // Strip a possible header row (first cell looks like "name" / "contact" etc.)
+  const firstCells = lines[0].split(delimiter).map((c) => c.trim().toLowerCase());
+  const hasHeader =
+    firstCells[0] === "name" ||
+    firstCells[0] === "contact name" ||
+    firstCells[0] === "contact" ||
+    firstCells[0] === "person";
+  const dataLines = hasHeader ? lines.slice(1) : lines;
+
+  return dataLines
+    .map((line): ParsedContactRow => {
+      // Handle quoted CSV fields (e.g. "Smith, John")
+      const cells: string[] = [];
+      if (delimiter === ",") {
+        let cur = "";
+        let inQuote = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') {
+            inQuote = !inQuote;
+          } else if (ch === "," && !inQuote) {
+            cells.push(cur.trim());
+            cur = "";
+          } else {
+            cur += ch;
+          }
+        }
+        cells.push(cur.trim());
+      } else {
+        line.split("\t").forEach((c) => cells.push(c.trim()));
+      }
+
+      const [c0 = "", c1 = "", c2 = "", c3 = ""] = cells;
+
+      // Heuristic: if c0 looks like a phone/email, user only pasted two cols (name, phone)
+      const looksLikePhone = (s: string) => /^[+\d\s\-().]{7,}$/.test(s);
+      const looksLikeEmail = (s: string) => s.includes("@");
+
+      if (looksLikePhone(c1) || looksLikeEmail(c1)) {
+        // 2-col paste: Name | Phone-or-Email
+        return {
+          name: c0,
+          designation: "",
+          phone: looksLikePhone(c1) ? c1 : "",
+          email: looksLikeEmail(c1) ? c1 : "",
+        };
+      }
+
+      return {
+        name: c0,
+        designation: c1,
+        phone: c2,
+        email: c3,
+      };
+    })
+    .filter((row) => row.name.trim().length > 0);
+}
+
+/** Convert a ParsedContactRow into a PersonEntry ready for the form */
+function rowToPersonEntry(row: ParsedContactRow, isPrimary: boolean): PersonEntry {
+  const phones = row.phone.trim() ? [row.phone.trim()] : [""];
+  const emails = row.email.trim().toLowerCase() ? [row.email.trim().toLowerCase()] : [""];
+  return {
+    personId: undefined,
+    name: row.name.trim(),
+    designation: row.designation.trim(),
+    phoneNumbers: phones,
+    emails,
+    selectedPhones: phones.filter(Boolean),
+    selectedEmails: emails.filter(Boolean),
+    isPrimaryContact: isPrimary,
+  };
+}
+
+// ── Paste-import types ───────────────────────────────────────────────────────
+
+/** A candidate Person found in the DB that matches a pasted row's name */
+interface MatchCandidate {
+  _id: string;
+  name: string;
+  phoneNumbers: string[];
+  emails: string[];
+  /** Companies this person is already linked to (from withCompanies=true) */
+  companies: Array<{ clientId: string; companyName: string; category: string; state: string }>;
+}
+
+/** Resolution chosen by the user for a single pasted row */
+type RowResolution =
+  | { kind: "new" }                        // create a fresh Person
+  | { kind: "linked"; candidate: MatchCandidate }; // link to existing Person
+
+/** Full state of one row inside the modal */
+interface PasteRow {
+  parsed: ParsedContactRow;
+  /** undefined = still searching, [] = no match found, 1+ = candidates */
+  candidates: MatchCandidate[] | undefined;
+  resolution: RowResolution | null; // null = unresolved match
+  /** Which candidate card is expanded for picking */
+  picking: boolean;
+}
+
+// ── PasteImportModal ──────────────────────────────────────────────────────────
+
+function PasteImportModal({
+  open,
+  onClose,
+  onImport,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Called with fully-resolved PersonEntry[] ready to splice into the form */
+  onImport: (entries: PersonEntry[]) => void;
+}) {
+  const [raw, setRaw] = useState("");
+  const [rows, setRows] = useState<PasteRow[]>([]);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Track in-flight lookups so stale responses are discarded
+  const lookupGenRef = useRef(0);
+
+  // Reset on open/close
+  useEffect(() => {
+    if (!open) {
+      setRaw("");
+      setRows([]);
+      lookupGenRef.current++;
+    } else {
+      setTimeout(() => textareaRef.current?.focus(), 120);
+    }
+  }, [open]);
+
+  // Re-parse + re-lookup whenever raw text changes
+  useEffect(() => {
+    const parsed = parsePastedContacts(raw);
+    const gen = ++lookupGenRef.current;
+
+    if (parsed.length === 0) { setRows([]); return; }
+
+    // Initialise rows with candidates=undefined (searching)
+    setRows(parsed.map((p) => ({ parsed: p, candidates: undefined, resolution: null, picking: false })));
+
+    // Fire one search per unique name
+    const uniqueNames = Array.from(new Set(parsed.map((p) => p.name.trim()).filter(Boolean)));
+    const resultsByName = new Map<string, MatchCandidate[]>();
+
+    Promise.all(
+      uniqueNames.map(async (name) => {
+        try {
+          const res = await fetch(
+            `/api/contacts?search=${encodeURIComponent(name)}&withCompanies=true`
+          );
+          if (!res.ok) return;
+          const data: MatchCandidate[] = await res.json();
+          // Only keep exact name matches (case-insensitive)
+          const exact = data.filter(
+            (c) => c.name.trim().toLowerCase() === name.toLowerCase()
+          );
+          resultsByName.set(name, exact);
+        } catch {
+          resultsByName.set(name, []);
+        }
+      })
+    ).then(() => {
+      if (lookupGenRef.current !== gen) return; // stale, discard
+      setRows((prev) =>
+        prev.map((row) => {
+          const candidates = resultsByName.get(row.parsed.name.trim()) ?? [];
+          return {
+            ...row,
+            candidates,
+            // Auto-resolve: no candidates → "new"; single candidate → still ask user
+            resolution: candidates.length === 0 ? { kind: "new" } : null,
+            picking: false,
+          };
+        })
+      );
+    });
+  }, [raw]);
+
+  if (!open) return null;
+
+  // ── Derived state ──────────────────────────────────────────────────────
+  const validRows = rows.filter((r) => r.parsed.name.trim());
+  const allResolved = validRows.length > 0 && validRows.every((r) => r.resolution !== null);
+  const linkedCount = validRows.filter((r) => r.resolution?.kind === "linked").length;
+  const newCount    = validRows.filter((r) => r.resolution?.kind === "new").length;
+  const searching   = validRows.some((r) => r.candidates === undefined);
+
+  const resolveRow = (index: number, resolution: RowResolution) => {
+    setRows((prev) =>
+      prev.map((r, i) => i === index ? { ...r, resolution, picking: false } : r)
+    );
+  };
+
+  const togglePicking = (index: number) => {
+    setRows((prev) =>
+      prev.map((r, i) => i === index ? { ...r, picking: !r.picking } : { ...r, picking: false })
+    );
+  };
+
+  const handleImport = () => {
+    if (!allResolved) return;
+    const hasAnyPrimary = false; // will be set inside handlePasteImport
+    const entries: PersonEntry[] = validRows.map((row, i) => {
+      const { parsed, resolution } = row;
+      const isPrimary = !hasAnyPrimary && i === 0;
+
+      if (resolution?.kind === "linked") {
+        const c = resolution.candidate;
+        // Merge pasted phone/email into the existing Person's lists
+        const mergedPhones = Array.from(
+          new Set([
+            ...c.phoneNumbers,
+            ...(parsed.phone.trim() ? [parsed.phone.trim()] : []),
+          ])
+        );
+        const mergedEmails = Array.from(
+          new Set([
+            ...c.emails,
+            ...(parsed.email.trim().toLowerCase() ? [parsed.email.trim().toLowerCase()] : []),
+          ])
+        );
+        return {
+          personId: c._id,
+          name: c.name,
+          designation: parsed.designation.trim(),
+          phoneNumbers: mergedPhones.length > 0 ? mergedPhones : [""],
+          emails: mergedEmails.length > 0 ? mergedEmails : [""],
+          selectedPhones: mergedPhones.filter(Boolean),
+          selectedEmails: mergedEmails.filter(Boolean),
+          isPrimaryContact: isPrimary,
+        };
+      }
+
+      // kind === "new"
+      return rowToPersonEntry(parsed, isPrimary);
+    });
+
+    onImport(entries);
+    onClose();
+  };
+
+  // ── Row status badge ───────────────────────────────────────────────────
+  const RowStatusBadge = ({ row, index }: { row: PasteRow; index: number }) => {
+    if (row.candidates === undefined) {
+      return (
+        <span className="flex items-center gap-1 text-[11px]" style={{ color: "var(--color-text-faint)" }}>
+          <RefreshCw className="w-3 h-3 animate-spin" /> Searching…
+        </span>
+      );
+    }
+    if (row.resolution?.kind === "new" && (row.candidates?.length ?? 0) === 0) {
+      return (
+        <span className="flex items-center gap-1 text-[11px] font-medium" style={{ color: "#22c55e" }}>
+          <CheckCircle2 className="w-3 h-3" /> New contact
+        </span>
+      );
+    }
+    if (row.resolution?.kind === "new" && (row.candidates?.length ?? 0) > 0) {
+      return (
+        <button type="button" onClick={() => togglePicking(index)}
+          className="flex items-center gap-1 text-[11px] font-medium transition-opacity hover:opacity-70"
+          style={{ color: "var(--color-text-faint)" }}>
+          <CheckCircle2 className="w-3 h-3" style={{ color: "#22c55e" }} /> Creating new
+          <span style={{ color: "#0071e3" }}>(change?)</span>
+        </button>
+      );
+    }
+    if (row.resolution?.kind === "linked") {
+      return (
+        <button type="button" onClick={() => togglePicking(index)}
+          className="flex items-center gap-1 text-[11px] font-medium transition-opacity hover:opacity-70"
+          style={{ color: "#0071e3" }}>
+          <CheckCircle2 className="w-3 h-3" /> Linked to {row.resolution.candidate.name}
+          <span style={{ color: "var(--color-text-faint)" }}>(change?)</span>
+        </button>
+      );
+    }
+    // Unresolved match
+    return (
+      <button type="button" onClick={() => togglePicking(index)}
+        className="flex items-center gap-1 text-[11px] font-medium"
+        style={{ color: "#f59e0b" }}>
+        <AlertCircle className="w-3 h-3" />
+        {row.candidates!.length} match{row.candidates!.length > 1 ? "es" : ""} found — resolve
+      </button>
+    );
+  };
+
+  // ── Candidate picker panel ─────────────────────────────────────────────
+  const CandidatePicker = ({ row, index }: { row: PasteRow; index: number }) => {
+    const candidates = row.candidates ?? [];
+    const pastedPhone = row.parsed.phone.trim();
+    const pastedEmail = row.parsed.email.trim().toLowerCase();
+
+    return (
+      <div className="mt-2 rounded-xl overflow-hidden"
+        style={{ border: "1px solid var(--color-border)", backgroundColor: "var(--color-surface)" }}>
+        {/* "Create new" option always first */}
+        <button type="button"
+          onClick={() => resolveRow(index, { kind: "new" })}
+          className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors"
+          style={{ borderBottom: "1px solid var(--color-border-soft)" }}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--color-hover)")}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+        >
+          <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-[12px] font-semibold"
+            style={{ backgroundColor: "var(--color-card)", border: "1px solid var(--color-border)", color: "var(--color-text-faint)" }}>
+            +
+          </div>
+          <div>
+            <p className="text-[13px] font-medium" style={{ color: "var(--color-text)" }}>Create new contact</p>
+            <p className="text-[11px]" style={{ color: "var(--color-text-faint)" }}>
+              A separate Person record will be created
+            </p>
+          </div>
+          {row.resolution?.kind === "new" && (
+            <CheckCircle2 className="w-4 h-4 ml-auto flex-shrink-0" style={{ color: "#0071e3" }} />
+          )}
+        </button>
+
+        {/* Existing candidates */}
+        {candidates.map((c) => {
+          const isChosen = row.resolution?.kind === "linked" && row.resolution.candidate._id === c._id;
+          const newPhone = pastedPhone && !c.phoneNumbers.includes(pastedPhone);
+          const newEmail = pastedEmail && !c.emails.map((e) => e.toLowerCase()).includes(pastedEmail);
+
+          return (
+            <button key={c._id} type="button"
+              onClick={() => resolveRow(index, { kind: "linked", candidate: c })}
+              className="w-full flex items-start gap-3 px-4 py-3 text-left transition-colors"
+              style={{ borderBottom: "1px solid var(--color-border-soft)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--color-hover)")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+            >
+              {/* Avatar */}
+              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-[12px] font-semibold"
+                style={{ backgroundColor: "rgba(0,113,227,0.10)", color: "#0071e3" }}>
+                {c.name.trim()[0]?.toUpperCase() ?? "?"}
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-medium leading-tight" style={{ color: "var(--color-text)" }}>
+                  {c.name}
+                </p>
+                {/* Existing phones */}
+                {c.phoneNumbers.filter(Boolean).length > 0 && (
+                  <p className="text-[11px] font-mono mt-0.5" style={{ color: "var(--color-text-faint)" }}>
+                    {c.phoneNumbers.filter(Boolean).join("  ·  ")}
+                  </p>
+                )}
+                {/* Existing emails */}
+                {c.emails.filter(Boolean).length > 0 && (
+                  <p className="text-[11px] mt-0.5" style={{ color: "var(--color-text-faint)" }}>
+                    {c.emails.filter(Boolean).join("  ·  ")}
+                  </p>
+                )}
+                {/* Companies already linked to */}
+                {c.companies?.length > 0 && (
+                  <p className="text-[11px] mt-0.5" style={{ color: "var(--color-text-faint)" }}>
+                    {c.companies.map((co) => co.companyName).join(", ")}
+                  </p>
+                )}
+                {/* New data that will be added */}
+                {(newPhone || newEmail) && (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {newPhone && (
+                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full font-mono"
+                        style={{ backgroundColor: "rgba(0,113,227,0.08)", color: "#0071e3" }}>
+                        + {pastedPhone}
+                      </span>
+                    )}
+                    {newEmail && (
+                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full"
+                        style={{ backgroundColor: "rgba(0,113,227,0.08)", color: "#0071e3" }}>
+                        + {pastedEmail}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {isChosen && (
+                <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "#0071e3" }} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────
   return (
-    <div className="flex items-center justify-between px-4 py-3.5">
-      <div className="flex items-center gap-3">
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center"
+      style={{ backgroundColor: "rgba(0,0,0,0.40)" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="relative flex flex-col rounded-2xl shadow-2xl"
+        style={{
+          backgroundColor: "var(--color-card)",
+          border: "1px solid var(--color-border)",
+          width: "min(580px, 96vw)",
+          maxHeight: "88vh",
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4"
+          style={{ borderBottom: "1px solid var(--color-border-soft)" }}>
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ backgroundColor: "rgba(0,113,227,0.10)" }}>
+              <ClipboardList className="w-3.5 h-3.5" style={{ color: "#0071e3" }} />
+            </div>
+            <div>
+              <h3 className="text-[15px] font-semibold leading-tight" style={{ color: "var(--color-text)" }}>
+                Paste contacts
+              </h3>
+              <p className="text-[12px]" style={{ color: "var(--color-text-faint)" }}>
+                Copy rows from Excel, Google Sheets, or any CSV
+              </p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose}
+            className="w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90"
+            style={{ backgroundColor: "var(--color-surface)", color: "var(--color-text-faint)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--color-hover)")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "var(--color-surface)")}>
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Format hint */}
+        <div className="px-5 py-2.5"
+          style={{ backgroundColor: "rgba(0,113,227,0.04)", borderBottom: "1px solid var(--color-border-soft)" }}>
+          <p className="text-[12px] leading-relaxed" style={{ color: "var(--color-text-faint)" }}>
+            <span className="font-medium" style={{ color: "var(--color-text-muted)" }}>Column order: </span>
+            Name&nbsp;·&nbsp;Designation&nbsp;·&nbsp;Phone&nbsp;·&nbsp;Email
+            <span className="mx-2" style={{ color: "var(--color-border)" }}>|</span>
+            <span className="font-medium" style={{ color: "var(--color-text-muted)" }}>or: </span>
+            Name&nbsp;·&nbsp;Phone/Email
+            <span style={{ color: "var(--color-text-faint)" }}>&nbsp; (tab or comma separated)</span>
+          </p>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4" style={{ minHeight: 0 }}>
+
+          {/* Textarea */}
+          <textarea
+            ref={textareaRef}
+            className="w-full rounded-xl resize-none font-mono text-[12px] p-3 outline-none"
+            style={{
+              backgroundColor: "var(--color-surface)",
+              border: "1px solid var(--color-border)",
+              color: "var(--color-text)",
+              minHeight: "100px",
+              maxHeight: "160px",
+              transition: "border-color 0.15s",
+            }}
+            placeholder={"Arjun Sharma\tCTO\t+91 98765 43210\tarjun@acme.com\nPriya Nair\tCFO\t+91 87654 32109\tpriya@acme.com"}
+            value={raw}
+            onChange={(e) => setRaw(e.target.value)}
+            onFocus={(e) => (e.currentTarget.style.borderColor = "#0071e3")}
+            onBlur={(e) => (e.currentTarget.style.borderColor = "var(--color-border)")}
+          />
+
+          {/* Per-row resolution list */}
+          {validRows.length > 0 && (
+            <div className="mt-4 space-y-3">
+              {rows.map((row, i) => {
+                if (!row.parsed.name.trim()) return null;
+                return (
+                  <div key={i} className="rounded-xl overflow-visible"
+                    style={{
+                      border: "1px solid var(--color-border)",
+                      backgroundColor: "var(--color-card)",
+                    }}>
+                    {/* Row summary line */}
+                    <div className="flex items-start gap-3 px-4 py-3">
+                      {/* Avatar */}
+                      <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-[12px] font-semibold mt-0.5"
+                        style={{ backgroundColor: "var(--color-surface)", color: "var(--color-text-faint)", border: "1px solid var(--color-border)" }}>
+                        {row.parsed.name.trim()[0]?.toUpperCase() ?? "?"}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-medium leading-tight" style={{ color: "var(--color-text)" }}>
+                          {row.parsed.name}
+                          {row.parsed.designation && (
+                            <span className="ml-1.5 text-[12px] font-normal" style={{ color: "var(--color-text-faint)" }}>
+                              {row.parsed.designation}
+                            </span>
+                          )}
+                        </p>
+                        <div className="flex flex-wrap gap-2 mt-0.5">
+                          {row.parsed.phone && (
+                            <span className="text-[11px] font-mono" style={{ color: "var(--color-text-faint)" }}>
+                              {row.parsed.phone}
+                            </span>
+                          )}
+                          {row.parsed.email && (
+                            <span className="text-[11px]" style={{ color: "var(--color-text-faint)" }}>
+                              {row.parsed.email}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1">
+                          <RowStatusBadge row={row} index={i} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Candidate picker — shown when picking=true */}
+                    {row.picking && (
+                      <div className="px-4 pb-3">
+                        <CandidatePicker row={row} index={i} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-5 py-4"
+          style={{ borderTop: "1px solid var(--color-border-soft)" }}>
+          <button type="button" onClick={onClose}
+            className="text-[14px] font-medium px-1 transition-colors"
+            style={{ color: "var(--color-text-faint)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-faint)")}>
+            Cancel
+          </button>
+
+          <div className="flex items-center gap-3">
+            {/* Summary counts once all resolved */}
+            {allResolved && !searching && (
+              <span className="text-[12px]" style={{ color: "var(--color-text-faint)" }}>
+                {linkedCount > 0 && `${linkedCount} linked`}
+                {linkedCount > 0 && newCount > 0 && " · "}
+                {newCount > 0 && `${newCount} new`}
+              </span>
+            )}
+            {searching && (
+              <span className="flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-faint)" }}>
+                <RefreshCw className="w-3 h-3 animate-spin" /> Searching contacts…
+              </span>
+            )}
+            <button type="button"
+              disabled={!allResolved || searching}
+              onClick={handleImport}
+              className="flex items-center gap-2 px-5 py-2 rounded-xl text-[14px] font-semibold transition-all active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{
+                backgroundColor: "#0071e3",
+                color: "#fff",
+                boxShadow: (!allResolved || searching) ? "none" : "0 1px 4px rgba(0,113,227,0.30)",
+                letterSpacing: "-0.01em",
+              }}
+              onMouseEnter={(e) => { if (allResolved && !searching) (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#0077ed"; }}
+              onMouseLeave={(e) => { if (allResolved && !searching) (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#0071e3"; }}>
+              <UserPlus className="w-3.5 h-3.5" />
+              {searching
+                ? "Searching…"
+                : !allResolved
+                ? `Resolve ${validRows.filter((r) => r.resolution === null).length} match${validRows.filter((r) => r.resolution === null).length > 1 ? "es" : ""}`
+                : `Import ${validRows.length} contact${validRows.length !== 1 ? "s" : ""}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── ContactsEmptyState ────────────────────────────────────────────────────────
+function ContactsEmptyState({ onAdd, onPaste }: { onAdd: () => void; onPaste: () => void }) {
+  return (
+    <div className="px-4 py-3.5">
+      <div className="flex items-center gap-3 mb-3">
         <div
           className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
           style={{ backgroundColor: "rgba(0,113,227,0.08)" }}
@@ -259,23 +861,40 @@ function ContactsEmptyState({ onAdd }: { onAdd: () => void }) {
         </div>
         <div>
           <p className="text-[13px] font-medium text-default leading-tight">No contacts yet</p>
-          <p className="text-[12px] text-faint leading-tight mt-0.5">Add a contact person for this client</p>
+          <p className="text-[12px] text-faint leading-tight mt-0.5">Add one at a time, or paste multiple from a spreadsheet</p>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={onAdd}
-        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-[13px] font-medium transition-all active:scale-[0.97] flex-shrink-0 ml-4"
-        style={{
-          color: "#0071e3",
-          backgroundColor: "rgba(0,113,227,0.08)",
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(0,113,227,0.13)")}
-        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "rgba(0,113,227,0.08)")}
-      >
-        <UserPlus className="w-3.5 h-3.5" />
-        Add Contact
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onAdd}
+          className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-[13px] font-medium transition-all active:scale-[0.97]"
+          style={{
+            color: "#0071e3",
+            backgroundColor: "rgba(0,113,227,0.08)",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(0,113,227,0.13)")}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "rgba(0,113,227,0.08)")}
+        >
+          <UserPlus className="w-3.5 h-3.5" />
+          Add Contact
+        </button>
+        <button
+          type="button"
+          onClick={onPaste}
+          className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-[13px] font-medium transition-all active:scale-[0.97]"
+          style={{
+            color: "var(--color-text-muted)",
+            backgroundColor: "var(--color-surface)",
+            border: "1px solid var(--color-border)",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--color-hover)")}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "var(--color-surface)")}
+        >
+          <ClipboardList className="w-3.5 h-3.5" />
+          Paste from spreadsheet
+        </button>
+      </div>
     </div>
   );
 }
@@ -305,6 +924,7 @@ export default function ClientFormModal({
   const [tabAnimating, setTabAnimating] = useState(false);
   const [tabDirection, setTabDirection] = useState<"left" | "right">("right");
   const [tabSwitched, setTabSwitched] = useState(false);
+  const [portalVisited, setPortalVisited] = useState(initialTab === "portal");
 
   // ── Validation errors ───────────────────────────────────────────────────
   const [fieldErrors, setFieldErrors] = useState<{ companyName: boolean; state: boolean }>({
@@ -356,6 +976,7 @@ export default function ClientFormModal({
   // ── Tab switching ───────────────────────────────────────────────────────
   const switchTab = (tab: "basic" | "portal") => {
     if (tab === activeTab) return;
+    if (tab === "portal") setPortalVisited(true);
     if (formScrollRef.current) tabScrollPos.current[activeTab] = formScrollRef.current.scrollTop;
     const goingRight = tab === "portal";
     setTabDirection(goingRight ? "right" : "left");
@@ -387,6 +1008,7 @@ export default function ClientFormModal({
     setPersons(p);
     setRemovedPersonIds([]);
     setActiveTab(initialTab);
+    setPortalVisited(isEdit || initialTab === "portal");
     setShowPassword(false);
     setConfirmingClose(false);
     // Show card view if client already has contacts, otherwise reset to empty state
@@ -491,6 +1113,39 @@ export default function ClientFormModal({
   const setPrimary = (index: number) =>
     setPersons((prev) => prev.map((p, i) => ({ ...p, isPrimaryContact: i === index })));
 
+  // ── Paste-import state & handler ────────────────────────────────────────
+  const [pasteModalOpen, setPasteModalOpen] = useState(false);
+
+  const handlePasteImport = useCallback((incoming: PersonEntry[]) => {
+    if (incoming.length === 0) return;
+    setContactsStarted(true);
+    setPersons((prev) => {
+      // If the only existing entry is a pristine empty placeholder, replace it
+      const onlyEmpty = prev.length === 1 && !prev[0].name.trim() && !prev[0].personId;
+      const base = onlyEmpty ? [] : prev;
+      const hasAnyPrimary = base.some((e) => e.isPrimaryContact);
+      // Fix up isPrimaryContact based on actual base state
+      const entries = incoming.map((entry, i) => ({
+        ...entry,
+        isPrimaryContact: !hasAnyPrimary && i === 0,
+      }));
+      return [...base, ...entries];
+    });
+    // Scroll contacts section into view after state flush
+    setTimeout(() => {
+      if (formScrollRef.current && contactsSectionRef.current) {
+        const formRect = formScrollRef.current.getBoundingClientRect();
+        const sectionRect = contactsSectionRef.current.getBoundingClientRect();
+        const headerHeight = stickyHeaderRef.current?.offsetHeight ?? 0;
+        const offset =
+          formScrollRef.current.scrollTop +
+          (sectionRect.top - formRect.top) -
+          headerHeight - 12;
+        formScrollRef.current.scrollTo({ top: offset, behavior: "smooth" });
+      }
+    }, 80);
+  }, []);
+
   // ── Submit with client-side validation ─────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -517,6 +1172,12 @@ export default function ClientFormModal({
       return;
     }
 
+    if (!isEdit && !portalVisited) {
+      setPortalVisited(true);
+      switchTab("portal");
+      return;
+    }
+
     await onSave(form, persons, removedPersonIds);
   };
 
@@ -527,6 +1188,8 @@ export default function ClientFormModal({
   const editSubtitle = isEdit
     ? `${client.companyName}${client.clientId ? ` · ${client.clientId}` : ""}`
     : undefined;
+
+  const primaryActionLabel = !isEdit && !portalVisited ? "Next" : isEdit ? "Save Changes" : "Add Client";
 
   // Save button: disabled if saving OR (edit mode with no changes)
   const saveDisabled = saving || (isEdit && !dirty);
@@ -867,15 +1530,70 @@ export default function ClientFormModal({
                       />
                     </div>
                   </FieldRow>
-                  {visibleCustomFields.length > 0 && (
-                    <div className="px-4 py-3">
-                      <CustomFieldInputs
-                        fields={visibleCustomFields}
-                        values={form.customFields}
-                        onChange={(customFields) => setForm({ ...form, customFields })}
-                      />
-                    </div>
-                  )}
+                  {visibleCustomFields.map((field, idx) => (
+                    <FieldRow
+                      key={field.key}
+                      label={field.label}
+                      hint={field.type === "checkbox" ? "Checkbox" : undefined}
+                      last={idx === visibleCustomFields.length - 1}
+                    >
+                      <div className="cfm-input-row">
+                        {field.type === "checkbox" ? (
+                          <input
+                            type="checkbox"
+                            checked={Boolean(form.customFields?.[field.key])}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                customFields: { ...form.customFields, [field.key]: e.target.checked },
+                              })
+                            }
+                            className="w-4 h-4 rounded border-gray-300"
+                            style={{ accentColor: "#0071e3", cursor: "pointer" }}
+                          />
+                        ) : field.type === "date" ? (
+                          <input
+                            type="date"
+                            value={String(form.customFields?.[field.key] || "")}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                customFields: { ...form.customFields, [field.key]: e.target.value },
+                              })
+                            }
+                            className="input-field"
+                            style={{ fontSize: "13px" }}
+                          />
+                        ) : field.type === "number" ? (
+                          <input
+                            type="number"
+                            value={String(form.customFields?.[field.key] || "")}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                customFields: { ...form.customFields, [field.key]: e.target.value },
+                              })
+                            }
+                            className="input-field"
+                            style={{ fontSize: "13px" }}
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            value={String(form.customFields?.[field.key] || "")}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                customFields: { ...form.customFields, [field.key]: e.target.value },
+                              })
+                            }
+                            className="input-field"
+                            style={{ fontSize: "13px" }}
+                          />
+                        )}
+                      </div>
+                    </FieldRow>
+                  ))}
                 </InsetGroup>
 
                 {/* Contacts */}
@@ -886,7 +1604,7 @@ export default function ClientFormModal({
                   sectionRef={contactsSectionRef}
                 >
                   {!showContactCards ? (
-                    <ContactsEmptyState onAdd={addPerson} />
+                    <ContactsEmptyState onAdd={addPerson} onPaste={() => setPasteModalOpen(true)} />
                   ) : (
                     <>
                       <div className="p-3 space-y-2.5">
@@ -909,20 +1627,33 @@ export default function ClientFormModal({
                         ))}
                       </div>
                       <div
-                        className="px-4 py-3 border-t"
+                        className="px-4 py-3 border-t flex items-center gap-2"
                         style={{ borderColor: "var(--color-border-soft)" }}
                       >
                         <button
                           ref={addContactBtnRef}
                           type="button"
                           onClick={addPerson}
-                          className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-[13px] font-medium transition-all active:scale-[0.98]"
+                          className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-[13px] font-medium transition-all active:scale-[0.98]"
                           style={{ color: "#0071e3", backgroundColor: "transparent" }}
                           onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(0,113,227,0.06)")}
                           onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                         >
                           <UserPlus className="w-4 h-4" />
                           Add Another Contact
+                        </button>
+                        <div style={{ width: "1px", alignSelf: "stretch", backgroundColor: "var(--color-border-soft)" }} />
+                        <button
+                          type="button"
+                          onClick={() => setPasteModalOpen(true)}
+                          className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-medium transition-all active:scale-[0.98]"
+                          style={{ color: "var(--color-text-muted)", backgroundColor: "transparent" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--color-hover)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                          title="Paste multiple contacts from a spreadsheet"
+                        >
+                          <ClipboardList className="w-4 h-4" />
+                          Paste
                         </button>
                       </div>
                     </>
@@ -1116,12 +1847,19 @@ export default function ClientFormModal({
             >
               {saving
                 ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Saving…</>
-                : isEdit ? "Save Changes" : "Add Client"
+                : primaryActionLabel
               }
             </button>
           </div>
         </form>
       </Modal>
+
+      {/* ── Paste-import modal ── */}
+      <PasteImportModal
+        open={pasteModalOpen}
+        onClose={() => setPasteModalOpen(false)}
+        onImport={handlePasteImport}
+      />
 
       {/* ── Discard confirm — uses existing ConfirmModal, properly animated ── */}
       <ConfirmModal

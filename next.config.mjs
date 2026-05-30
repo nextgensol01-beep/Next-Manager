@@ -22,6 +22,15 @@ const nextConfig = {
       },
     ],
   },
+  async redirects() {
+    return [
+      {
+        source: "/dashboard/quotation",
+        destination: "/dashboard/quotations",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
