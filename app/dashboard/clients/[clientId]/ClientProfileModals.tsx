@@ -1,8 +1,8 @@
 "use client";
 
 import React from "react";
-import { Plus, Send, Users } from "lucide-react";
-import { formatCurrency, FINANCIAL_YEARS, PAYMENT_MODES, STATES } from "@/lib/utils";
+import { Send } from "lucide-react";
+import { formatCurrency, FINANCIAL_YEARS, PAYMENT_MODES } from "@/lib/utils";
 import { CategoryBreakdown } from "@/components/ui/CategoryBreakdown";
 import Modal from "@/components/ui/Modal";
 import {
@@ -150,8 +150,6 @@ export default function ClientProfileModals({
   breakdownRec,
   setBreakdownRec,
   makeBreakdownProps,
-
-  saving,
   inlineSaving,
 }: ClientProfileModalsProps) {
 

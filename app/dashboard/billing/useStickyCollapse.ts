@@ -45,10 +45,12 @@ export function useStickyCollapse({ enabled }: UseStickyCollapseArgs) {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
 
+    let observer: IntersectionObserver | undefined;
+
     // Wait one frame so topControlsHeight has been measured
     // (ResizeObserver in BillingTopControls runs synchronously on mount)
     const rafId = requestAnimationFrame(() => {
-      const observer = new IntersectionObserver(
+      observer = new IntersectionObserver(
         ([entry]) => {
           // Sentinel is NOT intersecting → it has scrolled behind the sticky
           // header → collapse the stats section.
@@ -64,9 +66,6 @@ export function useStickyCollapse({ enabled }: UseStickyCollapseArgs) {
       );
 
       observer.observe(sentinel);
-
-      // Store for cleanup
-      (sentinel as any).__observer = observer;
     });
 
     const scrollEl = isMobile ? window : document.getElementById("dashboard-scroll-area");
@@ -94,10 +93,8 @@ export function useStickyCollapse({ enabled }: UseStickyCollapseArgs) {
       cancelAnimationFrame(rafId);
       cancelAnimationFrame(scrollRafId);
       scrollEl.removeEventListener("scroll", handleScroll);
-      const observer = (sentinel as any).__observer as IntersectionObserver | undefined;
       if (observer) {
         observer.disconnect();
-        delete (sentinel as any).__observer;
       }
     };
   }, [enabled, topControlsHeight, isMobile]);

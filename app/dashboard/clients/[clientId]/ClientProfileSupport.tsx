@@ -891,8 +891,6 @@ export function PersonEntryCard({
   };
 
   // Number badge — ① ② ③ etc.
-  const numberBadge = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨","⑩"][index] ?? `${index + 1}`;
-
   return (
     <div
       className="rounded-2xl"

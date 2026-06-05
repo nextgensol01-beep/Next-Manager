@@ -57,18 +57,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     quotationNumber = `QT-${yearKey}-${seq}`;
   }
 
+  const finalisedAt = new Date();
   currentRevision.isFinalised = true;
+  currentRevision.finalisedAt = finalisedAt;
   await currentRevision.save();
 
   // Set validity
-  const validTill = new Date();
+  const validTill = new Date(finalisedAt);
   validTill.setDate(validTill.getDate() + (quotation.validityDays || 30));
 
   quotation.quotationNumber = quotationNumber;
   quotation.status = "Finalized";
   quotation.validTill = validTill;
   quotation.activities.push({
-    timestamp: new Date(),
+    timestamp: finalisedAt,
     action: "Quotation finalised",
     detail: `${quotationNumber} · Rev ${quotation.currentRevisionNumber}`,
   });

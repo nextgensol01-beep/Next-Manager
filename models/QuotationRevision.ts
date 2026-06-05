@@ -27,6 +27,7 @@ export interface IQuotationRevision extends Document {
   validityDays: number;
   // locked snapshot — set once, never changed
   isFinalised: boolean;
+  finalisedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -61,6 +62,7 @@ const QuotationRevisionSchema = new Schema<IQuotationRevision>(
     notes: { type: String, default: "" },
     validityDays: { type: Number, default: 30 },
     isFinalised: { type: Boolean, default: false },
+    finalisedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

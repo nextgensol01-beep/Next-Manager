@@ -1,15 +1,17 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   ArrowLeft, Plus, Trash2, CheckCircle2, GitBranch,
-  Mail, ChevronDown, Activity, FileText, Eye, EyeOff, Printer,
-  AlertTriangle, IndianRupee, Landmark, Receipt, Building2,
-  Clock, Sparkles
+  Mail, Activity, FileText, Eye, EyeOff, Printer,
+  AlertTriangle, IndianRupee, Receipt, Building2,
+  Sparkles, MoreHorizontal, Copy, Send, X
 } from "lucide-react";
-import { formatCurrency, FINANCIAL_YEARS } from "@/lib/utils";
+import { FINANCIAL_YEARS } from "@/lib/utils";
 import { buildQuotationHTML as buildHTML } from "@/utils/quotationTemplate";
+import { escapeHtmlWithLineBreaks } from "@/utils/sanitizeHtml";
 import Modal from "@/components/ui/Modal";
 import { QUOTATION_STATUS_CONFIG, QuotationStatusPill } from "@/components/quotations/QuotationStatus";
 import {
@@ -34,7 +36,9 @@ interface Revision {
   consultationGstPercent: number; consultationGstAmount: number;
   governmentFees: number; itemsSubtotal: number; itemsGst: number;
   grandTotal: number; notes: string; validityDays: number; isFinalised: boolean;
+  finalisedAt?: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 interface Activity { timestamp: string; action: string; detail?: string; }
@@ -52,6 +56,14 @@ interface Quotation {
   createdAt: string; updatedAt: string;
 }
 
+interface ClientEmailOption {
+  id: string;
+  name: string;
+  email: string;
+  designation?: string;
+  isPrimaryContact?: boolean;
+}
+
 const CATEGORIES = ["CAT-I", "CAT-II", "CAT-III", "CAT-IV"];
 const TYPES = ["Recycling", "EOL", "Co-processing", "Energy Recovery", "Other"];
 const GST_OPTIONS = [...GST_PERCENT_OPTIONS];
@@ -66,12 +78,91 @@ const STANDARD_SERVICES = [
   { label: "Energy Recovery Compliance Services", category: "CAT-I", type: "Energy Recovery", description: "Energy Recovery Compliance Services" },
 ];
 
+const surfaceCard =
+  "rounded-[32px] border border-base bg-card/90 shadow-[0_18px_60px_rgba(0,0,0,0.06)] backdrop-blur-xl";
+const softInput =
+  "h-12 rounded-2xl border border-base bg-surface/70 px-4 text-sm text-default transition-all duration-200 focus:border-brand-400 focus:bg-card focus:outline-none focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-60";
+const softTextarea =
+  "rounded-[24px] border border-base bg-surface/70 px-4 py-3 text-sm text-default transition-all duration-200 focus:border-brand-400 focus:bg-card focus:outline-none focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-60";
+const appleButton =
+  "inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
+const sectionEyebrow = "text-[11px] font-semibold uppercase text-muted";
+
 function fmt(n: number) { return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function money(n: number) {
+  const hasPaise = Math.round(n * 100) % 100 !== 0;
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: hasPaise ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(n);
+}
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 function fmtTime(iso: string) {
   return new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function getEmailDraftUnavailableMessage(status: QuotationStatus) {
+  switch (status) {
+    case "Draft":
+      return "Unfinalized quotation cannot be drafted. Finalise it before creating an email draft.";
+    case "RevisionRequested":
+      return "Create and finalise a new revision before drafting this quotation again.";
+    case "Accepted":
+      return "Accepted quotation cannot be drafted again.";
+    case "Rejected":
+      return "Rejected quotation cannot be drafted again.";
+    case "Expired":
+      return "Expired quotation cannot be drafted again. Create a new revision if needed.";
+    default:
+      return "";
+  }
+}
+
+function cleanDocumentPart(value: string) {
+  return value
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getQuotationDisplayNumber(q: Pick<Quotation, "quotationNumber">, rev: Pick<Revision, "revisionNumber">) {
+  const base = q.quotationNumber || "DRAFT";
+  return rev.revisionNumber > 0 ? `${base} Rev ${rev.revisionNumber}` : base;
+}
+
+function getQuotationDocumentTitle(q: Pick<Quotation, "quotationNumber" | "clientName" | "financialYear">, rev: Pick<Revision, "revisionNumber">) {
+  return [
+    getQuotationDisplayNumber(q, rev),
+    cleanDocumentPart(q.clientName || "Client"),
+    `FY ${cleanDocumentPart(q.financialYear || "")}`,
+  ].filter(Boolean).join(" - ");
+}
+
+function getQuotationEmailSubject(q: Pick<Quotation, "clientName" | "financialYear">, rev: Pick<Revision, "revisionNumber">) {
+  const prefix = rev.revisionNumber > 0 ? "Revised Quotation" : "Quotation";
+  return `${prefix} for EPR Annual Return - FY ${q.financialYear} - ${q.clientName}`;
+}
+
+function getDefaultEmailMessage(q: Pick<Quotation, "clientName" | "financialYear">, rev: Pick<Revision, "revisionNumber">) {
+  const quotationLabel = rev.revisionNumber > 0 ? "revised quotation" : "quotation";
+  return `Dear Team,\n\nPlease find our ${quotationLabel} for ${q.clientName} for EPR Annual Return services for FY ${q.financialYear}. Kindly review it and let us know if you have any questions.\n\nRegards,\nNextgen Solutions`;
+}
+
+function prependEmailMessage(html: string, message: string) {
+  const trimmedMessage = message.trim();
+  if (!trimmedMessage) return html;
+
+  const messageHtml = `
+    <div style="max-width:760px; margin:0 auto 28px; padding:0 12px 24px; border-bottom:1px solid #e5e5e7; color:#1d1d1f; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size:14px; line-height:1.65;">
+      ${escapeHtmlWithLineBreaks(trimmedMessage)}
+    </div>
+  `;
+
+  return html.replace(/<body([^>]*)>/i, `<body$1>${messageHtml}`);
 }
 
 // Compute diff between two revisions
@@ -141,12 +232,27 @@ export default function QuotationDetailPage() {
   const [creatingRevision, setCreatingRevision] = useState(false);
   const [emailLoading, setEmailLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [quotationTemplate, setQuotationTemplate] = useState("");
+  const [previewTemplateLoading, setPreviewTemplateLoading] = useState(false);
+  const [previewTemplateError, setPreviewTemplateError] = useState("");
+  const [previewHeight, setPreviewHeight] = useState(720);
   const [statusDropdown, setStatusDropdown] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [moreMenuAnchor, setMoreMenuAnchor] = useState<"header" | "summary" | null>(null);
+  const [moreMenuPosition, setMoreMenuPosition] = useState({ top: 0, left: 0, maxHeight: 520 });
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailRecipient, setEmailRecipient] = useState("");
+  const [emailCc, setEmailCc] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailMessage, setEmailMessage] = useState("");
+  const [clientEmailOptions, setClientEmailOptions] = useState<ClientEmailOption[]>([]);
+  const [selectedToEmails, setSelectedToEmails] = useState<string[]>([]);
+  const [selectedCcEmails, setSelectedCcEmails] = useState<string[]>([]);
   const [markSentPrompt, setMarkSentPrompt] = useState<null | "print" | "email">(null);
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const moreMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const isMounted = useRef(true);
   const isInitialLoad = useRef(true);
   const isSwitchingRevision = useRef(false);
@@ -238,13 +344,102 @@ export default function QuotationDetailPage() {
     setTimeout(() => { isSwitchingRevision.current = false; }, 300);
   }, [selectedRevNum]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Close status dropdown on outside click
+  const positionMoreMenu = useCallback((button: HTMLButtonElement) => {
+    const rect = button.getBoundingClientRect();
+    const menuWidth = 288;
+    const viewportPadding = 12;
+    const maxLeft = Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding);
+    const preferredLeft = rect.right - menuWidth;
+    const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
+    const spaceAbove = rect.top - viewportPadding;
+    const preferredHeight = Math.min(520, window.innerHeight - viewportPadding * 2);
+    const openAbove = spaceBelow < 360 && spaceAbove > spaceBelow;
+    const availableHeight = openAbove ? spaceAbove : spaceBelow;
+    const maxHeight = Math.max(120, Math.min(preferredHeight, availableHeight));
+    setMoreMenuPosition({
+      top: openAbove
+        ? Math.max(viewportPadding, rect.top - maxHeight - 8)
+        : Math.max(viewportPadding, rect.bottom + 8),
+      left: Math.min(Math.max(viewportPadding, preferredLeft), maxLeft),
+      maxHeight,
+    });
+  }, []);
+
+  // Close floating action menus on outside click; keep the More menu clamped during scroll/resize.
   useEffect(() => {
-    if (!statusDropdown) return;
-    const handler = () => setStatusDropdown(false);
-    document.addEventListener("click", handler);
-    return () => document.removeEventListener("click", handler);
-  }, [statusDropdown]);
+    if (!statusDropdown && !moreMenuOpen) return;
+    const closeMenus = () => {
+      setStatusDropdown(false);
+      setMoreMenuOpen(false);
+      setMoreMenuAnchor(null);
+      moreMenuButtonRef.current = null;
+    };
+    const repositionMoreMenu = () => {
+      if (moreMenuOpen && moreMenuButtonRef.current) positionMoreMenu(moreMenuButtonRef.current);
+    };
+    document.addEventListener("click", closeMenus);
+    window.addEventListener("resize", repositionMoreMenu);
+    window.addEventListener("scroll", repositionMoreMenu, true);
+    return () => {
+      document.removeEventListener("click", closeMenus);
+      window.removeEventListener("resize", repositionMoreMenu);
+      window.removeEventListener("scroll", repositionMoreMenu, true);
+    };
+  }, [statusDropdown, moreMenuOpen, positionMoreMenu]);
+
+  const openMoreMenu = (event: React.MouseEvent<HTMLButtonElement>, anchor: "header" | "summary") => {
+    event.stopPropagation();
+    moreMenuButtonRef.current = event.currentTarget;
+    positionMoreMenu(event.currentTarget);
+    setMoreMenuOpen(open => moreMenuAnchor === anchor ? !open : true);
+    setMoreMenuAnchor(anchor);
+    setStatusDropdown(false);
+  };
+
+  useEffect(() => {
+    if (activeTab !== "preview" || quotationTemplate || previewTemplateError) return;
+    let cancelled = false;
+    setPreviewTemplateLoading(true);
+    setPreviewTemplateError("");
+    fetch("/api/quotation/template", { cache: "no-store" })
+      .then(async res => {
+        if (!res.ok) throw new Error("Quotation template not found");
+        return res.json() as Promise<{ html: string }>;
+      })
+      .then(data => {
+        if (!cancelled) setQuotationTemplate(data.html);
+      })
+      .catch(error => {
+        if (!cancelled) {
+          setPreviewTemplateError(error instanceof Error ? error.message : "Failed to load quotation preview");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewTemplateLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeTab, quotationTemplate, previewTemplateError]);
+
+  const resizePreview = useCallback((iframe: HTMLIFrameElement) => {
+    const doc = iframe.contentDocument;
+    if (!doc) return;
+    doc.documentElement.style.overflow = "hidden";
+    doc.body.style.overflow = "hidden";
+    const height = Math.max(
+      doc.body?.scrollHeight || 0,
+      doc.documentElement?.scrollHeight || 0,
+      720
+    );
+    setPreviewHeight(height + 4);
+  }, []);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (previewIframeRef.current) resizePreview(previewIframeRef.current);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [resizePreview]);
 
   const buildFormRevision = useCallback((baseRevision: Revision): Revision => {
     const calculatedItems = items.map(item => {
@@ -371,6 +566,9 @@ export default function QuotationDetailPage() {
   const isEditable = !!quotation && canEditQuotation(quotation.status) && isViewingCurrentRev;
   const canCreateRevision = !!quotation && canCreateQuotationRevision(quotation.status) && isViewingCurrentRev;
   const canCreateEmailDraft = !!quotation && canCreateQuotationEmailDraft(quotation.status);
+  const emailDraftUnavailableMessage = quotation && !canCreateEmailDraft
+    ? getEmailDraftUnavailableMessage(quotation.status)
+    : "";
   const allowedResponseStatuses = quotation
     ? RESPONSE_ACTION_STATUSES.filter((status) => getAllowedQuotationTransitions(quotation.status).includes(status))
     : [];
@@ -411,10 +609,31 @@ export default function QuotationDetailPage() {
     } finally { setCreatingRevision(false); }
   };
 
+  const handleDuplicate = async () => {
+    if (!quotation) return;
+    setMoreMenuOpen(false);
+    setMoreMenuAnchor(null);
+    try {
+      const res = await fetch(`/api/quotations/${id}/duplicate`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error || "Failed to duplicate quotation");
+        return;
+      }
+      const data = await res.json();
+      toast.success("Quotation duplicated");
+      router.push(`/dashboard/quotations/${data._id}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to duplicate quotation");
+    }
+  };
+
   // Status change
   const updateStatus = async (newStatus: QuotationStatus) => {
     if (!quotation || !getAllowedQuotationTransitions(quotation.status).includes(newStatus)) return;
     setStatusDropdown(false);
+    setMoreMenuOpen(false);
+    setMoreMenuAnchor(null);
     const prev = quotation?.status;
     const res = await fetch(`/api/quotations/${id}/status`, {
       method: "PATCH",
@@ -467,14 +686,70 @@ export default function QuotationDetailPage() {
     } finally { setPdfLoading(false); }
   };
 
-  const openEmailDraftModal = () => {
+  const parseEmailList = (value: string) =>
+    value
+      .split(/[,\n;]/)
+      .map(email => email.trim().toLowerCase())
+      .filter(Boolean);
+
+  const toggleContactEmail = (email: string, field: "to" | "cc") => {
+    const setSelected = field === "to" ? setSelectedToEmails : setSelectedCcEmails;
+    const setOtherSelected = field === "to" ? setSelectedCcEmails : setSelectedToEmails;
+    setSelected(current => current.includes(email) ? current.filter(value => value !== email) : [...current, email]);
+    setOtherSelected(current => current.filter(value => value !== email));
+  };
+
+  const openEmailDraftModal = async () => {
     if (!quotation) return;
     if (!canCreateEmailDraft) {
       toast.error("Finalise the quotation before creating an email draft");
       return;
     }
     setEmailRecipient("");
+    setEmailCc("");
+    setEmailSubject("");
+    setSelectedToEmails([]);
+    setSelectedCcEmails([]);
+    const currentRevision = quotation.revisions.find(revision => revision.revisionNumber === quotation.currentRevisionNumber);
+    setEmailSubject(currentRevision ? getQuotationEmailSubject(quotation, currentRevision) : "");
+    setEmailMessage(currentRevision ? getDefaultEmailMessage(quotation, currentRevision) : "");
+    setClientEmailOptions([]);
     setEmailModalOpen(true);
+
+    if (!quotation.clientId) return;
+    try {
+      const res = await fetch(`/api/client-contacts?clientId=${encodeURIComponent(quotation.clientId)}`);
+      if (!res.ok) return;
+      const contacts = await res.json() as Array<{
+        personId?: string;
+        name?: string;
+        designation?: string;
+        isPrimaryContact?: boolean;
+        emails?: string[];
+        email?: string;
+      }>;
+      const seen = new Set<string>();
+      const options = contacts.flatMap((contact, contactIndex) =>
+        [...(Array.isArray(contact.emails) ? contact.emails : []), contact.email || ""]
+          .map(email => email.trim().toLowerCase())
+          .filter(email => {
+            if (!email || seen.has(email)) return false;
+            seen.add(email);
+            return true;
+          })
+          .map((email, emailIndex) => ({
+            id: `${contact.personId || contactIndex}-${emailIndex}-${email}`,
+            name: contact.name?.trim() || "Client contact",
+            email,
+            designation: contact.designation || "",
+            isPrimaryContact: Boolean(contact.isPrimaryContact),
+          }))
+      );
+      setClientEmailOptions(options);
+      if (options[0]) setSelectedToEmails([options[0].email]);
+    } catch {
+      // Keep the modal editable even if contact lookup fails.
+    }
   };
 
   // Email Draft
@@ -484,11 +759,14 @@ export default function QuotationDetailPage() {
       toast.error("Finalise the quotation before creating an email draft");
       return;
     }
-    const recipient = emailRecipient.trim();
-    if (!recipient) {
+    const manualTo = parseEmailList(emailRecipient);
+    const toList = Array.from(new Set([...selectedToEmails, ...manualTo]));
+    if (toList.length === 0) {
       toast.error("Enter a recipient email");
       return;
     }
+    const ccList = Array.from(new Set([...selectedCcEmails, ...parseEmailList(emailCc)]))
+      .filter(email => !toList.includes(email));
     setEmailLoading(true);
     try {
       const target = await getQuotationOutputTarget(quotation.currentRevisionNumber);
@@ -496,25 +774,46 @@ export default function QuotationDetailPage() {
       const tmplRes = await fetch("/api/quotation/template");
       if (!tmplRes.ok) throw new Error("Quotation template not found");
       const { html: template } = await tmplRes.json();
-      const html = buildQuotationHTML(template, target.quotation, target.revision);
-      const subject = `Quotation for EPR Fulfilment Services - FY ${target.quotation.financialYear}`;
+      const quotationHtml = buildQuotationHTML(template, target.quotation, target.revision);
+      const html = prependEmailMessage(quotationHtml, emailMessage);
+      const subject = emailSubject.trim() || getQuotationEmailSubject(target.quotation, target.revision);
+      const filename = `${getQuotationDocumentTitle(target.quotation, target.revision)}.pdf`;
+      const pdfRes = await fetch("/api/quotation/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: quotationHtml }),
+      });
+      if (!pdfRes.ok) {
+        const data = await pdfRes.json().catch(() => null);
+        throw new Error(data?.error || "Failed to generate quotation PDF");
+      }
+      const { contentBase64 } = await pdfRes.json() as { contentBase64: string };
+      const payload = {
+        to: toList,
+        ...(ccList.length > 0 ? { cc: ccList } : {}),
+        subject,
+        html,
+        attachments: [{ filename, mimeType: "application/pdf", contentBase64 }],
+        logType: "quotation",
+        logClientId: target.quotation.clientId,
+        logClientName: target.quotation.clientName,
+        logFy: target.quotation.financialYear,
+      };
       const res = await fetch("/api/email/create-draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: recipient.trim(),
-          subject,
-          html,
-          logType: "quotation",
-          logClientName: target.quotation.clientName,
-          logFy: target.quotation.financialYear,
-        }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const data = await res.json();
         toast.success("Email draft created in Gmail");
         setEmailModalOpen(false);
         setEmailRecipient("");
+        setEmailCc("");
+        setEmailSubject("");
+        setEmailMessage("");
+        setSelectedToEmails([]);
+        setSelectedCcEmails([]);
         if (data.draftUrl) window.open(data.draftUrl, "_blank");
         if (target.quotation.status === "Finalized") setMarkSentPrompt("email");
       } else {
@@ -527,8 +826,10 @@ export default function QuotationDetailPage() {
   };
 
   function buildQuotationHTML(template: string, q: Quotation, rev: Revision): string {
+    const quoteNumber = getQuotationDisplayNumber(q, rev);
     return buildHTML(template, {
-      quoteNumber: (q.quotationNumber || "DRAFT") + (q.quotationNumber ? ` Rev ${rev.revisionNumber}` : ""),
+      quoteNumber,
+      fileTitle: getQuotationDocumentTitle(q, rev),
       clientName: q.clientName,
       clientAddress: q.clientAddress || "",
       clientGst: q.clientGst || "",
@@ -543,7 +844,7 @@ export default function QuotationDetailPage() {
       governmentFees: rev.governmentFees,
       grandTotal: rev.grandTotal,
       notes: rev.notes,
-      generatedAt: new Date().toISOString(),
+      generatedAt: rev.finalisedAt || (rev.isFinalised ? rev.updatedAt : rev.createdAt) || q.createdAt,
       validityDays: rev.validityDays ?? q.validityDays ?? 30,
     });
   }
@@ -571,137 +872,270 @@ export default function QuotationDetailPage() {
     ? (quotation?.revisions.find(r => r.revisionNumber === selectedRevNum - 1) ?? null)
     : null;
   const diffChanges = viewedRevision && prevRevision ? computeDiff(prevRevision, viewedRevision) : [];
+  const previewRevision = viewedRevision ? buildFormRevision(viewedRevision) : null;
+  const previewQuotation = quotation ? {
+    ...quotation,
+    clientName,
+    clientId,
+    clientAddress,
+    clientGst,
+    clientState,
+    financialYear,
+    validityDays,
+  } : null;
+  const previewHtml = quotationTemplate && previewQuotation && previewRevision
+    ? buildQuotationHTML(quotationTemplate, previewQuotation, previewRevision)
+    : "";
+  const emailDraftRevision = quotation?.revisions.find(revision => revision.revisionNumber === quotation.currentRevisionNumber) ?? null;
+  const emailAttachmentName = quotation && emailDraftRevision
+    ? `${getQuotationDocumentTitle(quotation, emailDraftRevision)}.pdf`
+    : "Quotation.pdf";
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+      <div
+        className="min-h-screen space-y-8 pb-28"
+        style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif' }}
+      >
+        <div className="sticky top-4 z-40 rounded-[32px] border border-white/50 bg-card/75 px-5 py-5 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="h-11 w-11 animate-pulse rounded-full bg-surface" />
+              <div className="space-y-3">
+                <div className="h-8 w-52 animate-pulse rounded-full bg-surface" />
+                <div className="h-4 w-72 max-w-[70vw] animate-pulse rounded-full bg-surface" />
+              </div>
+            </div>
+            <div className="space-y-3 lg:text-right">
+              <div className="h-3 w-24 animate-pulse rounded-full bg-surface lg:ml-auto" />
+              <div className="h-8 w-40 animate-pulse rounded-full bg-surface" />
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,7fr)_minmax(340px,3fr)]">
+          <div className="space-y-6">
+            {[0, 1, 2].map(i => (
+              <div key={i} className={`${surfaceCard} p-6 sm:p-8`}>
+                <div className="mb-6 h-5 w-44 animate-pulse rounded-full bg-surface" />
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="h-12 animate-pulse rounded-2xl bg-surface" />
+                  <div className="h-12 animate-pulse rounded-2xl bg-surface" />
+                  <div className="h-24 animate-pulse rounded-[24px] bg-surface sm:col-span-2" />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className={`${surfaceCard} h-96 p-6`}>
+            <div className="h-4 w-28 animate-pulse rounded-full bg-surface" />
+            <div className="mt-6 h-12 w-48 animate-pulse rounded-full bg-surface" />
+            <div className="mt-8 space-y-4">
+              <div className="h-4 animate-pulse rounded-full bg-surface" />
+              <div className="h-4 animate-pulse rounded-full bg-surface" />
+              <div className="h-12 animate-pulse rounded-full bg-surface" />
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (!quotation) return null;
 
+  const menuItemClass = "flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-white/10";
+  const moreMenu = (
+    <div
+      className="fixed z-50 w-72 max-w-[calc(100vw-24px)] origin-top-right overflow-y-auto rounded-[24px] border border-white/80 p-2 shadow-[0_26px_90px_rgba(0,0,0,0.22)] transition-all duration-200 dark:border-white/10"
+      onClick={(event) => event.stopPropagation()}
+      style={{
+        top: moreMenuPosition.top,
+        left: moreMenuPosition.left,
+        maxHeight: moreMenuPosition.maxHeight,
+        backgroundColor: "rgba(245, 245, 247, 0.58)",
+        backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.48), rgba(255,255,255,0.34))",
+        backdropFilter: "blur(44px) saturate(220%) contrast(0.96)",
+        WebkitBackdropFilter: "blur(44px) saturate(220%) contrast(0.96)",
+        boxShadow: "0 28px 96px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.72), inset 0 0 0 1px rgba(255,255,255,0.28)",
+      }}
+    >
+      <button
+        onClick={() => { setMoreMenuOpen(false); handlePrintPreview(); }}
+        disabled={pdfLoading}
+        className={menuItemClass}
+      >
+        <Printer className="h-4 w-4 text-muted" />
+        <span>{pdfLoading ? "Opening preview..." : "Print / Preview"}</span>
+      </button>
+      <button
+        onClick={() => { setMoreMenuOpen(false); openEmailDraftModal(); }}
+        disabled={emailLoading || !canCreateEmailDraft}
+        title={canCreateEmailDraft ? "Create email draft" : emailDraftUnavailableMessage}
+        className={menuItemClass}
+      >
+        <Mail className="h-4 w-4 text-muted" />
+        <span className="min-w-0">
+          <span className="block">{emailLoading ? "Creating draft..." : "Email Draft"}</span>
+          {!canCreateEmailDraft && emailDraftUnavailableMessage && (
+            <span className="mt-0.5 block text-xs leading-snug text-faint">{emailDraftUnavailableMessage}</span>
+          )}
+        </span>
+      </button>
+      <button
+        onClick={() => { setMoreMenuOpen(false); handleCreateRevision(); }}
+        disabled={!canCreateRevision || creatingRevision}
+        className={menuItemClass}
+      >
+        <GitBranch className="h-4 w-4 text-muted" />
+        <span className="min-w-0">
+          <span className="block">{creatingRevision ? "Creating revision..." : "Create Revision"}</span>
+          {!canCreateRevision && (
+            <span className="mt-0.5 block text-xs leading-snug text-faint">Available after client response when revision rules allow it.</span>
+          )}
+        </span>
+      </button>
+      <button
+        onClick={handleDuplicate}
+        className={menuItemClass}
+      >
+        <Copy className="h-4 w-4 text-muted" />
+        <span>Duplicate</span>
+      </button>
+      {allowedResponseStatuses.length > 0 && (
+        <div className="mt-1 border-t border-black/10 pt-2 dark:border-white/10">
+          <p className="px-3.5 pb-1 pt-2 text-[11px] font-semibold uppercase text-muted">Change Status</p>
+          {allowedResponseStatuses.map(s => {
+            const cfg = QUOTATION_STATUS_CONFIG[s];
+            return (
+              <button
+                key={s}
+                onClick={() => updateStatus(s)}
+                className="flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] dark:hover:bg-white/10"
+              >
+                <span className={`h-2 w-2 rounded-full ${cfg.dot}`} />
+                <span>{cfg.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <button
+        disabled
+        title="Archive workflow is not available for quotations yet"
+        className="mt-1 flex w-full cursor-not-allowed items-center gap-3 rounded-2xl px-3.5 py-3 text-left text-sm text-faint opacity-50"
+      >
+        <AlertTriangle className="h-4 w-4" />
+        <span>
+          <span className="block">Archive</span>
+          <span className="mt-0.5 block text-xs">Archive workflow is not available yet.</span>
+        </span>
+      </button>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen pb-20">
+    <div
+      className="min-h-screen pb-28"
+      style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif' }}
+    >
       {/* ─── TOP BAR ─── */}
-      <div className="flex items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => router.push("/dashboard/quotations")}
-            className="p-2 rounded-xl hover:bg-surface transition-colors text-muted hover:text-default"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-xl font-bold text-default tracking-tight" style={{ letterSpacing: "-0.025em" }}>
+      <div className="sticky top-4 z-40 mb-8 rounded-[32px] border border-white/50 bg-card/75 px-5 py-4 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur-2xl dark:border-white/10 dark:bg-card/80 sm:px-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-start gap-4">
+            <button
+              onClick={() => router.push("/dashboard/quotations")}
+              className="mt-1 shrink-0 rounded-full border border-base bg-surface/80 p-3 text-muted transition duration-200 hover:-translate-y-0.5 hover:bg-card hover:text-default hover:shadow-sm active:scale-[0.98]"
+              title="Back to quotations"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <div className="min-w-0">
+              <h1 className="min-w-0 truncate text-3xl font-semibold leading-tight text-default sm:text-4xl">
                 {quotation.quotationNumber ? (
-                  <span className="font-mono">{quotation.quotationNumber}</span>
+                  <span>{quotation.quotationNumber}</span>
                 ) : (
                   <span className="text-muted">Untitled Draft</span>
                 )}
               </h1>
-              <QuotationStatusPill status={quotation.status} />
-              {savedStatus === "saving" && <span className="text-xs text-muted animate-pulse">Saving...</span>}
-              {savedStatus === "saved" && <span className="text-xs text-emerald-500 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Saved</span>}
-            </div>
-            <p className="text-xs text-muted mt-0.5">
-              {quotation.clientName} · FY {quotation.financialYear}
-              {quotation.validTill && ` · Valid till ${fmtDate(quotation.validTill)}`}
-            </p>
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="flex items-center gap-2">
-          {isEditable && (
-            <button
-              onClick={handleFinalize}
-              disabled={finalising}
-              className="btn-primary gap-2 text-sm"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              {finalising ? "Finalising..." : "Finalise Quote"}
-            </button>
-          )}
-
-          {canCreateRevision && (
-            <button
-              onClick={handleCreateRevision}
-              disabled={creatingRevision}
-              className="btn-secondary gap-2 text-sm"
-            >
-              <GitBranch className="w-3.5 h-3.5" />
-              {creatingRevision ? "Creating..." : "Create Revision"}
-            </button>
-          )}
-
-          <button onClick={handlePrintPreview} disabled={pdfLoading} className="btn-secondary gap-2 text-sm">
-            <Printer className="w-3.5 h-3.5" />
-            {pdfLoading ? "Opening..." : "Print / Preview"}
-          </button>
-
-          <button onClick={openEmailDraftModal} disabled={emailLoading || !canCreateEmailDraft} className="btn-secondary gap-2 text-sm">
-            <Mail className="w-3.5 h-3.5" />
-            {emailLoading ? "Creating..." : "Email Draft"}
-          </button>
-
-          {/* Status dropdown */}
-          {allowedResponseStatuses.length > 0 && (
-          <div className="relative">
-            <button
-              onClick={(e) => { e.stopPropagation(); setStatusDropdown(!statusDropdown); }}
-              className="btn-secondary gap-1.5 text-sm"
-            >
-              Response <ChevronDown className="w-3.5 h-3.5" />
-            </button>
-            {statusDropdown && (
-              <div className="absolute right-0 top-full mt-1 bg-card border border-base rounded-xl shadow-lg py-1 z-50 min-w-52">
-                <p className="px-3.5 py-2 text-xs font-semibold text-muted uppercase tracking-wide border-b border-base mb-1">Mark as</p>
-                {allowedResponseStatuses.map(s => {
-                  const cfg = QUOTATION_STATUS_CONFIG[s];
-                  return (
-                    <button
-                      key={s}
-                      onClick={() => updateStatus(s)}
-                      className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm hover:bg-surface transition-colors"
-                    >
-                      <span className={`w-2 h-2 rounded-full ${cfg.dot}`} />
-                      <span className="text-default">{cfg.label}</span>
-                    </button>
-                  );
-                })}
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted">
+                <span className="font-medium text-default">{quotation.clientName}</span>
+                <QuotationStatusPill status={quotation.status} />
+                <span className="text-faint">FY {quotation.financialYear}</span>
+                {quotation.validTill && <span className="text-faint">Valid till {fmtDate(quotation.validTill)}</span>}
+                {savedStatus === "saving" && <span className="animate-pulse text-xs text-muted">Saving...</span>}
+                {savedStatus === "saved" && <span className="flex items-center gap-1 text-xs text-emerald-500"><CheckCircle2 className="h-3 w-3" />Saved</span>}
               </div>
-            )}
+            </div>
           </div>
-          )}
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between lg:justify-end">
+            <div className="sm:text-right">
+              <p className="text-xs font-semibold uppercase text-muted">Grand Total</p>
+              <p className="mt-1 text-3xl font-semibold leading-none text-default">{money(liveGrand)}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {isEditable && (
+                <button
+                  onClick={handleFinalize}
+                  disabled={finalising}
+                  className="btn-primary gap-2 rounded-full px-5 py-3 text-sm shadow-sm shadow-brand-600/15 transition duration-200 active:scale-[0.98]"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {finalising ? "Finalising..." : "Finalise Quote"}
+                </button>
+              )}
+              {!isEditable && canCreateEmailDraft && (
+                <button
+                  onClick={openEmailDraftModal}
+                  disabled={emailLoading}
+                  className="btn-primary gap-2 rounded-full px-5 py-3 text-sm shadow-sm shadow-brand-600/15 transition duration-200 active:scale-[0.98]"
+                >
+                  <Mail className="h-4 w-4" />
+                  {emailLoading ? "Creating..." : "Email Draft"}
+                </button>
+              )}
+              {!isEditable && !canCreateEmailDraft && (
+                <div className="hidden rounded-full border border-base bg-surface/80 px-4 py-2 text-sm text-muted sm:block">
+                  {QUOTATION_STATUS_CONFIG[quotation.status].label}
+                </div>
+              )}
+              <div className="relative">
+                <button
+                  onClick={(e) => openMoreMenu(e, "header")}
+                  className="inline-flex items-center gap-2 rounded-full border border-base bg-surface/80 px-4 py-3 text-muted transition duration-200 hover:-translate-y-0.5 hover:bg-card hover:text-default hover:shadow-sm active:scale-[0.98]"
+                  title="More actions"
+                >
+                  <MoreHorizontal className="h-5 w-5" />
+                  <span className="hidden text-sm font-medium sm:inline">More</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* ─── REVISION STEPPER ─── */}
       {quotation.revisions.length > 0 && (
-        <div className="flex items-center gap-1 mb-6 overflow-x-auto pb-1">
+        <div className="mb-6 flex max-w-full items-center gap-2 overflow-x-auto rounded-[28px] border border-base bg-surface/70 p-2 shadow-sm backdrop-blur-xl">
           {quotation.revisions.map(rev => (
             <button
               key={rev.revisionNumber}
               onClick={() => setSelectedRevNum(rev.revisionNumber)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium transition-all border whitespace-nowrap ${
+              className={`flex shrink-0 items-center gap-3 rounded-full border px-4 py-2.5 text-sm font-medium transition-all duration-200 whitespace-nowrap active:scale-[0.98] ${
                 selectedRevNum === rev.revisionNumber
-                  ? "bg-default text-inverse border-default shadow-sm"
-                  : "bg-card border-base text-muted hover:text-default hover:border-default/30"
+                  ? "border-white/70 bg-card text-default shadow-[0_10px_30px_rgba(0,0,0,0.08)]"
+                  : "border-transparent text-muted hover:bg-card/70 hover:text-default"
               }`}
             >
+              <span className={`h-2 w-2 rounded-full shrink-0 ${rev.isFinalised ? "bg-emerald-400" : "bg-amber-400"}`} title={rev.isFinalised ? "Finalised" : "Draft"} />
               <span className="font-mono text-xs">Rev {rev.revisionNumber}</span>
-              {rev.isFinalised && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Finalised" />}
-              {!rev.isFinalised && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Editable" />}
+              <span className="text-xs text-faint">{rev.isFinalised ? "Finalised" : "Draft"}</span>
+              <span className="font-mono text-xs tabular-nums text-default">{money(rev.grandTotal)}</span>
             </button>
           ))}
           {canCreateRevision && (
             <button
               onClick={handleCreateRevision}
               disabled={creatingRevision}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs text-muted hover:text-default border border-dashed border-base hover:border-default/40 transition-all"
+              className="flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-base px-4 py-2.5 text-xs text-muted transition-all duration-200 hover:bg-card hover:text-default active:scale-[0.98]"
             >
               <Plus className="w-3 h-3" /> New Revision
             </button>
@@ -711,17 +1145,25 @@ export default function QuotationDetailPage() {
 
       {/* ─── DIFF BANNER ─── */}
       {diffChanges.length > 0 && selectedRevNum !== null && selectedRevNum > 0 && (
-        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 mb-5">
-          <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 mb-3 uppercase tracking-wide">
-            Changes from Rev {selectedRevNum - 1} → Rev {selectedRevNum}
-          </p>
-          <div className="space-y-2">
+        <div className="mb-6 rounded-[28px] border border-base bg-card/80 p-4 shadow-sm backdrop-blur-xl sm:p-5">
+          <div className="mb-3 flex items-center gap-3">
+            <div className="rounded-full bg-amber-100/70 p-2 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+              <GitBranch className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-default">Changes in this revision</p>
+              <p className="text-xs text-muted">Rev {selectedRevNum - 1} to Rev {selectedRevNum}</p>
+            </div>
+          </div>
+          <div className="grid gap-2 md:grid-cols-3">
             {diffChanges.map((change, i) => (
-              <div key={i} className="flex items-center gap-3 text-sm">
-                <span className="text-muted min-w-40 shrink-0">{change.field}</span>
-                <span className="text-default line-through opacity-50">{change.from}</span>
-                <span className="text-muted">→</span>
-                <span className="text-default font-medium">{change.to}</span>
+              <div key={i} className="rounded-2xl border border-base bg-surface/70 p-3.5 text-sm">
+                <p className="mb-2 text-xs font-semibold uppercase text-muted">{change.field}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-muted line-through opacity-70">{change.from}</span>
+                  <span className="text-faint">to</span>
+                  <span className="font-medium text-default">{change.to}</span>
+                </div>
               </div>
             ))}
           </div>
@@ -729,17 +1171,17 @@ export default function QuotationDetailPage() {
       )}
 
       {/* ─── MAIN TABS ─── */}
-      <div className="flex gap-1 bg-surface border border-base rounded-xl p-1 mb-5 w-fit">
+      <div className="mb-8 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-base bg-surface/70 p-1.5 shadow-sm">
         {[
-          { key: "editor", label: "Editor", icon: FileText },
+          { key: "editor", label: isEditable ? "Editor" : "Details", icon: FileText },
           { key: "preview", label: "Preview", icon: Eye },
           { key: "timeline", label: "Activity", icon: Activity },
         ].map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             onClick={() => setActiveTab(key as "editor" | "preview" | "timeline")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              activeTab === key ? "bg-card shadow-sm text-default" : "text-muted hover:text-default"
+            className={`flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium transition-all duration-200 active:scale-[0.98] ${
+              activeTab === key ? "bg-card shadow-[0_10px_30px_rgba(0,0,0,0.08)] text-default" : "text-muted hover:bg-card/60 hover:text-default"
             }`}
           >
             <Icon className="w-3.5 h-3.5" />{label}
@@ -749,11 +1191,11 @@ export default function QuotationDetailPage() {
 
       {/* ─── EDITOR TAB ─── */}
       {activeTab === "editor" && (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,7fr)_minmax(340px,3fr)]">
           {/* LEFT — FORM */}
-          <div className="xl:col-span-2 space-y-4">
+          <div className="order-2 space-y-8 xl:order-1">
             {!isEditable && selectedRevNum !== quotation.currentRevisionNumber && (
-              <div className="bg-slate-50 dark:bg-slate-800/40 border border-base rounded-2xl p-4 flex items-center gap-3">
+              <div className="flex items-center gap-3 rounded-2xl border border-base bg-surface/70 p-4">
                 <EyeOff className="w-4 h-4 text-muted shrink-0" />
                 <p className="text-sm text-muted">
                   Viewing Rev {selectedRevNum} (read-only). The current revision is Rev {quotation.currentRevisionNumber}.
@@ -761,354 +1203,267 @@ export default function QuotationDetailPage() {
               </div>
             )}
 
-            {/* Client + FY */}
-            <div className="bg-card border border-base rounded-2xl p-5 shadow-sm">
-              <h3 className="font-semibold text-default mb-4 flex items-center gap-2 text-sm">
-                <Building2 className="w-4 h-4 text-muted" />Quotation Details
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2 relative">
-                  <label className="label">Client Name *</label>
-                  <input
-                    className="input-field w-full"
-                    value={clientName}
-                    onChange={e => {
-                      setClientName(e.target.value);
-                      setShowSuggestions(true);
-                      if (!e.target.value) {
-                        setClientId("");
-                        setClientAddress("");
-                        setClientGst("");
-                        setClientState("");
-                      }
-                    }}
-                    onFocus={() => setShowSuggestions(true)}
-                    disabled={!isEditable}
-                    placeholder="Company name"
-                  />
-                  {/* Autocomplete suggestions */}
-                  {showSuggestions && clientSuggestions.length > 0 && (
-                    <div 
-                      onClick={e => e.stopPropagation()}
-                      className="absolute left-0 right-0 top-full mt-1 bg-card border border-base rounded-xl shadow-lg z-50 max-h-48 overflow-y-auto py-1"
-                    >
-                      {clientSuggestions.map(client => (
-                        <button
-                          key={client.clientId}
-                          type="button"
-                          onClick={() => {
-                            setClientName(client.companyName);
-                            setClientId(client.clientId);
-                            setClientAddress(client.address || "");
-                            setClientGst(client.gstNumber || "");
-                            setClientState(client.state || "");
-                            setShowSuggestions(false);
-                          }}
-                          className="w-full text-left px-3 py-2 text-xs hover:bg-surface text-default font-medium border-b border-soft last:border-0"
-                        >
-                          <p className="font-semibold">{client.companyName}</p>
-                          {client.gstNumber && <p className="text-[10px] text-muted mt-0.5">GST: {client.gstNumber} · {client.state}</p>}
-                        </button>
-                      ))}
+            {!isEditable && (
+              <>
+                <div className={`${surfaceCard} p-6 sm:p-8`}>
+                  <div className="mb-6">
+                    <h3 className="flex items-center gap-2 text-xl font-semibold text-default"><Building2 className="h-5 w-5 text-muted" />Quotation Details</h3>
+                    <p className="mt-1 text-sm text-muted">Client and validity information for this quotation.</p>
+                  </div>
+                  <div className="divide-y divide-soft">
+                    {[
+                      { label: "Client Name", value: clientName, wide: true },
+                      { label: "Financial Year", value: financialYear },
+                      { label: "Billing Address", value: clientAddress || "Not provided", wide: true },
+                      { label: "Client GSTIN", value: clientGst || "Not provided", mono: true },
+                      { label: "State", value: clientState || "Not provided" },
+                      { label: "Validity", value: `${validityDays} days` },
+                      ...(viewedRevision?.finalisedAt ? [{ label: "Finalised", value: fmtDate(viewedRevision.finalisedAt) }] : []),
+                    ].map(({ label, value, wide, mono }) => (
+                      <div key={label} className={`grid gap-2 py-4 first:pt-0 last:pb-0 sm:grid-cols-[160px_minmax(0,1fr)] ${wide ? "sm:items-start" : "sm:items-center"}`}>
+                        <p className={sectionEyebrow}>{label}</p>
+                        <p className={`break-words text-sm leading-relaxed text-default ${mono ? "font-mono" : ""}`}>{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className={`${surfaceCard} p-5 sm:p-6`}>
+                  <div className="mb-5 flex items-center justify-between gap-4">
+                    <h3 className="flex items-center gap-2 text-base font-semibold text-default"><IndianRupee className="h-4 w-4 text-muted" />Line Items</h3>
+                    <p className="text-xs text-muted">{items.length} {items.length === 1 ? "item" : "items"}</p>
+                  </div>
+                  {items.length > 0 ? (
+                    <div className="space-y-4">
+                      {items.map((item, idx) => {
+                        const { gstAmt, total } = calcItem(item);
+                        return (
+                          <article key={item._id} className="rounded-[24px] border border-base bg-surface/70 p-5 transition duration-200 hover:-translate-y-0.5 hover:bg-card hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] sm:p-6">
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <p className={sectionEyebrow}>Item {idx + 1}</p>
+                                <h4 className="mt-1 text-lg font-semibold leading-snug text-default">{item.description || "EPR Credit Procurement"}</h4>
+                                <p className="mt-2 text-sm leading-relaxed text-muted">{item.category} credit for {item.type} compliance.</p>
+                              </div>
+                              <div className="shrink-0 sm:text-right">
+                                <p className={sectionEyebrow}>Total</p>
+                                <p className="mt-1 font-mono text-xl font-semibold tabular-nums text-default">{money(total)}</p>
+                                {item.gstPercent > 0 && <p className="mt-1 text-xs text-muted">Includes GST {money(gstAmt)}</p>}
+                              </div>
+                            </div>
+                            <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+                              {[
+                                { label: "Category", value: item.category },
+                                { label: "Quantity", value: `${item.quantity.toLocaleString("en-IN")} MT`, mono: true },
+                                { label: "Unit Price", value: money(item.rate), mono: true },
+                                { label: "GST", value: `${item.gstPercent}%`, mono: true },
+                              ].map(({ label, value, mono }) => (
+                                <div key={label} className="rounded-2xl border border-base bg-card/70 px-4 py-3">
+                                  <p className={sectionEyebrow}>{label}</p>
+                                  <p className={`mt-1 text-sm font-medium text-default ${mono ? "font-mono tabular-nums" : ""}`}>{value}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </article>
+                        );
+                      })}
                     </div>
+                  ) : (
+                    <div className="rounded-[24px] border border-dashed border-base bg-surface/70 p-8 text-center text-sm text-muted">No line items in this revision.</div>
                   )}
                 </div>
-                <div>
-                  <label className="label">Financial Year</label>
-                  <select className="input-field" value={financialYear} onChange={e => setFinancialYear(e.target.value)} disabled={!isEditable}>
-                    {FINANCIAL_YEARS.map(y => <option key={y}>{y}</option>)}
-                  </select>
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="label">Billing Address</label>
-                  <input
-                    className="input-field"
-                    value={clientAddress}
-                    onChange={e => setClientAddress(e.target.value)}
-                    disabled={!isEditable}
-                    placeholder="Billing street address, state, etc."
-                  />
-                </div>
-                <div>
-                  <label className="label">Client GSTIN</label>
-                  <input
-                    className="input-field font-mono"
-                    value={clientGst}
-                    onChange={e => setClientGst(e.target.value.toUpperCase())}
-                    disabled={!isEditable}
-                    placeholder="GSTIN number"
-                    maxLength={15}
-                  />
-                </div>
-                <div>
-                  <label className="label">State Code</label>
-                  <input
-                    className="input-field"
-                    value={clientState}
-                    onChange={e => setClientState(e.target.value)}
-                    disabled={!isEditable}
-                    placeholder="State e.g. Delhi, Maharashtra"
-                  />
-                </div>
-                <div>
-                  <label className="label">Valid for (days)</label>
-                  <input type="number" className="input-field" value={validityDays} onChange={e => setValidityDays(Number(e.target.value))} disabled={!isEditable} min={1} />
-                </div>
-              </div>
-            </div>
 
-            {/* Line Items */}
-            <div className="bg-card border border-base rounded-2xl shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between p-4 border-b border-base">
-                <h3 className="font-semibold text-default flex items-center gap-2 text-sm">
-                  <IndianRupee className="w-4 h-4 text-muted" />EPR Credit Line Items
-                </h3>
-                {isEditable && (
-                  <button
-                    onClick={() => setItems(prev => [...prev, newItem()])}
-                    className="glass-btn glass-btn-primary"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Add Row
-                  </button>
-                )}
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr>
-                      {["Description", "Category", "Type", "Qty (MT)", "Rate (₹)", "GST%", "Amount", ""].map((h, i) => (
-                        <th key={h || `col-${i}`} className="table-header" style={{ minWidth: h === "Description" ? 170 : h === "Amount" ? 110 : 80 }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
+                <div className={`${surfaceCard} p-6 sm:p-8`}>
+                  <div className="mb-6 flex items-center gap-2">
+                    <Receipt className="h-5 w-5 text-muted" />
+                    <div>
+                      <h3 className="text-xl font-semibold text-default">Charges</h3>
+                      <p className="mt-1 text-sm text-muted">Fees and tax components in this revision.</p>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {[
+                      { label: "Consultation", value: money(liveCC), helper: `GST ${Number(consultationGstPercent) || 0}% - ${money(liveCCGst)}` },
+                      { label: "Government Fees", value: money(liveGF), helper: "CPCB / SPCB / portal charges" },
+                      { label: "Grand Total", value: money(liveGrand), emphasis: true },
+                    ].map(({ label, value, helper, emphasis }) => (
+                      <div key={label} className="rounded-[24px] border border-base bg-surface/70 p-5">
+                        <p className={sectionEyebrow}>{label}</p>
+                        <p className={`mt-2 font-mono font-semibold tabular-nums text-default ${emphasis ? "text-2xl" : "text-lg"}`}>{value}</p>
+                        {helper && <p className="mt-2 text-xs text-muted">{helper}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className={`${surfaceCard} p-6 sm:p-8`}>
+                  <h3 className="text-xl font-semibold text-default">Notes / Terms</h3>
+                  <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-default">{notes || "No notes or special terms."}</p>
+                </div>
+              </>
+            )}
+
+            {isEditable && (
+              <>
+                <div className={`${surfaceCard} p-6 sm:p-8`}>
+                  <div className="mb-6">
+                    <h3 className="flex items-center gap-2 text-xl font-semibold text-default"><Building2 className="h-5 w-5 text-muted" />Client details</h3>
+                    <p className="mt-1 text-sm text-muted">Who this quotation is prepared for.</p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div className="relative sm:col-span-2">
+                      <label className="label">Client Name *</label>
+                      <input className={`${softInput} w-full`} value={clientName} onChange={e => { setClientName(e.target.value); setShowSuggestions(true); if (!e.target.value) { setClientId(""); setClientAddress(""); setClientGst(""); setClientState(""); } }} onFocus={() => setShowSuggestions(true)} disabled={!isEditable} placeholder="Company name" />
+                      {showSuggestions && clientSuggestions.length > 0 && (
+                        <div onClick={e => e.stopPropagation()} className="absolute left-0 right-0 top-full z-50 mt-2 max-h-72 overflow-y-auto rounded-[24px] border border-base bg-card/95 p-2 shadow-[0_22px_70px_rgba(0,0,0,0.12)] backdrop-blur-xl">
+                          {clientSuggestions.map(client => (
+                            <button key={client.clientId} type="button" onClick={() => { setClientName(client.companyName); setClientId(client.clientId); setClientAddress(client.address || ""); setClientGst(client.gstNumber || ""); setClientState(client.state || ""); setShowSuggestions(false); }} className="w-full rounded-[20px] px-4 py-3 text-left text-sm text-default transition duration-200 hover:bg-surface active:scale-[0.98]">
+                              <p className="font-semibold">{client.companyName}</p>
+                              <p className="mt-1 text-xs text-muted">{[client.gstNumber ? `GST ${client.gstNumber}` : "", client.state].filter(Boolean).join(" - ") || "Client record"}</p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div><label className="label">Financial Year</label><select className={`${softInput} w-full`} value={financialYear} onChange={e => setFinancialYear(e.target.value)} disabled={!isEditable}>{FINANCIAL_YEARS.map(y => <option key={y}>{y}</option>)}</select></div>
+                    <div className="sm:col-span-2"><label className="label">Billing Address</label><input className={`${softInput} w-full`} value={clientAddress} onChange={e => setClientAddress(e.target.value)} disabled={!isEditable} placeholder="Billing street address, state, etc." /></div>
+                    <div><label className="label">Client GSTIN</label><input className={`${softInput} w-full font-mono`} value={clientGst} onChange={e => setClientGst(e.target.value.toUpperCase())} disabled={!isEditable} placeholder="GSTIN number" maxLength={15} /></div>
+                    <div><label className="label">State Code</label><input className={`${softInput} w-full`} value={clientState} onChange={e => setClientState(e.target.value)} disabled={!isEditable} placeholder="State e.g. Delhi, Maharashtra" /></div>
+                    <div><label className="label">Valid for (days)</label><input type="number" className={`${softInput} w-full`} value={validityDays} onChange={e => setValidityDays(Number(e.target.value))} disabled={!isEditable} min={1} /></div>
+                  </div>
+                </div>
+
+                <div className={`${surfaceCard} p-5 sm:p-6`}>
+                  <div className="mb-5 flex items-center justify-between gap-4">
+                    <h3 className="flex items-center gap-2 text-base font-semibold text-default"><IndianRupee className="h-4 w-4 text-muted" />Line Items</h3>
+                    <button onClick={() => setItems(prev => [...prev, newItem()])} className="glass-btn glass-btn-primary rounded-full px-4 py-2 transition duration-200 active:scale-[0.98]"><Plus className="h-3.5 w-3.5" /> Add Item</button>
+                  </div>
+                  <div className="space-y-4">
                     {items.map((item, idx) => {
                       const { gstAmt, total } = calcItem(item);
                       return (
-                        <tr key={item._id} className="border-t border-soft">
-                          <td className="px-3 py-2">
-                            <input 
-                              list={`services-list-${item._id}`}
-                              className="input-field !py-1.5 text-xs" 
-                              value={item.description} 
-                              onChange={e => {
-                                const val = e.target.value;
-                                updateItem(idx, "description", val);
-                                const matched = STANDARD_SERVICES.find(s => s.description === val);
-                                if (matched) {
-                                  updateItem(idx, "category", matched.category);
-                                  updateItem(idx, "type", matched.type);
-                                }
-                              }} 
-                              disabled={!isEditable} 
-                            />
-                            <datalist id={`services-list-${item._id}`}>
-                              {STANDARD_SERVICES.map(s => (
-                                <option key={s.label} value={s.description}>
-                                  {s.category} · {s.type}
-                                </option>
-                              ))}
-                            </datalist>
-                          </td>
-                          <td className="px-3 py-2">
-                            <select className="input-field !py-1.5 text-xs" value={item.category} onChange={e => updateItem(idx, "category", e.target.value)} disabled={!isEditable}>
-                              {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                            </select>
-                          </td>
-                          <td className="px-3 py-2">
-                            <select className="input-field !py-1.5 text-xs" value={item.type} onChange={e => updateItem(idx, "type", e.target.value)} disabled={!isEditable}>
-                              {TYPES.map(t => <option key={t}>{t}</option>)}
-                            </select>
-                          </td>
-                          <td className="px-3 py-2">
-                            <input type="number" min="0" className="input-field !py-1.5 text-xs font-mono text-center" value={item.quantity || ""} onChange={e => updateItem(idx, "quantity", Number(e.target.value))} disabled={!isEditable} />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input type="number" min="0" step="0.01" className="input-field !py-1.5 text-xs font-mono" value={item.rate || ""} onChange={e => updateItem(idx, "rate", Number(e.target.value))} disabled={!isEditable} placeholder="0.00" />
-                          </td>
-                          <td className="px-3 py-2">
-                            <select className="input-field !py-1.5 text-xs" value={item.gstPercent} onChange={e => updateItem(idx, "gstPercent", Number(e.target.value))} disabled={!isEditable}>
-                              {GST_OPTIONS.map(g => <option key={g} value={g}>{g}%</option>)}
-                            </select>
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            <p className="text-sm font-semibold text-default">{formatCurrency(total)}</p>
-                            {item.gstPercent > 0 && <p className="text-xs text-muted">+GST {formatCurrency(gstAmt)}</p>}
-                          </td>
-                          <td className="px-2 py-2">
-                            {isEditable && (
-                              <button
-                                onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))}
-                                disabled={items.length === 1}
-                                className="p-1 text-faint hover:text-red-500 transition-colors"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </td>
-                        </tr>
+                        <article key={item._id} className="rounded-[24px] border border-base bg-surface/70 p-5 transition duration-200 hover:-translate-y-0.5 hover:bg-card hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] sm:p-6">
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0 flex-1">
+                              <div className="mb-2 flex items-center justify-between gap-3"><label className={sectionEyebrow}>Product / Service</label><span className="text-xs text-faint">Item {idx + 1}</span></div>
+                              <input list={`services-list-${item._id}`} className={`${softInput} w-full`} value={item.description} onChange={e => { const val = e.target.value; updateItem(idx, "description", val); const matched = STANDARD_SERVICES.find(s => s.description === val); if (matched) { updateItem(idx, "category", matched.category); updateItem(idx, "type", matched.type); } }} disabled={!isEditable} />
+                              <datalist id={`services-list-${item._id}`}>{STANDARD_SERVICES.map(s => <option key={s.label} value={s.description}>{s.category} - {s.type}</option>)}</datalist>
+                              <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">{STANDARD_SERVICES.slice(0, 4).map(service => <button key={service.label} type="button" onClick={() => { updateItem(idx, "description", service.description); updateItem(idx, "category", service.category); updateItem(idx, "type", service.type); }} disabled={!isEditable} className="shrink-0 rounded-full border border-transparent bg-card/60 px-2.5 py-1 text-[11px] font-medium text-faint transition duration-200 hover:-translate-y-0.5 hover:border-base hover:bg-surface hover:text-muted active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">{service.category} {service.type}</button>)}</div>
+                            </div>
+                            <div className="flex items-start justify-between gap-3 sm:block sm:min-w-40 sm:text-right">
+                              <div><p className={sectionEyebrow}>Total</p><p className="mt-1 font-mono text-xl font-semibold tabular-nums text-default">{money(total)}</p>{item.gstPercent > 0 && <p className="mt-1 text-xs text-muted">GST {money(gstAmt)}</p>}</div>
+                              <button onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))} disabled={items.length === 1} className="rounded-full p-2 text-faint transition hover:bg-red-50 hover:text-red-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-red-900/20" title="Remove item"><Trash2 className="h-4 w-4" /></button>
+                            </div>
+                          </div>
+                          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                            <div><label className="label">Category</label><select className={`${softInput} w-full`} value={item.category} onChange={e => updateItem(idx, "category", e.target.value)} disabled={!isEditable}>{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div>
+                            <div><label className="label">Type</label><select className={`${softInput} w-full`} value={item.type} onChange={e => updateItem(idx, "type", e.target.value)} disabled={!isEditable}>{TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+                            <div><label className="label">Quantity (MT)</label><input type="number" min="0" className={`${softInput} w-full font-mono text-right tabular-nums`} value={item.quantity || ""} onChange={e => updateItem(idx, "quantity", Number(e.target.value))} disabled={!isEditable} /></div>
+                            <div><label className="label">Unit Price</label><input type="number" min="0" step="0.01" className={`${softInput} w-full font-mono text-right tabular-nums`} value={item.rate || ""} onChange={e => updateItem(idx, "rate", Number(e.target.value))} disabled={!isEditable} placeholder="0.00" /></div>
+                            <div><label className="label">GST</label><select className={`${softInput} w-full`} value={item.gstPercent} onChange={e => updateItem(idx, "gstPercent", Number(e.target.value))} disabled={!isEditable}>{GST_OPTIONS.map(g => <option key={g} value={g}>{g}%</option>)}</select></div>
+                          </div>
+                        </article>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="border-t border-soft px-4 py-2.5 bg-surface flex justify-end gap-6 text-xs">
-                <span className="text-muted">Subtotal: <strong className="text-default">{formatCurrency(liveItemsSubtotal)}</strong></span>
-                <span className="text-muted">GST: <strong className="text-default">{formatCurrency(liveItemsGst)}</strong></span>
-              </div>
-            </div>
-
-            {/* Additional Charges */}
-            <div className="bg-card border border-base rounded-2xl shadow-sm overflow-hidden">
-              <div className="p-4 border-b border-base flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-muted" />
-                <h3 className="font-semibold text-default text-sm">Additional Charges</h3>
-              </div>
-              <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-0 divide-y md:divide-y-0 md:divide-x divide-base">
-                <div className="pb-4 md:pb-0 md:pr-5 space-y-4">
-                  <div>
-                    <p className="text-sm font-medium text-default mb-2 flex items-center gap-2">
-                      <IndianRupee className="w-3.5 h-3.5 text-muted" />Consultation Charges
-                    </p>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="col-span-2">
-                        <label className="label">Amount (₹)</label>
-                        <input type="number" min="0" step="0.01" className="input-field font-mono" value={consultationCharges} onChange={e => setConsultationCharges(e.target.value)} disabled={!isEditable} />
-                      </div>
-                      <div>
-                        <label className="label">GST %</label>
-                        <select className="input-field" value={consultationGstPercent} onChange={e => setConsultationGstPercent(e.target.value)} disabled={!isEditable}>
-                          {GST_OPTIONS.map(g => <option key={g} value={g}>{g}%</option>)}
-                        </select>
-                      </div>
-                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-default mb-2 flex items-center gap-2">
-                      <Landmark className="w-3.5 h-3.5 text-muted" />Government Fees
-                    </p>
-                    <input type="number" min="0" step="0.01" className="input-field font-mono" value={governmentFees} onChange={e => setGovernmentFees(e.target.value)} disabled={!isEditable} />
-                    <p className="text-xs text-faint mt-1">CPCB / SPCB / portal charges (no GST)</p>
+                  <button onClick={() => setItems(prev => [...prev, newItem()])} className={`${appleButton} mt-4 border border-base bg-surface text-default hover:bg-card`}><Plus className="mr-2 h-4 w-4" />Add Item</button>
+                </div>
+
+                <div className={`${surfaceCard} p-6 sm:p-8`}>
+                  <div className="mb-6"><h3 className="flex items-center gap-2 text-xl font-semibold text-default"><Receipt className="h-5 w-5 text-muted" />Additional charges</h3><p className="mt-1 text-sm text-muted">Consultation, tax, and statutory fees.</p></div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <div><label className="label">Consultation Charges</label><input type="number" min="0" step="0.01" className={`${softInput} w-full font-mono tabular-nums`} value={consultationCharges} onChange={e => setConsultationCharges(e.target.value)} disabled={!isEditable} /></div>
+                    <div><label className="label">Consultation GST %</label><select className={`${softInput} w-full`} value={consultationGstPercent} onChange={e => setConsultationGstPercent(e.target.value)} disabled={!isEditable}>{GST_OPTIONS.map(g => <option key={g} value={g}>{g}%</option>)}</select></div>
+                    <div><label className="label">Government Fees</label><input type="number" min="0" step="0.01" className={`${softInput} w-full font-mono tabular-nums`} value={governmentFees} onChange={e => setGovernmentFees(e.target.value)} disabled={!isEditable} /><p className="mt-2 text-xs text-faint">CPCB / SPCB / portal charges.</p></div>
                   </div>
                 </div>
 
-                {/* Right: live totals */}
-                <div className="pt-4 md:pt-0 md:pl-5">
-                  <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">Breakup</p>
-                  <div className="space-y-2">
-                    {[
-                      { label: "EPR Credits (excl. GST)", value: liveItemsSubtotal },
-                      { label: "GST on Credits", value: liveItemsGst, muted: true },
-                      ...(liveCC > 0 ? [{ label: "Consultation Charges", value: liveCC }] : []),
-                      ...(liveCCGst > 0 ? [{ label: `GST on Consultation`, value: liveCCGst, muted: true }] : []),
-                      ...(liveGF > 0 ? [{ label: "Government Fees", value: liveGF }] : []),
-                    ].map(({ label, value, muted }) => (
-                      <div key={label} className="flex justify-between text-sm">
-                        <span className="text-muted">{label}</span>
-                        <span className={muted ? "text-muted font-medium" : "text-default font-medium"}>{formatCurrency(value)}</span>
-                      </div>
-                    ))}
-                    <div className="border-t border-base pt-2 mt-2 flex justify-between items-center">
-                      <span className="font-bold text-default">Grand Total</span>
-                      <span className="text-2xl font-black text-brand-600 dark:text-brand-400">{formatCurrency(liveGrand)}</span>
-                    </div>
-                  </div>
+                <div className={`${surfaceCard} p-6 sm:p-8`}>
+                  <div className="mb-5"><h3 className="text-xl font-semibold text-default">Notes / Terms</h3><p className="mt-1 text-sm text-muted">Payment terms, validity, or client-facing conditions.</p></div>
+                  <textarea className={`${softTextarea} min-h-36 w-full resize-y`} rows={5} value={notes} onChange={e => setNotes(e.target.value)} disabled={!isEditable} placeholder="Payment terms, validity, special conditions..." />
                 </div>
-              </div>
-
-              <div className="border-t border-base p-4">
-                <label className="label">Notes / Terms</label>
-                <textarea className="input-field" rows={2} value={notes} onChange={e => setNotes(e.target.value)} disabled={!isEditable} placeholder="Payment terms, validity, special conditions…" />
-              </div>
-            </div>
+              </>
+            )}
           </div>
 
           {/* RIGHT — STATUS + QUICK SUMMARY */}
-          <div className="xl:col-span-1">
-            <div className="sticky top-6 space-y-4">
+          <div className="order-1 xl:order-2">
+            <div className="xl:sticky xl:top-32">
               {/* Summary card */}
-              <div className="bg-card border border-base rounded-2xl shadow-sm overflow-hidden">
-                <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-4 text-white">
-                  <p className="text-xs text-white/50 font-mono mb-1">
-                    {quotation.quotationNumber || "DRAFT"}{quotation.quotationNumber ? ` · Rev ${quotation.currentRevisionNumber}` : ""}
-                  </p>
-                  <p className="font-bold text-lg">{quotation.clientName}</p>
-                  <p className="text-white/60 text-sm mt-0.5">FY {quotation.financialYear}</p>
-                </div>
-                <div className="p-4 space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted">Status</span>
-                    <QuotationStatusPill status={quotation.status} />
+              <div className="rounded-[32px] border border-white/70 bg-card/90 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.10)] backdrop-blur-xl dark:border-white/10 dark:bg-card/80">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="font-mono text-xs text-faint">{quotation.quotationNumber || "DRAFT"}{quotation.quotationNumber ? ` - Rev ${quotation.currentRevisionNumber}` : ""}</p>
+                    <p className="mt-2 truncate text-lg font-semibold leading-snug text-default">{quotation.clientName}</p>
+                    <p className="mt-1 text-sm text-muted">FY {quotation.financialYear}</p>
                   </div>
-                  <div className="flex justify-between text-sm">
+                  <QuotationStatusPill status={quotation.status} />
+                </div>
+
+                <div className="my-6 rounded-[28px] border border-base bg-surface/70 p-5">
+                  <p className="text-xs font-semibold uppercase text-muted">Grand Total</p>
+                  <p className="mt-2 font-mono text-4xl font-semibold leading-none tabular-nums text-default">{money(liveGrand)}</p>
+                </div>
+
+                <div className="space-y-3 text-sm">
+                  {[
+                    { label: "EPR Credits", value: liveItemsSubtotal },
+                    { label: "GST on Credits", value: liveItemsGst },
+                    ...(liveCC > 0 ? [{ label: "Consultation", value: liveCC }] : []),
+                    ...(liveCCGst > 0 ? [{ label: "GST on Consultation", value: liveCCGst }] : []),
+                    ...(liveGF > 0 ? [{ label: "Government Fees", value: liveGF }] : []),
+                  ].map(({ label, value }) => (
+                    <div key={label} className="flex items-center justify-between gap-4">
+                      <span className="text-muted">{label}</span>
+                      <span className="font-mono font-medium tabular-nums text-default">{money(value)}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="my-6 h-px bg-base" />
+
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between gap-4">
                     <span className="text-muted">Current Revision</span>
-                    <span className="font-mono text-default font-medium">Rev {quotation.currentRevisionNumber}</span>
+                    <span className="font-mono font-medium text-default">Rev {quotation.currentRevisionNumber}</span>
                   </div>
                   {quotation.validTill && (
-                    <div className="flex justify-between text-sm">
+                    <div className="flex items-center justify-between gap-4">
                       <span className="text-muted">Valid Till</span>
                       <span className="text-default">{fmtDate(quotation.validTill)}</span>
                     </div>
                   )}
                   {quotation.sentAt && (
-                    <div className="flex justify-between text-sm">
+                    <div className="flex items-center justify-between gap-4">
                       <span className="text-muted">Sent</span>
                       <span className="text-default">{fmtDate(quotation.sentAt)}</span>
                     </div>
                   )}
-                  <div className="border-t border-base mt-3 pt-3 flex justify-between items-center">
-                    <span className="font-semibold text-default">Grand Total</span>
-                    <span className="text-xl font-black text-brand-600 dark:text-brand-400">{formatCurrency(liveGrand)}</span>
+                </div>
+
+                <div className="mt-6 grid gap-2">
+                  {isEditable ? (
+                    <button onClick={handleFinalize} disabled={finalising} className="btn-primary w-full justify-center gap-2 rounded-full py-3 shadow-sm shadow-brand-600/15 transition duration-200 active:scale-[0.98]">
+                      <Sparkles className="h-4 w-4" />
+                      {finalising ? "Finalising..." : "Finalise Quote"}
+                    </button>
+                  ) : canCreateEmailDraft ? (
+                    <button onClick={openEmailDraftModal} disabled={emailLoading} className="btn-primary w-full justify-center gap-2 rounded-full py-3 shadow-sm shadow-brand-600/15 transition duration-200 active:scale-[0.98]">
+                      <Mail className="h-4 w-4" />
+                      {emailLoading ? "Creating..." : "Email Draft"}
+                    </button>
+                  ) : null}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={(e) => openMoreMenu(e, "summary")}
+                      className="btn-secondary w-full justify-center gap-2 rounded-full bg-card/90 py-3 text-sm transition duration-200 active:scale-[0.98]"
+                    >
+                      <MoreHorizontal className="h-4 w-4" /> More
+                    </button>
                   </div>
                 </div>
-              </div>
 
-              {/* Response tracking */}
-              <div className="bg-card border border-base rounded-2xl p-4 shadow-sm">
-                <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">Client Response</p>
-                {allowedResponseStatuses.length > 0 ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    {([
-                      ["Accepted", "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800", CheckCircle2],
-                      ["RevisionRequested", "text-amber-600 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800", GitBranch],
-                      ["Rejected", "text-red-500 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800", AlertTriangle],
-                      ["Sent", "text-blue-600 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800", Clock],
-                    ] as [QuotationStatus, string, React.ElementType][])
-                      .filter(([s]) => allowedResponseStatuses.includes(s))
-                      .map(([s, cls, Icon]) => (
-                        <button
-                          key={s}
-                          onClick={() => updateStatus(s)}
-                          className={`flex flex-col items-center gap-1 py-2.5 rounded-xl border text-xs font-medium transition-all hover:opacity-80 ${
-                            quotation.status === s ? cls : "border-base text-muted bg-surface hover:bg-card"
-                          }`}
-                        >
-                          <Icon className="w-3.5 h-3.5" />
-                          {QUOTATION_STATUS_CONFIG[s].label}
-                        </button>
-                      ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted">No response action is available for {QUOTATION_STATUS_CONFIG[quotation.status].label} quotations.</p>
-                )}
-              </div>
-
-              {/* Workflow actions */}
-              <div className="space-y-2">
-                {isEditable && (
-                  <button onClick={handleFinalize} disabled={finalising} className="btn-primary w-full justify-center gap-2 py-3">
-                    <Sparkles className="w-4 h-4" />
-                    {finalising ? "Finalising..." : "Finalise Quote"}
-                  </button>
-                )}
-                <div className="grid grid-cols-1 gap-2">
-                  <button onClick={handlePrintPreview} disabled={pdfLoading} className="btn-secondary justify-center gap-1.5 text-sm py-2.5">
-                    <Printer className="w-3.5 h-3.5" />Print / Preview
-                  </button>
-                  <button onClick={openEmailDraftModal} disabled={emailLoading || !canCreateEmailDraft} className="btn-secondary justify-center gap-1.5 text-sm py-2.5">
-                    <Mail className="w-3.5 h-3.5" />Email Draft
-                  </button>
-                </div>
               </div>
             </div>
           </div>
@@ -1117,127 +1472,110 @@ export default function QuotationDetailPage() {
 
       {/* ─── PREVIEW TAB ─── */}
       {activeTab === "preview" && (
-        <div className="bg-surface rounded-2xl p-6 border border-base">
-          <div className="max-w-3xl mx-auto bg-card border border-base rounded-2xl shadow-xl overflow-hidden">
-            <div className="bg-slate-900 text-white p-8">
-              <div className="flex justify-between items-start">
-                <div>
-                  <p className="text-4xl font-black tracking-tight">NEXTGEN</p>
-                  <p className="text-white/40 text-sm mt-1">EPR Consultancy Solutions</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-mono text-white/60 text-xs">QUOTATION</p>
-                  <p className="font-mono text-xl font-bold mt-1">{quotation.quotationNumber || "DRAFT"}</p>
-                  {quotation.quotationNumber && (
-                    <p className="text-white/40 text-xs mt-1">Rev {selectedRevNum ?? quotation.currentRevisionNumber}</p>
+        <div className="rounded-[32px] border border-base bg-[#f5f5f7] p-4 shadow-sm sm:p-8 dark:bg-surface">
+          <div className="mb-6 flex flex-col gap-4 rounded-[28px] border border-white/70 bg-card/85 p-4 shadow-sm backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between dark:border-white/10">
+            <div>
+              <p className="font-mono text-xs text-faint">{quotation.quotationNumber || "DRAFT"} - Rev {selectedRevNum ?? quotation.currentRevisionNumber}</p>
+              <h3 className="mt-1 text-lg font-semibold text-default">Quotation Preview</h3>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={handlePrintPreview} disabled={pdfLoading} className={`${appleButton} border border-base bg-card text-default hover:bg-surface`}>
+                <Printer className="mr-2 h-4 w-4" />{pdfLoading ? "Opening..." : "Print"}
+              </button>
+              {canCreateEmailDraft && (
+                <button onClick={openEmailDraftModal} disabled={emailLoading} className={`${appleButton} border border-base bg-card text-default hover:bg-surface`}>
+                  <Mail className="mr-2 h-4 w-4" />Email Draft
+                </button>
                   )}
                 </div>
               </div>
-            </div>
-            <div className="p-8">
-              <div className="grid grid-cols-2 gap-6 mb-8">
-                <div>
-                  <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Prepared for</p>
-                  <p className="font-semibold text-default text-lg">{clientName}</p>
-                  {clientAddress && <p className="text-muted text-xs mt-1 max-w-[280px] break-words">{clientAddress}</p>}
-                  {clientGst && <p className="text-muted text-xs mt-1 font-mono">GSTIN: {clientGst}</p>}
-                  <p className="text-muted text-xs mt-1">FY {financialYear}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Date</p>
-                  <p className="text-default">{fmtDate(new Date().toISOString())}</p>
-                  {quotation.validTill && (
-                    <>
-                      <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1 mt-3">Valid Till</p>
-                      <p className="text-default">{fmtDate(quotation.validTill)}</p>
-                    </>
-                  )}
-                </div>
+          {previewTemplateLoading && (
+            <div className="mx-auto max-w-[860px] rounded-[28px] border border-base bg-white p-8 shadow-[0_30px_90px_rgba(0,0,0,0.10)]">
+              <div className="mb-6 h-5 w-44 animate-pulse rounded-full bg-surface" />
+              <div className="space-y-3">
+                <div className="h-4 animate-pulse rounded-full bg-surface" />
+                <div className="h-4 w-5/6 animate-pulse rounded-full bg-surface" />
+                <div className="h-56 animate-pulse rounded-[24px] bg-surface" />
               </div>
-
-              {/* Items table */}
-              <table className="w-full text-sm mb-6">
-                <thead>
-                  <tr className="border-b-2 border-base">
-                    {["Description", "Cat", "Type", "Qty", "Rate", "GST", "Total"].map(h => (
-                      <th key={h} className={`py-2 text-xs font-semibold text-muted uppercase tracking-wide ${h === "Total" || h === "Rate" || h === "Qty" || h === "GST" ? "text-right" : "text-left"}`}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-base">
-                  {items.map((item, i) => {
-                    const { total } = calcItem(item);
-                    return (
-                      <tr key={i}>
-                        <td className="py-3 text-default">{item.description}</td>
-                        <td className="py-3 text-muted text-xs font-mono">{item.category}</td>
-                        <td className="py-3 text-muted text-xs">{item.type}</td>
-                        <td className="py-3 text-right text-default font-mono text-xs">{item.quantity.toLocaleString()}</td>
-                        <td className="py-3 text-right text-default font-mono text-xs">₹{fmt(item.rate)}</td>
-                        <td className="py-3 text-right text-muted text-xs">{item.gstPercent}%</td>
-                        <td className="py-3 text-right font-semibold text-default">₹{fmt(total)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              {/* Totals */}
-              <div className="ml-auto max-w-xs space-y-1.5">
-                {[
-                  { label: "EPR Credits (excl. GST)", value: liveItemsSubtotal },
-                  { label: "GST on Credits", value: liveItemsGst, muted: true },
-                  ...(liveCC > 0 ? [{ label: "Consultation Charges", value: liveCC }] : []),
-                  ...(liveCCGst > 0 ? [{ label: `GST on Consultation`, value: liveCCGst, muted: true }] : []),
-                  ...(liveGF > 0 ? [{ label: "Government Fees", value: liveGF }] : []),
-                ].map(({ label, value, muted }) => (
-                  <div key={label} className="flex justify-between text-sm">
-                    <span className={muted ? "text-faint" : "text-muted"}>{label}</span>
-                    <span className={muted ? "text-muted" : "text-default"}>₹{fmt(value)}</span>
-                  </div>
-                ))}
-                <div className="border-t-2 border-default/20 pt-2 flex justify-between items-center">
-                  <span className="font-bold text-default">Grand Total</span>
-                  <span className="text-xl font-black text-brand-600">₹{fmt(liveGrand)}</span>
-                </div>
-              </div>
-
-              {notes && (
-                <div className="mt-8 p-4 bg-surface rounded-xl border border-base">
-                  <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Notes & Terms</p>
-                  <p className="text-sm text-default whitespace-pre-line">{notes}</p>
-                </div>
-              )}
+              <p className="mt-6 text-center text-sm text-muted">Preparing preview...</p>
             </div>
-          </div>
+          )}
+          {previewTemplateError && (
+            <div className="mx-auto max-w-3xl rounded-[28px] border border-red-200 bg-card p-6 text-center shadow-sm dark:border-red-900/50">
+              <AlertTriangle className="mx-auto mb-3 h-6 w-6 text-red-500" />
+              <p className="text-sm font-medium text-red-600 dark:text-red-400">{previewTemplateError}</p>
+              <button onClick={() => { setPreviewTemplateError(""); setQuotationTemplate(""); }} className={`${appleButton} mt-4 border border-base bg-surface text-default hover:bg-card`}>Retry</button>
+            </div>
+          )}
+          {previewHtml && (
+            <iframe
+              ref={previewIframeRef}
+              title="Quotation preview"
+              srcDoc={previewHtml}
+              className="mx-auto block w-full max-w-[860px] rounded-2xl border border-base bg-white shadow-[0_30px_90px_rgba(0,0,0,0.12)]"
+              style={{ height: previewHeight }}
+              sandbox="allow-same-origin"
+              scrolling="no"
+              onLoad={event => {
+                const iframe = event.currentTarget;
+                requestAnimationFrame(() => resizePreview(iframe));
+              }}
+            />
+          )}
         </div>
       )}
 
-      {/* ─── TIMELINE TAB ─── */}
+      {/* Activity tab */}
       {activeTab === "timeline" && (
-        <div className="max-w-xl">
-          <div className="space-y-1">
-            {[...quotation.activities].reverse().map((activity, i) => (
-              <div key={i} className="flex gap-4 group">
-                <div className="flex flex-col items-center">
-                  <div className="w-2 h-2 rounded-full bg-brand-400 mt-1.5 shrink-0" />
-                  {i < quotation.activities.length - 1 && (
-                    <div className="w-px flex-1 bg-base mt-1" />
-                  )}
+        <div className={`${surfaceCard} max-w-3xl p-6 sm:p-8`}>
+          <div className="mb-8">
+            <h3 className="text-xl font-semibold text-default">Activity</h3>
+            <p className="mt-1 text-sm text-muted">Complete history for this quotation.</p>
+          </div>
+          {quotation.activities.length > 0 ? (
+            <div className="relative space-y-4 before:absolute before:left-5 before:top-6 before:h-[calc(100%-48px)] before:w-px before:bg-base">
+              {[...quotation.activities].reverse().map((activity, i) => (
+                <div key={i} className="relative flex gap-4">
+                  <div className="z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-base bg-card text-brand-500 shadow-sm">
+                    <Activity className="h-4 w-4" />
+                  </div>
+                  <div className="flex-1 rounded-[24px] border border-base bg-surface/70 p-4 transition duration-200 hover:-translate-y-0.5 hover:bg-card hover:shadow-[0_16px_44px_rgba(0,0,0,0.06)]">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm font-semibold text-default">{activity.action}</p>
+                      <p className="text-xs text-faint">{fmtDate(activity.timestamp)} - {fmtTime(activity.timestamp)}</p>
+                    </div>
+                    {activity.detail && <p className="mt-2 text-sm leading-relaxed text-muted">{activity.detail}</p>}
+                  </div>
                 </div>
-                <div className="pb-6">
-                  <p className="text-xs text-faint mb-0.5">
-                    {fmtDate(activity.timestamp)} · {fmtTime(activity.timestamp)}
-                  </p>
-                  <p className="text-sm font-medium text-default">{activity.action}</p>
-                  {activity.detail && (
-                    <p className="text-xs text-muted mt-0.5">{activity.detail}</p>
-                  )}
-                </div>
-              </div>
-            ))}
-            {quotation.activities.length === 0 && (
-              <p className="text-muted text-sm">No activity yet.</p>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-[28px] border border-dashed border-base bg-surface/70 p-8 text-center">
+              <Activity className="mx-auto mb-3 h-6 w-6 text-muted" />
+              <p className="text-sm font-semibold text-default">No activity yet</p>
+              <p className="mt-1 text-sm text-muted">Actions like finalising, sending, and revisions will appear here.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "editor" && (isEditable || canCreateEmailDraft) && (
+        <div className="fixed inset-x-3 bottom-3 z-40 rounded-[24px] border border-white/70 bg-card/90 p-2 shadow-[0_18px_60px_rgba(0,0,0,0.16)] backdrop-blur-xl xl:hidden dark:border-white/10">
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1 px-2">
+              <p className="text-[11px] font-semibold uppercase text-muted">Grand Total</p>
+              <p className="truncate font-mono text-lg font-semibold tabular-nums text-default">{money(liveGrand)}</p>
+            </div>
+            {isEditable ? (
+              <button onClick={handleFinalize} disabled={finalising} className="btn-primary shrink-0 gap-2 rounded-[20px] px-4 py-3 transition duration-200 active:scale-[0.98]">
+                <Sparkles className="h-4 w-4" />
+                {finalising ? "Finalising..." : "Finalise"}
+              </button>
+            ) : (
+              <button onClick={openEmailDraftModal} disabled={emailLoading} className="btn-primary shrink-0 gap-2 rounded-[20px] px-4 py-3 transition duration-200 active:scale-[0.98]">
+                <Mail className="h-4 w-4" />
+                Email
+              </button>
             )}
           </div>
         </div>
@@ -1248,44 +1586,113 @@ export default function QuotationDetailPage() {
         onClose={() => {
           if (!emailLoading) setEmailModalOpen(false);
         }}
-        title="Create email draft"
-        subtitle={quotation.clientName}
-        size="sm"
+        title="Create Email Draft"
+        size="xl"
+        hideHeader
+        className="rounded-[36px] border-white/70 shadow-[0_34px_110px_rgba(0,0,0,0.28)] backdrop-blur-2xl dark:border-white/10"
+        bgColor="rgba(232,232,235,0.86)"
       >
         <form
-          className="space-y-4"
+          className="flex max-h-[90vh] flex-col overflow-hidden bg-transparent"
           onSubmit={(e) => {
             e.preventDefault();
             handleEmailDraft();
           }}
         >
-          <div>
-            <label className="label">Recipient email</label>
-            <input
-              type="email"
-              className="input-field"
-              value={emailRecipient}
-              onChange={(e) => setEmailRecipient(e.target.value)}
-              placeholder="client@example.com"
-              autoFocus
-              required
-            />
-          </div>
-          <div className="flex justify-end gap-2">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/35 bg-white/20 px-5 py-5 backdrop-blur-2xl sm:px-6 dark:border-white/10 dark:bg-white/5">
+            <div className="flex min-w-0 items-start gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-500/10 text-brand-600 shadow-sm">
+                <Mail className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-default">Create Email Draft</h3>
+                <p className="mt-1 text-sm text-muted">{quotation.quotationNumber || "Draft quotation"} for {quotation.clientName}</p>
+              </div>
+            </div>
             <button
               type="button"
-              className="btn-secondary px-4"
-              disabled={emailLoading}
-              onClick={() => setEmailModalOpen(false)}
+              onClick={() => { if (!emailLoading) setEmailModalOpen(false); }}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/60 bg-white/55 text-muted shadow-sm backdrop-blur-xl transition duration-200 hover:bg-white/80 hover:text-default active:scale-[0.98] dark:border-white/10 dark:bg-white/10"
+              aria-label="Close email draft modal"
             >
-              Cancel
+              <X className="h-4 w-4" />
             </button>
-            <button
-              type="submit"
-              className="btn-primary px-4"
-              disabled={emailLoading || !emailRecipient.trim()}
-            >
-              {emailLoading ? "Creating..." : "Create Draft"}
+          </div>
+
+          <div className="flex-1 space-y-6 overflow-y-auto bg-[#d8d8dc]/55 px-5 py-5 backdrop-blur-2xl sm:px-6 dark:bg-surface/70">
+            <section>
+              <p className={sectionEyebrow}>Recipients</p>
+              {clientEmailOptions.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {clientEmailOptions.map(option => (
+                    <div key={option.id} className="flex h-14 min-w-[220px] max-w-[270px] items-center gap-2 rounded-full border border-white/80 bg-white/92 px-2.5 py-2 shadow-[0_8px_22px_rgba(0,0,0,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-white dark:border-white/10 dark:bg-card/85">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f1f1f3] text-[11px] font-semibold text-muted shadow-inner dark:bg-surface">
+                        {option.name.split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase() || "C"}
+                      </div>
+                      <div className="min-w-0 flex-1 leading-none">
+                        <p className="truncate text-[13px] font-semibold leading-4 text-default">{option.name}</p>
+                        <p className="mt-0.5 truncate text-[11px] leading-3 text-muted">{option.email}</p>
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <label className={`cursor-pointer rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition duration-200 ${selectedToEmails.includes(option.email) ? "bg-brand-600 text-white shadow-sm shadow-brand-600/20" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-surface"}`}>
+                          <input type="checkbox" checked={selectedToEmails.includes(option.email)} onChange={() => toggleContactEmail(option.email, "to")} className="sr-only" />
+                          To
+                        </label>
+                        <label className={`cursor-pointer rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition duration-200 ${selectedCcEmails.includes(option.email) ? "bg-muted text-white shadow-sm" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-surface"}`}>
+                          <input type="checkbox" checked={selectedCcEmails.includes(option.email)} onChange={() => toggleContactEmail(option.email, "cc")} className="sr-only" />
+                          CC
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 rounded-[24px] border border-dashed border-white/70 bg-white/60 p-4 text-sm text-muted shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-card/70">No saved client contacts found. Add recipients manually below.</div>
+              )}
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="label">Additional To</label>
+                  <input type="text" className={`${softInput} w-full border-white/75 bg-white/88 shadow-[0_8px_24px_rgba(0,0,0,0.06)] focus:bg-white dark:border-base dark:bg-card`} value={emailRecipient} onChange={(e) => setEmailRecipient(e.target.value)} placeholder="client@example.com" autoFocus={clientEmailOptions.length === 0} />
+                  <p className="mt-1 text-xs text-faint">Separate multiple email addresses with commas.</p>
+                </div>
+                <div>
+                  <label className="label">Additional CC</label>
+                  <input type="text" className={`${softInput} w-full border-white/75 bg-white/88 shadow-[0_8px_24px_rgba(0,0,0,0.06)] focus:bg-white dark:border-base dark:bg-card`} value={emailCc} onChange={(e) => setEmailCc(e.target.value)} placeholder="accounts@example.com, owner@example.com" />
+                  <p className="mt-1 text-xs text-faint">Separate multiple emails with commas.</p>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <label className={sectionEyebrow}>Subject</label>
+              <input className="mt-3 h-12 w-full rounded-full border border-white/75 bg-white/88 px-5 text-sm font-medium text-default shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-base dark:bg-card" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Quotation subject" />
+            </section>
+
+            <section>
+              <label className={sectionEyebrow}>Message Body</label>
+              <textarea className="mt-3 min-h-60 w-full resize-y rounded-[32px] border border-white/75 bg-white/92 px-5 py-5 text-sm leading-relaxed text-default shadow-[0_16px_44px_rgba(0,0,0,0.08)] transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-base dark:bg-card" rows={9} value={emailMessage} onChange={(e) => setEmailMessage(e.target.value)} placeholder="Add a short message for the client" />
+              <p className="mt-2 text-xs text-faint">This message appears above the quotation and can be edited in Gmail after the draft is created.</p>
+            </section>
+
+            <section>
+              <div className="flex items-center gap-3 rounded-[24px] border border-white/75 bg-white/88 px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.06)] dark:border-base dark:bg-card">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/10 text-red-500">
+                  <FileText className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-default">{emailAttachmentName}</p>
+                  <p className="mt-0.5 text-[11px] font-semibold uppercase text-muted">Generated automatically</p>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div className="flex shrink-0 items-center justify-end gap-3 border-t border-white/35 bg-white/45 px-5 py-4 shadow-[0_-12px_36px_rgba(0,0,0,0.04)] backdrop-blur-2xl sm:px-6 dark:border-white/10 dark:bg-card/70">
+            <button type="button" className={`${appleButton} border border-white/70 bg-white/70 text-default shadow-sm hover:bg-white dark:border-base dark:bg-surface dark:hover:bg-card`} disabled={emailLoading} onClick={() => setEmailModalOpen(false)}>Cancel</button>
+            <button type="submit" className={`${appleButton} bg-brand-600 text-white shadow-sm shadow-brand-600/20 hover:bg-brand-700`} disabled={emailLoading || (selectedToEmails.length === 0 && !emailRecipient.trim())}>
+              <Send className="mr-2 h-4 w-4" />
+              {emailLoading ? "Creating..." : "Create Gmail Draft"}
             </button>
           </div>
         </form>
@@ -1297,7 +1704,16 @@ export default function QuotationDetailPage() {
         title="Mark quotation as sent?"
         size="sm"
       >
-        <div className="space-y-4">
+        <div className="space-y-5">
+          <div className="flex items-start gap-4 rounded-[28px] border border-base bg-surface/70 p-5">
+            <div className="rounded-full bg-brand-500/10 p-3 text-brand-600">
+              <Mail className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-default">Mark quotation as sent?</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted">This helps track client response and quotation status.</p>
+            </div>
+          </div>
           <p className="text-sm text-muted">
             {markSentPrompt === "email"
               ? "The email draft was created. Mark this quotation as Sent once you are ready to track the client response."
@@ -1306,14 +1722,14 @@ export default function QuotationDetailPage() {
           <div className="flex justify-end gap-2">
             <button
               type="button"
-              className="btn-secondary px-4"
+              className={`${appleButton} border border-base bg-surface text-default hover:bg-card`}
               onClick={() => setMarkSentPrompt(null)}
             >
               Not now
             </button>
             <button
               type="button"
-              className="btn-primary px-4"
+              className={`${appleButton} bg-brand-600 text-white hover:bg-brand-700`}
               onClick={async () => {
                 setMarkSentPrompt(null);
                 await updateStatus("Sent");
@@ -1324,6 +1740,7 @@ export default function QuotationDetailPage() {
           </div>
         </div>
       </Modal>
+      {moreMenuOpen && moreMenuAnchor && typeof document !== "undefined" && createPortal(moreMenu, document.body)}
     </div>
   );
 }

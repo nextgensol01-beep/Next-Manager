@@ -61,6 +61,14 @@ const QuotationSchema = new Schema<IQuotation>(
 QuotationSchema.index({ financialYear: 1, status: 1 });
 QuotationSchema.index({ clientName: 1 });
 QuotationSchema.index({ createdAt: -1 });
+QuotationSchema.index(
+  { quotationNumber: 1 },
+  {
+    unique: true,
+    name: "quotationNumber_partial_unique",
+    partialFilterExpression: { quotationNumber: { $gt: "" } },
+  }
+);
 
 export default (mongoose.models.Quotation as mongoose.Model<IQuotation>) ||
   mongoose.model<IQuotation>("Quotation", QuotationSchema);

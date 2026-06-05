@@ -2,8 +2,8 @@
 import { useState, useEffect, useRef, useCallback, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import {
-  Plus, Pencil, Trash2, Building2, Calendar, FileText,
-  Hash, Mail, MapPin, Phone, Shield, User, ChevronRight, X,
+  Plus, Trash2, Building2, Calendar, FileText,
+  Hash, Mail, MapPin, Phone, Shield, User, ChevronRight,
   AlertTriangle, Info, Check
 } from "lucide-react";
 import toast from "react-hot-toast";
@@ -354,7 +354,6 @@ function AppleIconGridPicker({
   const entrancePhase = useRef(false);
   const entranceStart = useRef(0);
 
-  const selectedIconObj = CLIENT_CUSTOM_FIELD_ICONS.find((i) => i.id === value) || CLIENT_CUSTOM_FIELD_ICONS[0];
   const SelectedIcon = FIELD_ICON_COMPONENTS[value] || FileText;
   const selectedColors = ICON_COLORS[value] || { bg: "#007AFF", fg: "#fff" };
 

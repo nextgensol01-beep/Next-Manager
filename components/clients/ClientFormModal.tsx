@@ -16,7 +16,7 @@ import type {
   ClientCustomFieldDefinition,
   ClientCustomFieldValues,
 } from "@/lib/clientCustomFields";
-import { Wand2, RefreshCw, Lock, UserPlus, AlertCircle, X, Users, ClipboardList, ChevronDown, ChevronUp, CheckCircle2 } from "lucide-react";
+import { Wand2, RefreshCw, Lock, UserPlus, AlertCircle, X, Users, ClipboardList, CheckCircle2 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

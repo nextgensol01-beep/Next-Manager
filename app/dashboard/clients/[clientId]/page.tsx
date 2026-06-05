@@ -10,7 +10,7 @@ import { invalidate, useCache } from "@/lib/useCache";
 import ClientFormModal from "@/components/clients/ClientFormModal";
 import type { ClientFormData } from "@/components/clients/ClientFormModal";
 import { usePendingList } from "@/lib/usePendingList";
-import type { ClientCustomFieldDefinition, ClientCustomFieldValues } from "@/lib/clientCustomFields";
+import type { ClientCustomFieldDefinition } from "@/lib/clientCustomFields";
 import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearState } from "@/app/providers";
 import ClientProfileActivityTimeline from "./ClientProfileActivityTimeline";
@@ -39,9 +39,7 @@ import {
   CollapsibleSectionHeader,
   CopyButton,
   createEmptyFyEntries,
-  createPersonEntry,
   CREDIT_TYPES,
-  emptyPersonEntry,
   FilterRail,
   formatDateTime,
   getContactEmails,
@@ -347,7 +345,7 @@ export default function ClientProfilePage() {
     }
 
     setLoading(false);
-  }, [clientId, fetchJson, readErrorMessage]);
+  }, [clientId, fetchJson, readErrorMessage, setAllBillings, setAllInvoices, setAllPayments, setAllUploadRecords]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

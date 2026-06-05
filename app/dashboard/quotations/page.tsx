@@ -138,11 +138,14 @@ export default function QuotationsPage() {
           items: []
         }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || `Failed to create quotation (${res.status})`);
+      }
       const data = await res.json();
       router.push(`/dashboard/quotations/${data._id}`);
-    } catch {
-      toast.error("Failed to create quotation");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create quotation");
     } finally {
       setCreating(false);
     }
@@ -455,17 +458,23 @@ export default function QuotationsPage() {
                         {formatDaysLeft(q.validTill)}
                       </div>
                     </td>
-                    <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+                    <td className="px-4 py-4">
                       <div className="flex items-center gap-1 justify-end">
                         <button
-                          onClick={() => router.push(`/dashboard/quotations/${q._id}`)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/dashboard/quotations/${q._id}`);
+                          }}
                           className="p-1.5 rounded-lg hover:bg-surface transition-colors text-muted hover:text-default"
                           title="Open Editor"
                         >
                           <ChevronRight className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => setSelectedQuotation(q)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedQuotation(q);
+                          }}
                           className="p-1.5 rounded-lg hover:bg-surface transition-colors text-muted hover:text-default"
                           title="More actions"
                         >

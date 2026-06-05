@@ -11,8 +11,9 @@ import { STATES, CATEGORIES, formatDate } from "@/lib/utils";
 import { Plus, Search, Pencil, Trash2, Eye, UserPlus, ChevronDown, MapPin, Calendar, Phone, Mail } from "lucide-react";
 import { useCache, invalidate } from "@/lib/useCache";
 import {
-  normalizePhoneList,
   normalizeEmailList,
+  normalizePhoneList,
+  syncEntrySelections,
   type PersonEntry,
 } from "@/app/dashboard/clients/[clientId]/ClientProfileSupport";
 import ClientFormModal from "@/components/clients/ClientFormModal";
@@ -52,58 +53,7 @@ interface Client {
 }
 
 
-const syncEntrySelections = (entry: PersonEntry): PersonEntry => {
-  const phoneSet = new Set(normalizePhoneList(entry.phoneNumbers));
-  const emailSet = new Set(normalizeEmailList(entry.emails));
-
-  return {
-    ...entry,
-    selectedPhones: normalizePhoneList(entry.selectedPhones).filter((value) => phoneSet.has(value)),
-    selectedEmails: normalizeEmailList(entry.selectedEmails).filter((value) => emailSet.has(value))};
-};
-
-const createPersonEntry = (person?: Partial<LinkedPerson & Person>): PersonEntry => {
-  const phoneNumbers = person?.allPhoneNumbers?.length
-    ? person.allPhoneNumbers
-    : person?.phoneNumbers?.length
-      ? person.phoneNumbers
-      : person?.mobile
-        ? [person.mobile]
-        : [""];
-
-  const emails = person?.allEmails?.length
-    ? person.allEmails
-    : person?.emails?.length
-      ? person.emails
-      : person?.email
-        ? [person.email]
-        : [""];
-
-  return syncEntrySelections({
-    personId: person?.personId || person?._id,
-    name: person?.name || "",
-    phoneNumbers,
-    emails,
-    selectedPhones: Array.isArray(person?.selectedPhones)
-      ? person.selectedPhones
-      : normalizePhoneList(phoneNumbers),
-    selectedEmails: Array.isArray(person?.selectedEmails)
-      ? person.selectedEmails
-      : normalizeEmailList(emails),
-    designation: person?.designation || "",
-    isPrimaryContact: person?.isPrimaryContact || false});
-};
-
-const emptyPersonEntry = (): PersonEntry => ({
-  name: "", phoneNumbers: [""], emails: [""], selectedPhones: [], selectedEmails: [], designation: "", isPrimaryContact: false});
-
 // ── Client form ───────────────────────────────────────────────────────────────
-
-const emptyForm = {
-  companyName: "", legalName: "", category: "PWP",
-  state: "", address: "", gstNumber: "", registrationNumber: "",
-  cpcbLoginId: "", cpcbPassword: "", otpMobileNumber: "",
-  customFields: {} as ClientCustomFieldValues};
 
 // ── PersonSearch: autocomplete for existing persons ───────────────────────────
 
