@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -88,7 +89,7 @@ export default function ConfirmModal({
       ? "bg-red-600 hover:bg-red-700 active:bg-red-800 text-white dark:bg-red-700 dark:hover:bg-red-600"
       : "bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white dark:bg-amber-700 dark:hover:bg-amber-600";
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{
@@ -193,6 +194,7 @@ export default function ConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

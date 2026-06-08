@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import Modal from "@/components/ui/Modal";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
@@ -664,7 +665,7 @@ function PasteImportModal({
   };
 
   // ── Render ─────────────────────────────────────────────────────────────
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center"
       style={{ backgroundColor: "rgba(0,0,0,0.40)" }}
@@ -845,7 +846,8 @@ function PasteImportModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
