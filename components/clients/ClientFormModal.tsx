@@ -16,6 +16,7 @@ import type {
   ClientCustomFieldDefinition,
   ClientCustomFieldValues,
 } from "@/lib/clientCustomFields";
+import { customFieldValueIsEmpty } from "@/lib/clientCustomFields";
 import { Wand2, RefreshCw, Lock, UserPlus, AlertCircle, X, Users, ClipboardList, CheckCircle2 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -912,6 +913,9 @@ export default function ClientFormModal({
 }: ClientFormModalProps) {
   const isEdit = client !== null;
   const visibleCustomFields = customFieldDefinitions.filter((f) => f.key !== "legalName");
+  const companyCustomFields = visibleCustomFields.filter((field) => field.profilePosition === "afterCompany");
+  const beforeContactCustomFields = visibleCustomFields.filter((field) => (field.profilePosition || "beforeContact") === "beforeContact");
+  const afterContactCustomFields = visibleCustomFields.filter((field) => field.profilePosition === "afterContact");
 
   // ── Form state ──────────────────────────────────────────────────────────
   const [form, setForm] = useState<ClientFormData>(emptyForm);
@@ -927,9 +931,10 @@ export default function ClientFormModal({
   const [portalVisited, setPortalVisited] = useState(initialTab === "portal");
 
   // ── Validation errors ───────────────────────────────────────────────────
-  const [fieldErrors, setFieldErrors] = useState<{ companyName: boolean; state: boolean }>({
+  const [fieldErrors, setFieldErrors] = useState<{ companyName: boolean; state: boolean; customFields: Record<string, boolean> }>({
     companyName: false,
     state: false,
+    customFields: {},
   });
 
   const formScrollRef = useRef<HTMLFormElement>(null);
@@ -1013,7 +1018,7 @@ export default function ClientFormModal({
     setConfirmingClose(false);
     // Show card view if client already has contacts, otherwise reset to empty state
     setContactsStarted(client ? (client.contacts || []).length > 0 : false);
-    setFieldErrors({ companyName: false, state: false });
+    setFieldErrors({ companyName: false, state: false, customFields: {} });
     tabScrollPos.current = { basic: 0, portal: 0 };
     setTabSwitched(false);
     initialFormRef.current = JSON.parse(JSON.stringify(f));
@@ -1150,18 +1155,28 @@ export default function ClientFormModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const customFieldErrors = visibleCustomFields.reduce<Record<string, boolean>>((acc, field) => {
+      if (field.required && customFieldValueIsEmpty(field, form.customFields?.[field.key])) acc[field.key] = true;
+      return acc;
+    }, {});
     const errors = {
       companyName: !form.companyName.trim(),
       state: !form.state.trim(),
+      customFields: customFieldErrors,
     };
     setFieldErrors(errors);
+    const firstCustomFieldErrorKey = Object.keys(customFieldErrors)[0];
 
-    if (errors.companyName || errors.state) {
+    if (errors.companyName || errors.state || firstCustomFieldErrorKey) {
       // Switch to basic tab if errors are there
       if (activeTab !== "basic") switchTab("basic");
       // Scroll to first error after tab switch settles
       setTimeout(() => {
-        const firstError = errors.companyName ? companyNameRef.current : stateRef.current;
+        const firstError = errors.companyName
+          ? companyNameRef.current
+          : firstCustomFieldErrorKey
+          ? document.getElementById(`cfm-custom-field-${firstCustomFieldErrorKey}`)
+          : stateRef.current;
         if (firstError && formScrollRef.current) {
           const formRect = formScrollRef.current.getBoundingClientRect();
           const errRect = firstError.getBoundingClientRect();
@@ -1182,8 +1197,20 @@ export default function ClientFormModal({
   };
 
   // Clear individual field error on change
-  const clearError = (field: keyof typeof fieldErrors) =>
+  const clearError = (field: "companyName" | "state") =>
     setFieldErrors((prev) => ({ ...prev, [field]: false }));
+  const updateCustomFieldValue = (field: ClientCustomFieldDefinition, value: ClientCustomFieldValues[string]) => {
+    setForm({
+      ...form,
+      customFields: { ...form.customFields, [field.key]: value },
+    });
+    if (fieldErrors.customFields[field.key] && !customFieldValueIsEmpty(field, value)) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        customFields: { ...prev.customFields, [field.key]: false },
+      }));
+    }
+  };
 
   const editSubtitle = isEdit
     ? `${client.companyName}${client.clientId ? ` · ${client.clientId}` : ""}`
@@ -1197,6 +1224,56 @@ export default function ClientFormModal({
 
   // Show card view if user explicitly clicked Add Contact OR client already has contacts
   const showContactCards = contactsStarted;
+  const renderCustomFieldRows = (fields: ClientCustomFieldDefinition[]) =>
+    fields.map((field, idx) => (
+      <FieldRow
+        key={field.key}
+        label={field.required ? `${field.label} *` : field.label}
+        hint={field.type === "checkbox" ? "Checkbox" : undefined}
+        last={idx === fields.length - 1}
+        error={Boolean(fieldErrors.customFields[field.key])}
+        fieldId={`cfm-custom-field-${field.key}`}
+      >
+        <div className={`cfm-input-row ${fieldErrors.customFields[field.key] ? "cfm-input-error" : ""}`}>
+          {field.type === "checkbox" ? (
+            <input
+              type="checkbox"
+              checked={Boolean(form.customFields?.[field.key])}
+              onChange={(e) => updateCustomFieldValue(field, e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300"
+              style={{ accentColor: "#0071e3", cursor: "pointer" }}
+            />
+          ) : field.type === "date" ? (
+            <input
+              type="date"
+              value={String(form.customFields?.[field.key] || "")}
+              onChange={(e) => updateCustomFieldValue(field, e.target.value)}
+              className="input-field"
+              style={{ fontSize: "13px" }}
+            />
+          ) : field.type === "number" ? (
+            <input
+              type="number"
+              value={String(form.customFields?.[field.key] || "")}
+              onChange={(e) => updateCustomFieldValue(field, e.target.value)}
+              className="input-field"
+              style={{ fontSize: "13px" }}
+            />
+          ) : (
+            <input
+              type="text"
+              value={String(form.customFields?.[field.key] || "")}
+              onChange={(e) => updateCustomFieldValue(field, e.target.value)}
+              className="input-field"
+              style={{ fontSize: "13px" }}
+            />
+          )}
+        </div>
+        {fieldErrors.customFields[field.key] && (
+          <p className="text-[11px] text-red-500 mt-1 font-medium">{field.label} is required</p>
+        )}
+      </FieldRow>
+    ));
 
   return (
     <>
@@ -1520,7 +1597,7 @@ export default function ClientFormModal({
                       <p className="text-[11px] text-red-500 mt-1 font-medium">Company name is required</p>
                     )}
                   </FieldRow>
-                  <FieldRow label="Legal Name" last={visibleCustomFields.length === 0}>
+                  <FieldRow label="Legal Name" last={companyCustomFields.length === 0}>
                     <div className="cfm-input-row">
                       <input
                         className="input-field"
@@ -1530,71 +1607,14 @@ export default function ClientFormModal({
                       />
                     </div>
                   </FieldRow>
-                  {visibleCustomFields.map((field, idx) => (
-                    <FieldRow
-                      key={field.key}
-                      label={field.label}
-                      hint={field.type === "checkbox" ? "Checkbox" : undefined}
-                      last={idx === visibleCustomFields.length - 1}
-                    >
-                      <div className="cfm-input-row">
-                        {field.type === "checkbox" ? (
-                          <input
-                            type="checkbox"
-                            checked={Boolean(form.customFields?.[field.key])}
-                            onChange={(e) =>
-                              setForm({
-                                ...form,
-                                customFields: { ...form.customFields, [field.key]: e.target.checked },
-                              })
-                            }
-                            className="w-4 h-4 rounded border-gray-300"
-                            style={{ accentColor: "#0071e3", cursor: "pointer" }}
-                          />
-                        ) : field.type === "date" ? (
-                          <input
-                            type="date"
-                            value={String(form.customFields?.[field.key] || "")}
-                            onChange={(e) =>
-                              setForm({
-                                ...form,
-                                customFields: { ...form.customFields, [field.key]: e.target.value },
-                              })
-                            }
-                            className="input-field"
-                            style={{ fontSize: "13px" }}
-                          />
-                        ) : field.type === "number" ? (
-                          <input
-                            type="number"
-                            value={String(form.customFields?.[field.key] || "")}
-                            onChange={(e) =>
-                              setForm({
-                                ...form,
-                                customFields: { ...form.customFields, [field.key]: e.target.value },
-                              })
-                            }
-                            className="input-field"
-                            style={{ fontSize: "13px" }}
-                          />
-                        ) : (
-                          <input
-                            type="text"
-                            value={String(form.customFields?.[field.key] || "")}
-                            onChange={(e) =>
-                              setForm({
-                                ...form,
-                                customFields: { ...form.customFields, [field.key]: e.target.value },
-                              })
-                            }
-                            className="input-field"
-                            style={{ fontSize: "13px" }}
-                          />
-                        )}
-                      </div>
-                    </FieldRow>
-                  ))}
+                  {renderCustomFieldRows(companyCustomFields)}
                 </InsetGroup>
+
+                {beforeContactCustomFields.length > 0 && (
+                  <InsetGroup title="Profile Fields" animDelay={60}>
+                    {renderCustomFieldRows(beforeContactCustomFields)}
+                  </InsetGroup>
+                )}
 
                 {/* Contacts */}
                 <InsetGroup
@@ -1659,6 +1679,12 @@ export default function ClientFormModal({
                     </>
                   )}
                 </InsetGroup>
+
+                {afterContactCustomFields.length > 0 && (
+                  <InsetGroup title="Additional Contact Details" animDelay={100}>
+                    {renderCustomFieldRows(afterContactCustomFields)}
+                  </InsetGroup>
+                )}
 
                 {/* Compliance */}
                 <InsetGroup title="Compliance & Location" animDelay={120}>

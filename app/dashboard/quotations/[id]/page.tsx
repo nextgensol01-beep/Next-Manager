@@ -1,17 +1,19 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "framer-motion";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   ArrowLeft, Plus, Trash2, CheckCircle2, GitBranch,
   Mail, Activity, FileText, Eye, EyeOff, Printer,
   AlertTriangle, IndianRupee, Receipt, Building2,
-  Sparkles, MoreHorizontal, Copy, Send, X
+  Sparkles, MoreHorizontal, Copy, Send, X,
+  Bold, Minus, Save, ChevronDown, Check, UserRound, CalendarDays
 } from "lucide-react";
 import { FINANCIAL_YEARS } from "@/lib/utils";
 import { buildQuotationHTML as buildHTML } from "@/utils/quotationTemplate";
-import { escapeHtmlWithLineBreaks } from "@/utils/sanitizeHtml";
+import { escapeHtml, escapeHtmlWithLineBreaks } from "@/utils/sanitizeHtml";
 import Modal from "@/components/ui/Modal";
 import { QUOTATION_STATUS_CONFIG, QuotationStatusPill } from "@/components/quotations/QuotationStatus";
 import {
@@ -64,6 +66,23 @@ interface ClientEmailOption {
   isPrimaryContact?: boolean;
 }
 
+interface EmailMessageTemplate {
+  _id: string;
+  name: string;
+  bodyHtml: string;
+  bodyText: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+const MAX_EMAIL_MESSAGE_TEMPLATES = 10;
+type EmailTemplateVariable = "clientName" | "financialYear";
+
+const EMAIL_TEMPLATE_VARIABLES: Record<EmailTemplateVariable, { label: string; token: string }> = {
+  clientName: { label: "Client Name", token: "{{clientName}}" },
+  financialYear: { label: "Financial Year", token: "{{financialYear}}" },
+};
+
 const CATEGORIES = ["CAT-I", "CAT-II", "CAT-III", "CAT-IV"];
 const TYPES = ["Recycling", "EOL", "Co-processing", "Energy Recovery", "Other"];
 const GST_OPTIONS = [...GST_PERCENT_OPTIONS];
@@ -87,6 +106,10 @@ const softTextarea =
 const appleButton =
   "inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
 const sectionEyebrow = "text-[11px] font-semibold uppercase text-muted";
+const liquidGlassStyle: React.CSSProperties = {
+  backdropFilter: "blur(72px) saturate(240%)",
+  WebkitBackdropFilter: "blur(72px) saturate(240%)",
+};
 
 function fmt(n: number) { return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function money(n: number) {
@@ -152,13 +175,181 @@ function getDefaultEmailMessage(q: Pick<Quotation, "clientName" | "financialYear
   return `Dear Team,\n\nPlease find our ${quotationLabel} for ${q.clientName} for EPR Annual Return services for FY ${q.financialYear}. Kindly review it and let us know if you have any questions.\n\nRegards,\nNextgen Solutions`;
 }
 
-function prependEmailMessage(html: string, message: string) {
-  const trimmedMessage = message.trim();
-  if (!trimmedMessage) return html;
+const messageDividerHtml = `<hr data-message-divider="true" style="border:none;border-top:1px solid #e5e5e7;margin:14px 0;" />`;
+
+function isEmailTemplateVariable(value: string | null): value is EmailTemplateVariable {
+  return value === "clientName" || value === "financialYear";
+}
+
+function getEmailVariableChipHtml(variable: EmailTemplateVariable, trailingSpace = false) {
+  const { label, token } = EMAIL_TEMPLATE_VARIABLES[variable];
+  const chip = `<span data-email-variable="${variable}" data-token="${token}" contenteditable="false" style="display:inline-flex;align-items:center;vertical-align:baseline;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:999px;padding:1px 8px;font-size:12px;font-weight:700;line-height:1.6;white-space:nowrap;box-shadow:inset 0 1px 0 rgba(255,255,255,0.85);">${label}</span>`;
+  return trailingSpace ? `${chip}&nbsp;` : chip;
+}
+
+function getDefaultEmailMessageHtml(q: Pick<Quotation, "clientName" | "financialYear">, rev: Pick<Revision, "revisionNumber">) {
+  return escapeHtmlWithLineBreaks(getDefaultEmailMessage(q, rev));
+}
+
+function htmlToPlainText(html: string) {
+  if (typeof document === "undefined") {
+    return html.replace(/<hr[^>]*>/gi, "\n---\n").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim();
+  }
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = html.replace(/<hr[^>]*>/gi, "\n---\n");
+  wrapper.querySelectorAll("[data-email-variable]").forEach(element => {
+    const variable = element.getAttribute("data-email-variable");
+    if (isEmailTemplateVariable(variable)) {
+      element.replaceWith(document.createTextNode(EMAIL_TEMPLATE_VARIABLES[variable].token));
+    }
+  });
+  return (wrapper.innerText || wrapper.textContent || "").trim();
+}
+
+function sanitizeEmailMessageHtml(html: string) {
+  if (typeof document === "undefined") return escapeHtml(html);
+
+  const source = document.createElement("div");
+  source.innerHTML = html;
+
+  const cleanNode = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return escapeHtml(node.textContent || "");
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+
+    const element = node as HTMLElement;
+    const tag = element.tagName.toLowerCase();
+    const children = Array.from(element.childNodes).map(cleanNode).join("");
+
+    if (tag === "span") {
+      const variable = element.getAttribute("data-email-variable");
+      return isEmailTemplateVariable(variable) ? getEmailVariableChipHtml(variable) : children;
+    }
+    if (tag === "strong" || tag === "b") return children ? `<strong>${children}</strong>` : "";
+    if (tag === "br") return "<br/>";
+    if (tag === "hr") return messageDividerHtml;
+    if (tag === "div" || tag === "p") return children ? `${children}<br/>` : "<br/>";
+
+    return children;
+  };
+
+  return Array.from(source.childNodes)
+    .map(cleanNode)
+    .join("")
+    .replace(/(<br\/>){3,}/g, "<br/><br/>")
+    .trim();
+}
+
+function applyAutoBoldToMessageHtml(html: string, boldValues: string[]) {
+  if (typeof document === "undefined") {
+    return boldValues.reduce((current, value) => {
+      const escapedValue = escapeHtml(value);
+      return current.split(escapedValue).join(`<strong>${escapedValue}</strong>`);
+    }, html);
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = sanitizeEmailMessageHtml(html);
+
+  const values = boldValues
+    .map(value => value.trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || "";
+      const match = values
+        .map(value => ({ value, index: text.indexOf(value) }))
+        .filter(item => item.index >= 0)
+        .sort((a, b) => a.index - b.index || b.value.length - a.value.length)[0];
+
+      if (!match) return;
+
+      const before = text.slice(0, match.index);
+      const matchedText = text.slice(match.index, match.index + match.value.length);
+      const after = text.slice(match.index + match.value.length);
+      const fragment = document.createDocumentFragment();
+      if (before) fragment.append(document.createTextNode(before));
+      const strong = document.createElement("strong");
+      strong.textContent = matchedText;
+      fragment.append(strong);
+      if (after) fragment.append(document.createTextNode(after));
+      node.parentNode?.replaceChild(fragment, node);
+      return;
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const element = node as HTMLElement;
+    if (element.tagName.toLowerCase() === "strong") return;
+    Array.from(element.childNodes).forEach(walk);
+  };
+
+  for (let i = 0; i < values.length; i += 1) {
+    Array.from(wrapper.childNodes).forEach(walk);
+  }
+
+  return wrapper.innerHTML;
+}
+
+function resolveEmailMessageVariables(
+  html: string,
+  q: Pick<Quotation, "clientName" | "financialYear">,
+) {
+  const values: Record<EmailTemplateVariable, string> = {
+    clientName: q.clientName || "",
+    financialYear: q.financialYear ? `FY ${q.financialYear}` : "",
+  };
+
+  if (typeof document === "undefined") {
+    return (Object.keys(values) as EmailTemplateVariable[]).reduce(
+      (current, variable) => current.split(EMAIL_TEMPLATE_VARIABLES[variable].token).join(escapeHtml(values[variable])),
+      html,
+    );
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = sanitizeEmailMessageHtml(html);
+  wrapper.querySelectorAll("[data-email-variable]").forEach(element => {
+    const variable = element.getAttribute("data-email-variable");
+    if (isEmailTemplateVariable(variable)) {
+      element.replaceWith(document.createTextNode(values[variable]));
+    }
+  });
+
+  const replaceTokens = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      let text = node.textContent || "";
+      (Object.keys(values) as EmailTemplateVariable[]).forEach(variable => {
+        text = text.split(EMAIL_TEMPLATE_VARIABLES[variable].token).join(values[variable]);
+      });
+      node.textContent = text;
+      return;
+    }
+    Array.from(node.childNodes).forEach(replaceTokens);
+  };
+  Array.from(wrapper.childNodes).forEach(replaceTokens);
+  return wrapper.innerHTML;
+}
+
+function prependEmailMessage(
+  html: string,
+  messageHtmlSource: string,
+  q: Pick<Quotation, "clientName" | "financialYear">,
+) {
+  const boldValues = [
+    q.clientName,
+    `FY ${q.financialYear}`,
+    "Nextgen Solutions",
+  ].filter(Boolean);
+  const resolvedMessage = resolveEmailMessageVariables(messageHtmlSource, q);
+  const formattedMessage = applyAutoBoldToMessageHtml(resolvedMessage, boldValues);
+  if (!htmlToPlainText(formattedMessage)) return html;
 
   const messageHtml = `
     <div style="max-width:760px; margin:0 auto 28px; padding:0 12px 24px; border-bottom:1px solid #e5e5e7; color:#1d1d1f; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size:14px; line-height:1.65;">
-      ${escapeHtmlWithLineBreaks(trimmedMessage)}
+      ${formattedMessage}
     </div>
   `;
 
@@ -236,6 +427,7 @@ export default function QuotationDetailPage() {
   const [previewTemplateLoading, setPreviewTemplateLoading] = useState(false);
   const [previewTemplateError, setPreviewTemplateError] = useState("");
   const [previewHeight, setPreviewHeight] = useState(720);
+  const [headerOverPreview, setHeaderOverPreview] = useState(false);
   const [statusDropdown, setStatusDropdown] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [moreMenuAnchor, setMoreMenuAnchor] = useState<"header" | "summary" | null>(null);
@@ -244,13 +436,27 @@ export default function QuotationDetailPage() {
   const [emailRecipient, setEmailRecipient] = useState("");
   const [emailCc, setEmailCc] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
-  const [emailMessage, setEmailMessage] = useState("");
+  const [emailMessageHtml, setEmailMessageHtml] = useState("");
+  const [emailMessageTemplates, setEmailMessageTemplates] = useState<EmailMessageTemplate[]>([]);
+  const [selectedEmailTemplateId, setSelectedEmailTemplateId] = useState("");
+  const [emailTemplateName, setEmailTemplateName] = useState("");
+  const [emailTemplateLoading, setEmailTemplateLoading] = useState(false);
+  const [emailTemplateDropdownOpen, setEmailTemplateDropdownOpen] = useState(false);
+  const [emailTemplateDropdownPosition, setEmailTemplateDropdownPosition] = useState({ top: 0, left: 0, width: 360 });
   const [clientEmailOptions, setClientEmailOptions] = useState<ClientEmailOption[]>([]);
   const [selectedToEmails, setSelectedToEmails] = useState<string[]>([]);
   const [selectedCcEmails, setSelectedCcEmails] = useState<string[]>([]);
   const [markSentPrompt, setMarkSentPrompt] = useState<null | "print" | "email">(null);
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const quotationTemplatePromiseRef = useRef<Promise<string> | null>(null);
+  const emailPdfPromiseRef = useRef<{ html: string; promise: Promise<string> } | null>(null);
+  const emailEditorRef = useRef<HTMLDivElement | null>(null);
+  const emailTemplateDropdownRef = useRef<HTMLDivElement | null>(null);
+  const emailTemplateDropdownButtonRef = useRef<HTMLButtonElement | null>(null);
+  const emailTemplateDropdownPanelRef = useRef<HTMLDivElement | null>(null);
+  const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
+  const previewPanelRef = useRef<HTMLDivElement | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const moreMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const isMounted = useRef(true);
@@ -263,6 +469,49 @@ export default function QuotationDetailPage() {
       if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    const editor = emailEditorRef.current;
+    if (!editor || document.activeElement === editor) return;
+    if (editor.innerHTML !== emailMessageHtml) {
+      editor.innerHTML = emailMessageHtml;
+    }
+  }, [emailMessageHtml]);
+
+  const positionEmailTemplateDropdown = useCallback(() => {
+    const button = emailTemplateDropdownButtonRef.current;
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    const viewportPadding = 12;
+    const width = Math.min(rect.width, window.innerWidth - viewportPadding * 2);
+    setEmailTemplateDropdownPosition({
+      top: rect.bottom + 8,
+      left: Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - width - viewportPadding),
+      width,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!emailTemplateDropdownOpen) return;
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        !emailTemplateDropdownRef.current?.contains(target) &&
+        !emailTemplateDropdownPanelRef.current?.contains(target)
+      ) {
+        setEmailTemplateDropdownOpen(false);
+      }
+    };
+    const reposition = () => positionEmailTemplateDropdown();
+    document.addEventListener("mousedown", handleClick);
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+    };
+  }, [emailTemplateDropdownOpen, positionEmailTemplateDropdown]);
 
   // Load quotation
   const loadQuotation = useCallback(async () => {
@@ -440,6 +689,46 @@ export default function QuotationDetailPage() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, [resizePreview]);
+
+  useEffect(() => {
+    if (activeTab !== "preview") {
+      setHeaderOverPreview(false);
+      return;
+    }
+
+    const scrollArea = document.getElementById("dashboard-scroll-area");
+    const header = stickyHeaderRef.current;
+    const previewPanel = previewPanelRef.current;
+    if (!scrollArea || !header || !previewPanel) return;
+
+    let frameId = 0;
+    const updateOverlap = () => {
+      cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        const headerRect = header.getBoundingClientRect();
+        const previewRect = previewPanel.getBoundingClientRect();
+        const overlaps = (
+          headerRect.bottom > previewRect.top &&
+          headerRect.top < previewRect.bottom
+        );
+        setHeaderOverPreview(current => current === overlaps ? current : overlaps);
+      });
+    };
+
+    const resizeObserver = new ResizeObserver(updateOverlap);
+    resizeObserver.observe(header);
+    resizeObserver.observe(previewPanel);
+    scrollArea.addEventListener("scroll", updateOverlap, { passive: true });
+    window.addEventListener("resize", updateOverlap);
+    updateOverlap();
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      resizeObserver.disconnect();
+      scrollArea.removeEventListener("scroll", updateOverlap);
+      window.removeEventListener("resize", updateOverlap);
+    };
+  }, [activeTab, previewHeight]);
 
   const buildFormRevision = useCallback((baseRevision: Revision): Revision => {
     const calculatedItems = items.map(item => {
@@ -699,6 +988,167 @@ export default function QuotationDetailPage() {
     setOtherSelected(current => current.filter(value => value !== email));
   };
 
+  const loadEmailMessageTemplates = async () => {
+    try {
+      const response = await fetch("/api/email-message-templates", { cache: "no-store" });
+      if (!response.ok) throw new Error("Failed to load saved messages");
+      const data = await response.json() as { templates?: EmailMessageTemplate[] };
+      setEmailMessageTemplates(Array.isArray(data.templates) ? data.templates : []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load saved messages");
+    }
+  };
+
+  const syncEmailEditorState = () => {
+    const editor = emailEditorRef.current;
+    if (!editor) return;
+    const cleanHtml = sanitizeEmailMessageHtml(editor.innerHTML);
+    setEmailMessageHtml(cleanHtml);
+  };
+
+  const focusEmailEditor = () => {
+    emailEditorRef.current?.focus();
+  };
+
+  const runEmailEditorCommand = (command: "bold" | "divider" | EmailTemplateVariable) => {
+    focusEmailEditor();
+    if (command === "bold") {
+      document.execCommand("bold");
+    } else if (command === "divider") {
+      document.execCommand("insertHTML", false, `${messageDividerHtml}<br/>`);
+    } else {
+      document.execCommand("insertHTML", false, getEmailVariableChipHtml(command, true));
+    }
+    syncEmailEditorState();
+  };
+
+  const selectEmailMessageTemplate = (templateId: string) => {
+    setSelectedEmailTemplateId(templateId);
+    const template = emailMessageTemplates.find(item => item._id === templateId);
+    if (!template) {
+      setEmailTemplateName("");
+      const currentRevision = quotation?.revisions.find(revision => revision.revisionNumber === quotation.currentRevisionNumber);
+      setEmailMessageHtml(quotation && currentRevision ? getDefaultEmailMessageHtml(quotation, currentRevision) : "");
+      return;
+    }
+    setEmailTemplateName(template.name);
+    setEmailMessageHtml(sanitizeEmailMessageHtml(template.bodyHtml));
+  };
+
+  const saveEmailMessageTemplate = async (mode: "create" | "update") => {
+    const cleanHtml = sanitizeEmailMessageHtml(emailMessageHtml);
+    const bodyText = htmlToPlainText(cleanHtml);
+    const selectedTemplate = emailMessageTemplates.find(template => template._id === selectedEmailTemplateId);
+    const name = emailTemplateName.trim() || selectedTemplate?.name || "Quotation message";
+
+    if (!bodyText) {
+      toast.error("Message body is required");
+      return;
+    }
+    if (mode === "create" && emailMessageTemplates.length >= MAX_EMAIL_MESSAGE_TEMPLATES) {
+      toast.error(`You can save up to ${MAX_EMAIL_MESSAGE_TEMPLATES} message templates.`);
+      return;
+    }
+    if (mode === "update" && !selectedTemplate) {
+      toast.error("Select a saved message to update");
+      return;
+    }
+
+    setEmailTemplateLoading(true);
+    try {
+      const response = await fetch(
+        mode === "update" ? `/api/email-message-templates/${selectedTemplate?._id}` : "/api/email-message-templates",
+        {
+          method: mode === "update" ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, bodyHtml: cleanHtml, bodyText }),
+        }
+      );
+      const data = await response.json().catch(() => null) as { template?: EmailMessageTemplate; error?: string } | null;
+      if (!response.ok || !data?.template) {
+        throw new Error(data?.error || "Failed to save message");
+      }
+      setEmailMessageHtml(data.template.bodyHtml);
+      setEmailTemplateName(data.template.name);
+      setSelectedEmailTemplateId(data.template._id);
+      await loadEmailMessageTemplates();
+      toast.success(mode === "update" ? "Saved message updated" : "Message saved");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save message");
+    } finally {
+      setEmailTemplateLoading(false);
+    }
+  };
+
+  const deleteEmailMessageTemplate = async () => {
+    const selectedTemplate = emailMessageTemplates.find(template => template._id === selectedEmailTemplateId);
+    if (!selectedTemplate) {
+      toast.error("Select a saved message to delete");
+      return;
+    }
+
+    setEmailTemplateLoading(true);
+    try {
+      const response = await fetch(`/api/email-message-templates/${selectedTemplate._id}`, { method: "DELETE" });
+      const data = await response.json().catch(() => null) as { error?: string } | null;
+      if (!response.ok) throw new Error(data?.error || "Failed to delete message");
+      setSelectedEmailTemplateId("");
+      setEmailTemplateName("");
+      await loadEmailMessageTemplates();
+      toast.success("Saved message deleted");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete message");
+    } finally {
+      setEmailTemplateLoading(false);
+    }
+  };
+
+  const loadQuotationTemplate = async () => {
+    if (quotationTemplate) return quotationTemplate;
+    if (!quotationTemplatePromiseRef.current) {
+      quotationTemplatePromiseRef.current = fetch("/api/quotation/template")
+        .then(async response => {
+          if (!response.ok) throw new Error("Quotation template not found");
+          const data = await response.json() as { html: string };
+          setQuotationTemplate(data.html);
+          return data.html;
+        })
+        .finally(() => {
+          quotationTemplatePromiseRef.current = null;
+        });
+    }
+    return quotationTemplatePromiseRef.current;
+  };
+
+  const generateQuotationPdf = (html: string) => {
+    if (emailPdfPromiseRef.current?.html === html) {
+      return emailPdfPromiseRef.current.promise;
+    }
+
+    const promise = fetch("/api/quotation/pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ html }),
+    })
+      .then(async response => {
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          throw new Error(data?.error || "Failed to generate quotation PDF");
+        }
+        const data = await response.json() as { contentBase64: string };
+        return data.contentBase64;
+      })
+      .catch(error => {
+        if (emailPdfPromiseRef.current?.promise === promise) {
+          emailPdfPromiseRef.current = null;
+        }
+        throw error;
+      });
+
+    emailPdfPromiseRef.current = { html, promise };
+    return promise;
+  };
+
   const openEmailDraftModal = async () => {
     if (!quotation) return;
     if (!canCreateEmailDraft) {
@@ -710,11 +1160,22 @@ export default function QuotationDetailPage() {
     setEmailSubject("");
     setSelectedToEmails([]);
     setSelectedCcEmails([]);
+    setSelectedEmailTemplateId("");
+    setEmailTemplateName("");
     const currentRevision = quotation.revisions.find(revision => revision.revisionNumber === quotation.currentRevisionNumber);
     setEmailSubject(currentRevision ? getQuotationEmailSubject(quotation, currentRevision) : "");
-    setEmailMessage(currentRevision ? getDefaultEmailMessage(quotation, currentRevision) : "");
+    setEmailMessageHtml(currentRevision ? getDefaultEmailMessageHtml(quotation, currentRevision) : "");
     setClientEmailOptions([]);
     setEmailModalOpen(true);
+    void loadEmailMessageTemplates();
+
+    if (currentRevision) {
+      void loadQuotationTemplate()
+        .then(template => generateQuotationPdf(buildQuotationHTML(template, quotation, currentRevision)))
+        .catch(() => {
+          // Submission retries and surfaces the error if preparation fails.
+        });
+    }
 
     if (!quotation.clientId) return;
     try {
@@ -771,23 +1232,13 @@ export default function QuotationDetailPage() {
     try {
       const target = await getQuotationOutputTarget(quotation.currentRevisionNumber);
       if (!target) return;
-      const tmplRes = await fetch("/api/quotation/template");
-      if (!tmplRes.ok) throw new Error("Quotation template not found");
-      const { html: template } = await tmplRes.json();
+      const template = await loadQuotationTemplate();
       const quotationHtml = buildQuotationHTML(template, target.quotation, target.revision);
-      const html = prependEmailMessage(quotationHtml, emailMessage);
+      const messageHtml = sanitizeEmailMessageHtml(emailMessageHtml);
+      const html = prependEmailMessage(quotationHtml, messageHtml, target.quotation);
       const subject = emailSubject.trim() || getQuotationEmailSubject(target.quotation, target.revision);
       const filename = `${getQuotationDocumentTitle(target.quotation, target.revision)}.pdf`;
-      const pdfRes = await fetch("/api/quotation/pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: quotationHtml }),
-      });
-      if (!pdfRes.ok) {
-        const data = await pdfRes.json().catch(() => null);
-        throw new Error(data?.error || "Failed to generate quotation PDF");
-      }
-      const { contentBase64 } = await pdfRes.json() as { contentBase64: string };
+      const contentBase64 = await generateQuotationPdf(quotationHtml);
       const payload = {
         to: toList,
         ...(ccList.length > 0 ? { cc: ccList } : {}),
@@ -811,7 +1262,9 @@ export default function QuotationDetailPage() {
         setEmailRecipient("");
         setEmailCc("");
         setEmailSubject("");
-        setEmailMessage("");
+        setEmailMessageHtml("");
+        setSelectedEmailTemplateId("");
+        setEmailTemplateName("");
         setSelectedToEmails([]);
         setSelectedCcEmails([]);
         if (data.draftUrl) window.open(data.draftUrl, "_blank");
@@ -890,6 +1343,58 @@ export default function QuotationDetailPage() {
   const emailAttachmentName = quotation && emailDraftRevision
     ? `${getQuotationDocumentTitle(quotation, emailDraftRevision)}.pdf`
     : "Quotation.pdf";
+  const selectedEmailTemplate = emailMessageTemplates.find(template => template._id === selectedEmailTemplateId) ?? null;
+  const emailTemplateLimitReached = emailMessageTemplates.length >= MAX_EMAIL_MESSAGE_TEMPLATES;
+  const emailTemplateDropdownPanel = (
+    <AnimatePresence>
+      {emailTemplateDropdownOpen && (
+        <motion.div
+          ref={emailTemplateDropdownPanelRef}
+          initial={{ opacity: 0, y: -8, scale: 0.96, filter: "blur(8px)" }}
+          animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+          exit={{ opacity: 0, y: -6, scale: 0.97, filter: "blur(6px)" }}
+          transition={{ type: "spring", stiffness: 430, damping: 34, mass: 0.75 }}
+          className="fixed isolate z-[100] overflow-hidden rounded-[24px] border border-white/70 bg-white/12 p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.78)] dark:border-white/10 dark:bg-black/15"
+          style={{
+            top: emailTemplateDropdownPosition.top,
+            left: emailTemplateDropdownPosition.left,
+            width: emailTemplateDropdownPosition.width,
+            backdropFilter: "blur(32px) saturate(180%)",
+            WebkitBackdropFilter: "blur(32px) saturate(180%)",
+          }}
+        >
+          <div className="pointer-events-none absolute inset-0 z-0 bg-white/20 dark:bg-black/15" />
+          <div className="pointer-events-none absolute inset-x-5 top-0 z-10 h-px bg-white/90" />
+          {[
+            { _id: "", name: "Default / unsaved message", bodyHtml: "", bodyText: "" },
+            ...emailMessageTemplates,
+          ].map(template => {
+            const active = selectedEmailTemplateId === template._id;
+            return (
+              <button
+                key={template._id || "default-template"}
+                type="button"
+                onClick={() => {
+                  selectEmailMessageTemplate(template._id);
+                  setEmailTemplateDropdownOpen(false);
+                }}
+                className={`group/item relative z-10 flex min-h-11 w-full items-center gap-3 rounded-[18px] px-3.5 py-2.5 text-left text-sm font-semibold transition-all duration-200 active:scale-[0.99] ${
+                  active
+                    ? "bg-brand-600 text-white shadow-[0_10px_26px_rgba(37,99,235,0.28)]"
+                    : "bg-white/10 text-default hover:bg-white/45 hover:shadow-sm dark:bg-white/5 dark:hover:bg-white/10"
+                }`}
+              >
+                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition duration-200 ${active ? "bg-white/18 text-white" : "bg-white/45 text-faint group-hover/item:text-muted dark:bg-white/10"}`}>
+                  {active && <Check className="h-3.5 w-3.5" />}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{template.name}</span>
+              </button>
+            );
+          })}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
 
   if (loading) {
     return (
@@ -941,22 +1446,24 @@ export default function QuotationDetailPage() {
 
   if (!quotation) return null;
 
-  const menuItemClass = "flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-white/10";
+  const menuItemClass = "relative z-10 flex w-full items-center gap-3 rounded-2xl bg-white/12 px-3.5 py-3 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white/5 dark:hover:bg-white/10";
   const moreMenu = (
     <div
-      className="fixed z-50 w-72 max-w-[calc(100vw-24px)] origin-top-right overflow-y-auto rounded-[24px] border border-white/80 p-2 shadow-[0_26px_90px_rgba(0,0,0,0.22)] transition-all duration-200 dark:border-white/10"
+      className="fixed isolate z-50 w-72 max-w-[calc(100vw-24px)] origin-top-right overflow-y-auto rounded-[24px] border border-white/65 p-2 shadow-[0_26px_90px_rgba(0,0,0,0.22)] transition-all duration-200 dark:border-white/10"
       onClick={(event) => event.stopPropagation()}
       style={{
         top: moreMenuPosition.top,
         left: moreMenuPosition.left,
         maxHeight: moreMenuPosition.maxHeight,
-        backgroundColor: "rgba(245, 245, 247, 0.58)",
-        backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.48), rgba(255,255,255,0.34))",
-        backdropFilter: "blur(44px) saturate(220%) contrast(0.96)",
-        WebkitBackdropFilter: "blur(44px) saturate(220%) contrast(0.96)",
+        backgroundColor: "rgba(218, 223, 232, 0.24)",
+        backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.16), rgba(225,230,238,0.06))",
+        backdropFilter: "blur(32px) saturate(180%)",
+        WebkitBackdropFilter: "blur(32px) saturate(180%)",
         boxShadow: "0 28px 96px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.72), inset 0 0 0 1px rgba(255,255,255,0.28)",
       }}
     >
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[#eef1f6]/15 dark:bg-black/10" />
+      <div className="pointer-events-none absolute inset-x-4 top-0 z-0 h-px bg-white/90" />
       <button
         onClick={() => { setMoreMenuOpen(false); handlePrintPreview(); }}
         disabled={pdfLoading}
@@ -1000,7 +1507,7 @@ export default function QuotationDetailPage() {
         <span>Duplicate</span>
       </button>
       {allowedResponseStatuses.length > 0 && (
-        <div className="mt-1 border-t border-black/10 pt-2 dark:border-white/10">
+        <div className="relative z-10 mt-1 border-t border-black/10 pt-2 dark:border-white/10">
           <p className="px-3.5 pb-1 pt-2 text-[11px] font-semibold uppercase text-muted">Change Status</p>
           {allowedResponseStatuses.map(s => {
             const cfg = QUOTATION_STATUS_CONFIG[s];
@@ -1008,7 +1515,7 @@ export default function QuotationDetailPage() {
               <button
                 key={s}
                 onClick={() => updateStatus(s)}
-                className="flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] dark:hover:bg-white/10"
+                className="flex w-full items-center gap-3 rounded-2xl bg-white/12 px-3.5 py-2.5 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] dark:bg-white/5 dark:hover:bg-white/10"
               >
                 <span className={`h-2 w-2 rounded-full ${cfg.dot}`} />
                 <span>{cfg.label}</span>
@@ -1020,7 +1527,7 @@ export default function QuotationDetailPage() {
       <button
         disabled
         title="Archive workflow is not available for quotations yet"
-        className="mt-1 flex w-full cursor-not-allowed items-center gap-3 rounded-2xl px-3.5 py-3 text-left text-sm text-faint opacity-50"
+        className="relative z-10 mt-1 flex w-full cursor-not-allowed items-center gap-3 rounded-2xl bg-white/10 px-3.5 py-3 text-left text-sm text-faint opacity-50 dark:bg-white/5"
       >
         <AlertTriangle className="h-4 w-4" />
         <span>
@@ -1037,7 +1544,25 @@ export default function QuotationDetailPage() {
       style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif' }}
     >
       {/* ─── TOP BAR ─── */}
-      <div className="sticky top-4 z-40 mb-8 rounded-[32px] border border-white/50 bg-card/75 px-5 py-4 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur-2xl dark:border-white/10 dark:bg-card/80 sm:px-6">
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-4 z-40 mb-8 rounded-[32px] border border-white/50 bg-card/75 px-5 py-4 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur-2xl transition-[background-color,border-color,color,box-shadow] duration-200 dark:border-white/10 dark:bg-card/80 sm:px-6"
+        style={headerOverPreview ? {
+          "--color-text": "#1d1d1f",
+          "--color-text-muted": "#424245",
+          "--color-text-faint": "#6e6e73",
+          "--color-card": "#ffffff",
+          "--color-card-rgb": "255,255,255",
+          "--color-surface": "#f5f5f7",
+          "--color-border": "rgba(0,0,0,0.09)",
+          "--color-border-soft": "rgba(0,0,0,0.05)",
+          backgroundColor: "rgba(255,255,255,0.68)",
+          borderColor: "rgba(255,255,255,0.72)",
+          backdropFilter: "blur(28px) saturate(180%)",
+          WebkitBackdropFilter: "blur(28px) saturate(180%)",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.78)",
+        } as React.CSSProperties : undefined}
+      >
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-start gap-4">
             <button
@@ -1057,7 +1582,7 @@ export default function QuotationDetailPage() {
               </h1>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted">
                 <span className="font-medium text-default">{quotation.clientName}</span>
-                <QuotationStatusPill status={quotation.status} />
+                <QuotationStatusPill status={quotation.status} forceLight={headerOverPreview} />
                 <span className="text-faint">FY {quotation.financialYear}</span>
                 {quotation.validTill && <span className="text-faint">Valid till {fmtDate(quotation.validTill)}</span>}
                 {savedStatus === "saving" && <span className="animate-pulse text-xs text-muted">Saving...</span>}
@@ -1315,9 +1840,15 @@ export default function QuotationDetailPage() {
                       <label className="label">Client Name *</label>
                       <input className={`${softInput} w-full`} value={clientName} onChange={e => { setClientName(e.target.value); setShowSuggestions(true); if (!e.target.value) { setClientId(""); setClientAddress(""); setClientGst(""); setClientState(""); } }} onFocus={() => setShowSuggestions(true)} disabled={!isEditable} placeholder="Company name" />
                       {showSuggestions && clientSuggestions.length > 0 && (
-                        <div onClick={e => e.stopPropagation()} className="absolute left-0 right-0 top-full z-50 mt-2 max-h-72 overflow-y-auto rounded-[24px] border border-base bg-card/95 p-2 shadow-[0_22px_70px_rgba(0,0,0,0.12)] backdrop-blur-xl">
+                        <div
+                          onClick={e => e.stopPropagation()}
+                          className="absolute left-0 right-0 top-full z-50 mt-2 max-h-72 isolate overflow-y-auto rounded-[24px] border border-white/75 bg-white/32 p-2 shadow-[0_22px_70px_rgba(0,0,0,0.16)] dark:border-white/10 dark:bg-card/45"
+                          style={liquidGlassStyle}
+                        >
+                          <div className="pointer-events-none absolute inset-0 z-0 bg-white/30 dark:bg-card/40" style={liquidGlassStyle} />
+                          <div className="pointer-events-none absolute inset-x-4 top-0 z-0 h-px bg-white/90" />
                           {clientSuggestions.map(client => (
-                            <button key={client.clientId} type="button" onClick={() => { setClientName(client.companyName); setClientId(client.clientId); setClientAddress(client.address || ""); setClientGst(client.gstNumber || ""); setClientState(client.state || ""); setShowSuggestions(false); }} className="w-full rounded-[20px] px-4 py-3 text-left text-sm text-default transition duration-200 hover:bg-surface active:scale-[0.98]">
+                            <button key={client.clientId} type="button" onClick={() => { setClientName(client.companyName); setClientId(client.clientId); setClientAddress(client.address || ""); setClientGst(client.gstNumber || ""); setClientState(client.state || ""); setShowSuggestions(false); }} className="relative z-10 w-full rounded-[20px] bg-white/12 px-4 py-3 text-left text-sm text-default transition duration-200 hover:bg-white/70 active:scale-[0.98] dark:bg-white/5 dark:hover:bg-white/10">
                               <p className="font-semibold">{client.companyName}</p>
                               <p className="mt-1 text-xs text-muted">{[client.gstNumber ? `GST ${client.gstNumber}` : "", client.state].filter(Boolean).join(" - ") || "Client record"}</p>
                             </button>
@@ -1472,7 +2003,7 @@ export default function QuotationDetailPage() {
 
       {/* ─── PREVIEW TAB ─── */}
       {activeTab === "preview" && (
-        <div className="rounded-[32px] border border-base bg-[#f5f5f7] p-4 shadow-sm sm:p-8 dark:bg-surface">
+        <div ref={previewPanelRef} className="rounded-[32px] border border-base bg-[#f5f5f7] p-4 shadow-sm sm:p-8 dark:bg-surface">
           <div className="mb-6 flex flex-col gap-4 rounded-[28px] border border-white/70 bg-card/85 p-4 shadow-sm backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between dark:border-white/10">
             <div>
               <p className="font-mono text-xs text-faint">{quotation.quotationNumber || "DRAFT"} - Rev {selectedRevNum ?? quotation.currentRevisionNumber}</p>
@@ -1670,8 +2201,131 @@ export default function QuotationDetailPage() {
             </section>
 
             <section>
-              <label className={sectionEyebrow}>Message Body</label>
-              <textarea className="mt-3 min-h-60 w-full resize-y rounded-[32px] border border-white/75 bg-white/92 px-5 py-5 text-sm leading-relaxed text-default shadow-[0_16px_44px_rgba(0,0,0,0.08)] transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-base dark:bg-card" rows={9} value={emailMessage} onChange={(e) => setEmailMessage(e.target.value)} placeholder="Add a short message for the client" />
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <label className={sectionEyebrow}>Message Body</label>
+                  <p className="mt-1 text-xs text-faint">{emailMessageTemplates.length}/{MAX_EMAIL_MESSAGE_TEMPLATES} saved messages</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => saveEmailMessageTemplate("create")}
+                    disabled={emailTemplateLoading || emailTemplateLimitReached}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-white/75 bg-white/78 px-3 text-xs font-semibold text-default shadow-sm transition duration-200 hover:bg-white active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10 dark:bg-card/80"
+                    title={emailTemplateLimitReached ? `Limit reached: ${MAX_EMAIL_MESSAGE_TEMPLATES} saved messages` : "Save as a new message"}
+                  >
+                    <Save className="h-3.5 w-3.5" /> Save New
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => saveEmailMessageTemplate("update")}
+                    disabled={emailTemplateLoading || !selectedEmailTemplate}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-white/75 bg-white/78 px-3 text-xs font-semibold text-default shadow-sm transition duration-200 hover:bg-white active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10 dark:bg-card/80"
+                  >
+                    Update
+                  </button>
+                  <button
+                    type="button"
+                    onClick={deleteEmailMessageTemplate}
+                    disabled={emailTemplateLoading || !selectedEmailTemplate}
+                    className="inline-flex h-9 items-center justify-center rounded-full border border-white/75 bg-white/78 px-3 text-xs font-semibold text-red-500 shadow-sm transition duration-200 hover:bg-white active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10 dark:bg-card/80"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-[32px] border border-white/75 bg-white/72 p-2.5 shadow-[0_16px_44px_rgba(0,0,0,0.08)] backdrop-blur-2xl dark:border-base dark:bg-card/80">
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                  <div ref={emailTemplateDropdownRef} className="relative z-30">
+                    <button
+                      ref={emailTemplateDropdownButtonRef}
+                      type="button"
+                      onClick={() => {
+                        positionEmailTemplateDropdown();
+                        setEmailTemplateDropdownOpen(open => !open);
+                      }}
+                      disabled={emailTemplateLoading}
+                      className={`group flex h-11 w-full items-center justify-between gap-3 rounded-full border px-4 text-left text-sm font-semibold text-default shadow-[0_10px_28px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.86)] backdrop-blur-2xl transition-all duration-300 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/10 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 ${
+                        emailTemplateDropdownOpen
+                          ? "border-brand-300 bg-white/94 ring-4 ring-brand-500/10 dark:bg-card"
+                          : "border-white/80 bg-white/78 hover:bg-white/92 dark:bg-surface/90"
+                      }`}
+                    >
+                      <span className="min-w-0 truncate">
+                        {selectedEmailTemplate?.name || "Default / unsaved message"}
+                      </span>
+                      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/80 text-muted shadow-sm transition duration-300 group-hover:text-default dark:bg-white/10 ${emailTemplateDropdownOpen ? "rotate-180 text-brand-600" : ""}`}>
+                        <ChevronDown className="h-4 w-4" />
+                      </span>
+                    </button>
+                  </div>
+                  <input
+                    className="h-11 rounded-full border border-white/75 bg-white/88 px-4 text-sm font-medium text-default shadow-sm transition duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-base dark:bg-surface"
+                    value={emailTemplateName}
+                    onChange={(event) => setEmailTemplateName(event.target.value)}
+                    placeholder="Saved message name"
+                    maxLength={80}
+                    disabled={emailTemplateLoading}
+                  />
+                </div>
+
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-[20px] border border-white/65 bg-white/58 px-2 py-1.5 shadow-inner dark:border-white/10 dark:bg-surface/70">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => runEmailEditorCommand("bold")}
+                      className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition duration-200 hover:bg-white hover:text-default active:scale-[0.96] dark:hover:bg-card"
+                      title="Bold selected text"
+                    >
+                      <Bold className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => runEmailEditorCommand("divider")}
+                      className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition duration-200 hover:bg-white hover:text-default active:scale-[0.96] dark:hover:bg-card"
+                      title="Insert separating line"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </button>
+                    <span className="mx-0.5 h-5 w-px bg-black/8 dark:bg-white/10" aria-hidden="true" />
+                    <button
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => runEmailEditorCommand("clientName")}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/75 bg-white/68 px-2.5 text-[11px] font-semibold text-default shadow-sm transition duration-200 hover:bg-white active:scale-[0.97] dark:border-white/10 dark:bg-card/75"
+                      title="Insert client name variable"
+                    >
+                      <UserRound className="h-3.5 w-3.5 text-brand-600" />
+                      Client Name
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => runEmailEditorCommand("financialYear")}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/75 bg-white/68 px-2.5 text-[11px] font-semibold text-default shadow-sm transition duration-200 hover:bg-white active:scale-[0.97] dark:border-white/10 dark:bg-card/75"
+                      title="Insert financial year variable"
+                    >
+                      <CalendarDays className="h-3.5 w-3.5 text-brand-600" />
+                      Financial Year
+                    </button>
+                  </div>
+                  <span className="pr-2 text-[11px] font-medium text-faint">Auto-bold stays active</span>
+                </div>
+
+                <div
+                  ref={emailEditorRef}
+                  contentEditable={!emailLoading}
+                  suppressContentEditableWarning
+                  className="mt-2 min-h-60 w-full overflow-y-auto rounded-[26px] border border-white/70 bg-white/92 px-5 py-5 text-sm leading-relaxed text-default shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-base dark:bg-card"
+                  onInput={syncEmailEditorState}
+                  onBlur={syncEmailEditorState}
+                  data-placeholder="Add a short message for the client"
+                  dangerouslySetInnerHTML={{ __html: emailMessageHtml }}
+                />
+              </div>
               <p className="mt-2 text-xs text-faint">This message appears above the quotation and can be edited in Gmail after the draft is created.</p>
             </section>
 
@@ -1741,6 +2395,7 @@ export default function QuotationDetailPage() {
         </div>
       </Modal>
       {moreMenuOpen && moreMenuAnchor && typeof document !== "undefined" && createPortal(moreMenu, document.body)}
+      {typeof document !== "undefined" && createPortal(emailTemplateDropdownPanel, document.body)}
     </div>
   );
 }

@@ -1,7 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { google } from "googleapis";
 import { connectDB } from "@/lib/mongoose";
 import EmailLog from "@/models/EmailLog";
 import { z } from "zod";
@@ -93,6 +92,73 @@ function buildRawEmail(
   return Buffer.from(mime).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+async function createGmailDraft(
+  clientId: string,
+  clientSecret: string,
+  refreshToken: string,
+  rawEmail: string,
+) {
+  const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+    cache: "no-store",
+  });
+  const tokenData = await tokenResponse.json() as { access_token?: string; error?: string; error_description?: string };
+  if (!tokenResponse.ok || !tokenData.access_token) {
+    const error = new Error(tokenData.error_description || tokenData.error || "Failed to refresh Gmail access token");
+    if (tokenData.error === "invalid_grant") error.name = "InvalidGrantError";
+    throw error;
+  }
+
+  const draftResponse = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${tokenData.access_token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ message: { raw: rawEmail } }),
+    cache: "no-store",
+  });
+  const draftData = await draftResponse.json() as { id?: string; error?: { message?: string } };
+  if (!draftResponse.ok) {
+    throw new Error(draftData.error?.message || "Gmail rejected the draft");
+  }
+  return draftData.id || "";
+}
+
+async function logDraft(input: {
+  logType: "quotation" | "payment_reminder" | "annual_return_draft" | "custom";
+  toList: string[];
+  ccList: string[];
+  subject: string;
+  logClientId?: string;
+  logClientName?: string;
+  logFy?: string;
+  draftId: string;
+}) {
+  try {
+    await connectDB();
+    await EmailLog.create({
+      type: input.logType,
+      to: input.toList,
+      subject: input.subject,
+      clientId: input.logClientId || "",
+      clientName: input.logClientName || "",
+      financialYear: input.logFy || "",
+      status: "draft",
+      notes: `To: ${input.toList.join(", ")}${input.ccList.length > 0 ? ` | Cc: ${input.ccList.join(", ")}` : ""}. Draft ID: ${input.draftId}`,
+    });
+  } catch (error) {
+    console.error("Failed to log Gmail draft:", error);
+  }
+}
+
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -121,10 +187,6 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, "https://developers.google.com/oauthplayground");
-    oauth2Client.setCredentials({ refresh_token: refreshToken });
-    const gmail = google.gmail({ version: "v1", auth: oauth2Client });
-
     // Keep all To recipients in the To header; CC contains only explicit CC entries.
     const toList: string[] = Array.isArray(to) ? to : [to];
     const explicitCcList: string[] = cc ? (Array.isArray(cc) ? cc : [cc]) : [];
@@ -132,26 +194,18 @@ export async function POST(req: NextRequest) {
       .filter(email => !toList.includes(email));
 
     const rawEmail = buildRawEmail(toList, ccList, subject, html, gmailUser, attachments);
-    const draft = await gmail.users.drafts.create({
-      userId: "me",
-      requestBody: { message: { raw: rawEmail } },
-    });
-    const draftId = draft.data.id || "";
+    const draftId = await createGmailDraft(clientId, clientSecret, refreshToken, rawEmail);
 
-    // Log the draft
-    try {
-      await connectDB();
-      await EmailLog.create({
-        type: logType,
-        to: toList,
-        subject,
-        clientId: logClientId || "",
-        clientName: logClientName || "",
-        financialYear: logFy || "",
-        status: "draft",
-        notes: `To: ${toList.join(", ")}${ccList.length > 0 ? ` | Cc: ${ccList.join(", ")}` : ""}. Draft ID: ${draftId}`,
-      });
-    } catch {}
+    after(logDraft({
+      logType,
+      toList,
+      ccList,
+      subject,
+      logClientId,
+      logClientName,
+      logFy,
+      draftId,
+    }));
 
     const draftUrl = draftId
       ? `https://mail.google.com/mail/#drafts/${draftId}`
@@ -160,10 +214,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, draftUrl, draftId, toList, ccList });
 
   } catch (err: unknown) {
-    const error = err as { message?: string; code?: number };
+    const error = err as { message?: string; name?: string };
     console.error("Gmail draft creation failed:", error);
 
-    if (error?.code === 401 || (error?.message || "").includes("invalid_grant")) {
+    if (error?.name === "InvalidGrantError" || (error?.message || "").includes("invalid_grant")) {
       return NextResponse.json({
         error: "Gmail OAuth token expired or invalid. Please re-authorise.",
         code: "INVALID_GRANT",
