@@ -1,18 +1,13 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
+import chromium from "@sparticuz/chromium";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import puppeteer, { type Browser, type LaunchOptions } from "puppeteer-core";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 
 export const runtime = "nodejs";
-
-const execFileAsync = promisify(execFile);
+export const maxDuration = 60;
 
 const pdfSchema = z.object({
   html: z.string().min(1),
@@ -34,6 +29,27 @@ function findBrowserExecutable() {
   return candidates.find(existsSync);
 }
 
+async function getBrowserLaunchOptions(): Promise<LaunchOptions> {
+  const executablePath = findBrowserExecutable();
+
+  if (executablePath) {
+    return {
+      args: [
+        "--disable-gpu",
+        "--no-sandbox",
+      ],
+      executablePath,
+      headless: true,
+    };
+  }
+
+  return {
+    args: chromium.args,
+    executablePath: await chromium.executablePath(),
+    headless: true,
+  };
+}
+
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -43,36 +59,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Quotation HTML is required" }, { status: 400 });
   }
 
-  const executablePath = findBrowserExecutable();
-  if (!executablePath) {
-    return NextResponse.json({
-      error: "Chrome or Edge is required to generate the quotation PDF",
-    }, { status: 503 });
-  }
-
-  const workDir = await mkdtemp(path.join(tmpdir(), "quotation-pdf-"));
-  const htmlPath = path.join(workDir, "quotation.html");
-  const pdfPath = path.join(workDir, "quotation.pdf");
-  const profilePath = path.join(workDir, "browser-profile");
+  let browser: Browser | null = null;
 
   try {
-    await writeFile(htmlPath, parsedBody.data.html, "utf8");
-    await execFileAsync(executablePath, [
-      "--headless=new",
-      "--disable-gpu",
-      "--no-sandbox",
-      "--no-pdf-header-footer",
-      `--user-data-dir=${profilePath}`,
-      `--print-to-pdf=${pdfPath}`,
-      pathToFileURL(htmlPath).href,
-    ], { timeout: 30000 });
+    browser = await puppeteer.launch(await getBrowserLaunchOptions());
+    const page = await browser.newPage();
+    await page.emulateMediaType("print");
+    await page.setContent(parsedBody.data.html, { waitUntil: "load" });
+    await page.waitForNetworkIdle({ idleTime: 500, timeout: 5000 }).catch(() => undefined);
+    const pdf = await page.pdf({
+      displayHeaderFooter: false,
+      format: "A4",
+      preferCSSPageSize: true,
+      printBackground: true,
+    });
 
-    const pdf = await readFile(pdfPath);
-    return NextResponse.json({ contentBase64: pdf.toString("base64") });
+    return NextResponse.json({ contentBase64: Buffer.from(pdf).toString("base64") });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to generate quotation PDF";
     return NextResponse.json({ error: message }, { status: 500 });
   } finally {
-    await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+    await browser?.close().catch(() => undefined);
   }
 }

@@ -650,11 +650,23 @@ export default function Sidebar({ open, onClose }: Props) {
   }, [open]);
 
   useEffect(() => {
-    cachedFetch<unknown[]>("/api/trash?type=all")
-      .then((d) => { if (Array.isArray(d)) setTrashCount(d.length); }).catch(() => {});
-    cachedFetch<unknown[]>("/api/email-log")
-      .then((d) => { if (Array.isArray(d)) setEmailCount(d.length); }).catch(() => {});
-  }, [pathname]);
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void Promise.all([
+        cachedFetch<{ count: number }>("/api/trash?type=all&count=1"),
+        cachedFetch<{ count: number }>("/api/email-log?count=1"),
+      ]).then(([trash, email]) => {
+        if (cancelled) return;
+        setTrashCount(Number(trash.count) || 0);
+        setEmailCount(Number(email.count) || 0);
+      }).catch(() => {});
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   const handleActivePtrMove = useCallback((nx: number, ny: number) => {
     pillCurNX.set(nx);

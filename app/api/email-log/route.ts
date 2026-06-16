@@ -15,7 +15,11 @@ export async function GET(req: NextRequest) {
     const query: Record<string, unknown> = {};
     if (clientId) query.clientId = clientId;
     if (type && type !== "all") query.type = type;
-    const logs = await EmailLog.find(query).sort({ sentAt: -1 }).limit(200);
+    if (searchParams.get("count") === "1") {
+      const count = await EmailLog.countDocuments(query);
+      return NextResponse.json({ count });
+    }
+    const logs = await EmailLog.find(query).sort({ sentAt: -1 }).limit(200).lean();
     return NextResponse.json(logs);
   } catch (error) {
     console.error("GET /api/email-log:", error);

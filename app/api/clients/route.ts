@@ -6,6 +6,7 @@ import {
   createClientRecord,
   listClientSummaries,
   listClientsWithContacts,
+  listClientsWithContactsPage,
 } from "@/lib/server/client-contact-service";
 
 const isClientValidationError = (message: string) =>
@@ -45,6 +46,24 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json(clients);
+  }
+
+  const hasPagination = searchParams.has("limit") || searchParams.has("offset");
+  if (hasPagination) {
+    const limitParam = searchParams.get("limit");
+    const offsetParam = searchParams.get("offset");
+    const parsedLimit = limitParam ? parseInt(limitParam, 10) : 30;
+    const parsedOffset = offsetParam ? parseInt(offsetParam, 10) : 0;
+
+    const page = await listClientsWithContactsPage({
+      category: searchParams.get("category"),
+      state: searchParams.get("state"),
+      search: searchParams.get("search"),
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : 30,
+      offset: Number.isFinite(parsedOffset) ? parsedOffset : 0,
+    });
+
+    return NextResponse.json(page);
   }
 
   const clients = await listClientsWithContacts({

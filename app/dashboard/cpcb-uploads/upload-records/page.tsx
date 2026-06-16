@@ -1,5 +1,5 @@
 "use client";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
@@ -122,10 +122,13 @@ const SummaryMetric = ({ label, value, accent = false }: { label: string; value:
 export default function UploadRecordsPage() {
   const [fy, setFy, financialYearLoaded] = useFinancialYearState();
   const [search, setSearch] = useState("");
+  const [clientQuery, setClientQuery] = useState("");
+  const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [activeView, setActiveView] = useState<UploadViewMode>("summary");
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [expandedUploadId, setExpandedUploadId] = useState<string | null>(null);
+  const clientPickerRef = useRef<HTMLDivElement>(null);
   const [form, setForm] = useState({
     clientId: "",
     financialYear: fy,
@@ -147,6 +150,40 @@ export default function UploadRecordsPage() {
     (clientId: string) => clients.find((client) => client.clientId === clientId)?.companyName || clientId,
     [clients]
   );
+
+  const selectedClient = useMemo(
+    () => clients.find((client) => client.clientId === form.clientId) || null,
+    [clients, form.clientId]
+  );
+
+  const filteredClientOptions = useMemo(() => {
+    const query = clientQuery.trim().toLowerCase();
+    const matches = query
+      ? clients.filter((client) =>
+          client.companyName.toLowerCase().includes(query) ||
+          client.clientId.toLowerCase().includes(query)
+        )
+      : clients;
+    return matches.slice(0, 8);
+  }, [clients, clientQuery]);
+
+  const uploadFormTotal = useMemo(() => (
+    (Number(form.cat1) || 0) +
+    (Number(form.cat2) || 0) +
+    (Number(form.cat3) || 0) +
+    (Number(form.cat4) || 0)
+  ), [form.cat1, form.cat2, form.cat3, form.cat4]);
+
+  useEffect(() => {
+    if (!clientPickerOpen) return;
+    const handler = (event: MouseEvent) => {
+      if (!clientPickerRef.current?.contains(event.target as Node)) {
+        setClientPickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [clientPickerOpen]);
 
   const filteredUploads = useMemo(() => {
     if (!search.trim()) return uploads;
@@ -195,11 +232,18 @@ export default function UploadRecordsPage() {
       cat4: "0",
       invoiceCount: "0",
     });
+    setClientQuery("");
+    setClientPickerOpen(false);
     setModalOpen(true);
   };
 
   const submitUpload = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.clientId) {
+      toast.error("Select a client from the list");
+      setClientPickerOpen(true);
+      return;
+    }
     setSaving(true);
     try {
       const response = await fetch("/api/upload-records", {
@@ -499,75 +543,178 @@ export default function UploadRecordsPage() {
         </div>
       )}
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Add Upload Record">
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="Add Upload Record"
+        size="lg"
+        bgColor="var(--color-card)"
+        className="rounded-[28px] border-white/70 dark:border-white/10 shadow-[0_24px_80px_rgba(15,23,42,0.22)]"
+      >
         <form onSubmit={submitUpload} className="space-y-4">
-          <div>
-            <label className="label">Client *</label>
-            <select
-              className="input-field"
-              value={form.clientId}
-              onChange={(e) => setForm((current) => ({ ...current, clientId: e.target.value }))}
-              required
-            >
-              <option value="">Select client</option>
-              {clients.map((client) => (
-                <option key={client.clientId} value={client.clientId}>{client.companyName}</option>
+          <div className="rounded-2xl border border-soft bg-surface p-3 sm:p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <p className="text-sm font-semibold text-default">Client details</p>
+                <p className="text-xs text-muted mt-0.5">Search by company name or client ID.</p>
+              </div>
+              {selectedClient && (
+                <span className="hidden sm:inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                  Selected
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_180px] gap-3">
+              <div ref={clientPickerRef} className="relative">
+                <label className="label">Client *</label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+                  <input
+                    className={`input-field h-11 w-full rounded-2xl pl-9 pr-10 text-sm shadow-inner shadow-black/[0.02] ${form.clientId ? "border-emerald-300 dark:border-emerald-700" : ""}`}
+                    placeholder="Type to search clients..."
+                    value={clientQuery}
+                    onChange={(e) => {
+                      setClientQuery(e.target.value);
+                      setForm((current) => ({ ...current, clientId: "" }));
+                      setClientPickerOpen(true);
+                    }}
+                    onFocus={() => setClientPickerOpen(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setClientPickerOpen(false);
+                    }}
+                    aria-invalid={!form.clientId && clientQuery.trim().length > 0}
+                    autoComplete="off"
+                  />
+                  {clientQuery && (
+                    <button
+                      type="button"
+                      className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-faint transition-colors hover:bg-hover hover:text-default"
+                      onClick={() => {
+                        setClientQuery("");
+                        setForm((current) => ({ ...current, clientId: "" }));
+                        setClientPickerOpen(true);
+                      }}
+                      aria-label="Clear client"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {clientPickerOpen && (
+                  <div className="absolute left-0 right-0 top-full z-50 mt-2 max-h-64 overflow-y-auto rounded-2xl border border-base bg-card p-1.5 shadow-2xl shadow-black/15">
+                    {filteredClientOptions.length > 0 ? (
+                      filteredClientOptions.map((client) => (
+                        <button
+                          key={client.clientId}
+                          type="button"
+                          className="w-full rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-surface focus:bg-surface focus:outline-none"
+                          onClick={() => {
+                            setForm((current) => ({ ...current, clientId: client.clientId }));
+                            setClientQuery(client.companyName);
+                            setClientPickerOpen(false);
+                          }}
+                        >
+                          <span className="block truncate text-sm font-semibold text-default">{client.companyName}</span>
+                          <span className="mt-0.5 block font-mono text-[11px] text-faint">{client.clientId}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-3 py-4 text-sm text-muted">No clients found</div>
+                    )}
+                  </div>
+                )}
+
+                {!form.clientId && clientQuery.trim().length > 0 && (
+                  <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-300">Choose a client from the results to continue.</p>
+                )}
+              </div>
+
+              <div>
+                <label className="label">Financial Year</label>
+                <input className="input-field h-11 rounded-2xl bg-card text-faint" value={form.financialYear} readOnly />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-soft bg-surface p-3 sm:p-4 shadow-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px] gap-3">
+              <div>
+                <label className="label">Upload Type *</label>
+                <div className="grid grid-cols-2 rounded-2xl border border-base bg-card p-1 shadow-inner shadow-black/[0.02]">
+                  {UPLOAD_TYPE_OPTIONS.map((option) => {
+                    const active = form.uploadType === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        className={`rounded-xl px-3 py-2 text-sm font-semibold transition-all ${active ? "bg-brand-600 text-white shadow-sm" : "text-muted hover:text-default"}`}
+                        onClick={() => setForm((current) => ({ ...current, uploadType: option.id }))}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="label">Number of Invoices *</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  className="input-field h-11 rounded-2xl font-mono"
+                  value={form.invoiceCount}
+                  onChange={(e) => setForm((current) => ({ ...current, invoiceCount: e.target.value }))}
+                  required
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-soft bg-surface p-3 sm:p-4 shadow-sm">
+            <div className="mb-3 flex items-end justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-default">Category quantities</p>
+                <p className="text-xs text-muted mt-0.5">Decimals are supported for CAT quantities.</p>
+              </div>
+              <div className="rounded-2xl bg-card px-3 py-2 text-right shadow-sm border border-soft">
+                <p className="text-[10px] uppercase text-faint">Total Qty</p>
+                <p className="font-mono text-base font-bold text-teal-600">{numberText(uploadFormTotal)}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                ["CAT-I", "cat1"],
+                ["CAT-II", "cat2"],
+                ["CAT-III", "cat3"],
+                ["CAT-IV", "cat4"],
+              ].map(([label, key]) => (
+                <div key={key}>
+                  <label className="label">{label}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    className="input-field h-11 rounded-2xl font-mono"
+                    value={form[key as "cat1" | "cat2" | "cat3" | "cat4"]}
+                    onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.value }))}
+                  />
+                </div>
               ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Financial Year *</label>
-            <input className="input-field bg-surface text-faint" value={form.financialYear} readOnly />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="label">Upload Type *</label>
-              <select
-                className="input-field"
-                value={form.uploadType}
-                onChange={(e) => setForm((current) => ({ ...current, uploadType: e.target.value as UploadType }))}
-                required
-              >
-                {UPLOAD_TYPE_OPTIONS.map((option) => (
-                  <option key={option.id} value={option.id}>{option.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="label">Number of Invoices *</label>
-              <input
-                type="number"
-                min="0"
-                className="input-field font-mono"
-                value={form.invoiceCount}
-                onChange={(e) => setForm((current) => ({ ...current, invoiceCount: e.target.value }))}
-                required
-              />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">CAT-I</label>
-              <input type="number" min="0" className="input-field font-mono" value={form.cat1} onChange={(e) => setForm((current) => ({ ...current, cat1: e.target.value }))} />
-            </div>
-            <div>
-              <label className="label">CAT-II</label>
-              <input type="number" min="0" className="input-field font-mono" value={form.cat2} onChange={(e) => setForm((current) => ({ ...current, cat2: e.target.value }))} />
-            </div>
-            <div>
-              <label className="label">CAT-III</label>
-              <input type="number" min="0" className="input-field font-mono" value={form.cat3} onChange={(e) => setForm((current) => ({ ...current, cat3: e.target.value }))} />
-            </div>
-            <div>
-              <label className="label">CAT-IV</label>
-              <input type="number" min="0" className="input-field font-mono" value={form.cat4} onChange={(e) => setForm((current) => ({ ...current, cat4: e.target.value }))} />
-            </div>
-          </div>
-          <div className="flex gap-2 pt-2 border-t border-base">
-            <button type="submit" className="btn-primary flex-1 justify-center" disabled={saving}>
+
+          <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row">
+            <button type="button" className="btn-secondary h-11 flex-1 justify-center rounded-2xl" onClick={() => setModalOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary h-11 flex-1 justify-center rounded-2xl" disabled={saving || !form.clientId}>
               {saving ? "Saving..." : "Add Upload Record"}
             </button>
-            <button type="button" className="btn-secondary" onClick={() => setModalOpen(false)}>Cancel</button>
           </div>
         </form>
       </Modal>

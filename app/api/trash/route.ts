@@ -12,7 +12,11 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const type = searchParams.get("type");
     const query = type && type !== "all" ? { recordType: type } : {};
-    const records = await DeletedRecord.find(query).sort({ deletedAt: -1 }).limit(200);
+    if (searchParams.get("count") === "1") {
+      const count = await DeletedRecord.countDocuments(query);
+      return NextResponse.json({ count });
+    }
+    const records = await DeletedRecord.find(query).sort({ deletedAt: -1 }).limit(200).lean();
     return NextResponse.json(records);
   } catch (error) {
     console.error("GET /api/trash:", error);

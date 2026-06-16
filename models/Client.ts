@@ -35,6 +35,10 @@ const ClientSchema = new Schema<IClient>(
   { timestamps: true }
 );
 
+ClientSchema.index({ createdAt: -1 });
+ClientSchema.index({ category: 1, createdAt: -1 });
+ClientSchema.index({ state: 1, createdAt: -1 });
+
 if (
   mongoose.models.Client &&
   (!mongoose.models.Client.schema.path("customFields") || !mongoose.models.Client.schema.path("legalName"))

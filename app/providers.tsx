@@ -183,11 +183,15 @@ function AppClientProviders({ children, dark }: { children: React.ReactNode; dar
     window.localStorage.setItem(storageKey, JSON.stringify(financialYearSettings));
 
     if (status === "authenticated") {
-      fetch("/api/financial-year-preference", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings: financialYearSettings }),
-      }).catch(() => {});
+      const timer = window.setTimeout(() => {
+        fetch("/api/financial-year-preference", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ settings: financialYearSettings }),
+        }).catch(() => {});
+      }, 2000);
+
+      return () => window.clearTimeout(timer);
     }
   }, [financialYearLoaded, financialYearSettings, status, storageKey]);
 

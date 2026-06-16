@@ -24,4 +24,6 @@ const EmailLogSchema = new Schema<IEmailLog>({
   notes:         { type: String, default: "" },
 }, { timestamps: false });
 
+EmailLogSchema.index({ sentAt: -1 });
+
 export default mongoose.models.EmailLog || mongoose.model<IEmailLog>("EmailLog", EmailLogSchema);

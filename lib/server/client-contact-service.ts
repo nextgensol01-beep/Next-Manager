@@ -122,7 +122,34 @@ const CLIENT_ID_PREFIXES: Record<string, string> = {
   SIMP: "SMP",
 };
 
+const MAX_NORMALIZED_SEARCH_CHARS = 80;
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const normalizeSearchText = (value: string) =>
+  value
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, MAX_NORMALIZED_SEARCH_CHARS);
+const buildFlexibleNormalizedRegex = (value: string) => {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) return "";
+  return normalized.split("").map(escapeRegex).join("[^a-z0-9]*");
+};
+const buildSearchFieldConditions = (fields: string[], search: string) => {
+  const escapedSearch = escapeRegex(search);
+  const flexibleSearch = buildFlexibleNormalizedRegex(search);
+  const conditions: Record<string, unknown>[] = fields.map((field) => ({
+    [field]: { $regex: escapedSearch, $options: "i" },
+  }));
+
+  if (flexibleSearch) {
+    fields.forEach((field) => {
+      conditions.push({ [field]: { $regex: flexibleSearch, $options: "i" } });
+    });
+  }
+
+  return conditions;
+};
 const toIdString = (value: MaybeId | null | undefined) => (value ? value.toString() : "");
 const unique = <T>(values: T[]) => Array.from(new Set(values));
 const stripModelMetadata = <T extends Record<string, unknown>>(record: T) => {
@@ -143,10 +170,12 @@ async function getSearchableCustomFieldConditions(search: string) {
     .select("key")
     .lean()) as Array<{ key?: string }>;
 
-  return definitions
+  const customFieldPaths = definitions
     .map((definition) => (typeof definition.key === "string" ? definition.key.trim() : ""))
     .filter((key) => Boolean(key) && key !== "legalName")
-    .map((key) => ({ [`customFields.${key}`]: { $regex: search, $options: "i" } }));
+    .map((key) => `customFields.${key}`);
+
+  return buildSearchFieldConditions(customFieldPaths, search);
 }
 
 async function normalizeClientCustomFields(input: unknown, existingValues: unknown = {}) {
@@ -412,10 +441,14 @@ export async function getClientContactsMap(clientIds: string[]) {
     return groupedContacts;
   }
 
-  const links = (await ClientContact.find({ clientId: { $in: normalizedClientIds } }).lean()) as unknown as ClientContactRecord[];
+  const links = (await ClientContact.find({ clientId: { $in: normalizedClientIds } })
+    .select("clientId personId designation isPrimaryContact selectedPhones selectedEmails createdAt")
+    .lean()) as unknown as ClientContactRecord[];
   const personIds = unique(links.map((link) => link.personId).filter(Boolean));
   const persons = personIds.length > 0
-    ? ((await Person.find({ _id: { $in: personIds } }).lean()) as unknown as PersonRecord[])
+    ? ((await Person.find({ _id: { $in: personIds } })
+        .select("name phoneNumbers emails createdAt")
+        .lean()) as unknown as PersonRecord[])
     : [];
 
   const personMap = new Map(persons.map((person) => [toIdString(person._id), person]));
@@ -482,11 +515,7 @@ export function listPersons(options: { search?: string | null; limit?: number | 
   const search = options.search?.trim();
 
   if (search) {
-    query.$or = [
-      { name: { $regex: search, $options: "i" } },
-      { phoneNumbers: { $regex: search, $options: "i" } },
-      { emails: { $regex: search, $options: "i" } },
-    ];
+    query.$or = buildSearchFieldConditions(["name", "phoneNumbers", "emails"], search);
   }
 
   let personQuery = Person.find(query).sort({ name: 1 });
@@ -657,11 +686,7 @@ export async function findClientIdsByContactSearch(search: string) {
   if (!term) return [];
 
   const persons = (await Person.find({
-    $or: [
-      { name: { $regex: term, $options: "i" } },
-      { phoneNumbers: { $regex: term, $options: "i" } },
-      { emails: { $regex: term, $options: "i" } },
-    ],
+    $or: buildSearchFieldConditions(["name", "phoneNumbers", "emails"], term),
   })
     .select("_id")
     .lean()) as Array<{ _id: MaybeId }>;
@@ -673,7 +698,7 @@ export async function findClientIdsByContactSearch(search: string) {
   return ClientContact.find({ personId: { $in: persons.map((person) => toIdString(person._id)) } }).distinct("clientId");
 }
 
-export async function listClientsWithContacts(options: {
+async function buildClientListQuery(options: {
   category?: string | null;
   state?: string | null;
   search?: string | null;
@@ -693,14 +718,21 @@ export async function listClientsWithContacts(options: {
     const matchedClientIds = await findClientIdsByContactSearch(search);
     const customFieldConditions = await getSearchableCustomFieldConditions(search);
     query.$or = [
-      { clientId: { $regex: search, $options: "i" } },
-      { companyName: { $regex: search, $options: "i" } },
-      { legalName: { $regex: search, $options: "i" } },
+      ...buildSearchFieldConditions(["clientId", "companyName", "legalName"], search),
       ...customFieldConditions,
       ...(matchedClientIds.length > 0 ? [{ clientId: { $in: matchedClientIds } }] : []),
     ];
   }
 
+  return query;
+}
+
+export async function listClientsWithContacts(options: {
+  category?: string | null;
+  state?: string | null;
+  search?: string | null;
+}) {
+  const query = await buildClientListQuery(options);
   const clients = await Client.find(query).sort({ createdAt: -1 });
   const contactsMap = await getClientContactsMap(clients.map((client) => client.clientId));
 
@@ -708,6 +740,41 @@ export async function listClientsWithContacts(options: {
     ...client.toObject(),
     contacts: contactsMap.get(client.clientId) || [],
   }));
+}
+
+export async function listClientsWithContactsPage(options: {
+  category?: string | null;
+  state?: string | null;
+  search?: string | null;
+  limit: number;
+  offset: number;
+}) {
+  const query = await buildClientListQuery(options);
+  const limit = Math.max(1, Math.min(Math.floor(options.limit), 100));
+  const offset = Math.max(0, Math.floor(options.offset));
+
+  const [clients, total] = await Promise.all([
+    Client.find(query)
+      .select("clientId companyName legalName category state address gstNumber registrationNumber cpcbLoginId cpcbPassword otpMobileNumber customFields createdAt")
+      .sort({ createdAt: -1 })
+      .skip(offset)
+      .limit(limit)
+      .lean(),
+    Client.countDocuments(query),
+  ]);
+  const contactsMap = await getClientContactsMap(clients.map((client) => client.clientId));
+  const items = clients.map((client) => ({
+    ...client,
+    contacts: contactsMap.get(client.clientId) || [],
+  }));
+  const nextOffset = offset + items.length;
+
+  return {
+    items,
+    total,
+    nextOffset,
+    hasMore: nextOffset < total,
+  };
 }
 
 export async function listClientSummaries(options: {
@@ -733,9 +800,7 @@ export async function listClientSummaries(options: {
   if (search) {
     const customFieldConditions = await getSearchableCustomFieldConditions(search);
     query.$or = [
-      { clientId: { $regex: search, $options: "i" } },
-      { companyName: { $regex: search, $options: "i" } },
-      { legalName: { $regex: search, $options: "i" } },
+      ...buildSearchFieldConditions(["clientId", "companyName", "legalName"], search),
       ...customFieldConditions,
     ];
   }
