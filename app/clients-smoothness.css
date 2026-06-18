@@ -1,0 +1,76 @@
+/* Clients page smoothness pass: opaque headers avoid fragile backdrop blur paint work. */
+.clients-morph-toolbar-inner {
+  background: #ffffff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  overflow: visible !important;
+  will-change: auto !important;
+}
+
+.clients-morph-toolbar,
+.clients-filter-anchor {
+  overflow: visible !important;
+}
+
+.clients-morph-toolbar[data-compact="true"] .clients-morph-toolbar-inner {
+  background: #ffffff !important;
+}
+
+.dark .clients-morph-toolbar-inner,
+.dark .clients-morph-toolbar[data-compact="true"] .clients-morph-toolbar-inner {
+  background: #101114 !important;
+}
+
+.clients-morph-toolbar-inner::before,
+.clients-morph-toolbar[data-compact="true"] .clients-morph-toolbar-inner::before {
+  content: none !important;
+  display: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.clients-mobile-dock {
+  background: #ffffff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.dark .clients-mobile-dock {
+  background: #101114 !important;
+}
+
+.clients-filter-chip-layer {
+  background: #ffffff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.dark .clients-filter-chip-layer {
+  background: #101114 !important;
+}
+
+.clients-filter-panel {
+  background: #ffffff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  z-index: 120 !important;
+  will-change: transform, opacity !important;
+}
+
+.dark .clients-filter-panel {
+  background: #101114 !important;
+}
+
+.clients-list-row,
+.clients-mobile-row {
+  contain: layout paint style;
+  content-visibility: auto;
+}
+
+.clients-list-row {
+  contain-intrinsic-size: 76px;
+}
+
+.clients-mobile-row {
+  contain-intrinsic-size: 92px;
+}

@@ -5,7 +5,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ["mongoose"],
+  devIndicators: false,
+  serverExternalPackages: ["mongoose", "@sparticuz/chromium"],
+  outputFileTracingIncludes: {
+    "/api/quotation/pdf": ["./node_modules/@sparticuz/chromium/bin/**/*"],
+  },
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,
