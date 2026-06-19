@@ -114,10 +114,12 @@ const ClientControlButton = React.forwardRef<HTMLButtonElement, LiquidGlassButto
 function ClientMobileSheet({
   ariaLabel,
   children,
+  className,
   onClose,
 }: {
   ariaLabel: string;
   children: (close: (afterClose?: () => void) => void) => React.ReactNode;
+  className?: string;
   onClose: () => void;
 }) {
   const [phase, setPhase] = useState<"entering" | "open" | "closing">("entering");
@@ -154,7 +156,7 @@ function ClientMobileSheet({
   }, [close]);
 
   return createPortal(
-    <div className={`clients-action-sheet-root ${phase === "closing" ? "is-closing" : ""}`}>
+    <div className={cn("clients-action-sheet-root", className, phase === "closing" && "is-closing")}>
       <button
         type="button"
         className="clients-action-sheet-backdrop"
@@ -260,25 +262,40 @@ function SearchField({
   );
 }
 
+type FilterPanelProps = {
+  activeFilterCount: number;
+  applyFilters: () => void;
+  cancelFilters: () => void;
+  className?: string;
+  draftCategoryFilter: string;
+  draftStateFilter: string;
+  panelRef?: React.Ref<HTMLDivElement>;
+  setDraftCategoryFilter: (value: string) => void;
+  setDraftStateFilter: (value: string) => void;
+  style?: React.CSSProperties;
+};
+
 function FilterPanel({
   activeFilterCount,
   applyFilters,
   cancelFilters,
+  className,
   draftCategoryFilter,
   draftStateFilter,
+  panelRef,
   setDraftCategoryFilter,
   setDraftStateFilter,
-}: {
-  activeFilterCount: number;
-  applyFilters: () => void;
-  cancelFilters: () => void;
-  draftCategoryFilter: string;
-  draftStateFilter: string;
-  setDraftCategoryFilter: (value: string) => void;
-  setDraftStateFilter: (value: string) => void;
-}) {
+  style,
+}: FilterPanelProps) {
   return (
-    <div className="clients-filter-panel" role="dialog" aria-modal="true" aria-label="Filter clients">
+    <div
+      ref={panelRef}
+      className={cn("clients-filter-panel", className)}
+      style={style}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Filter clients"
+    >
       <div className="clients-filter-panel-header">
         <div className="min-w-0">
           <p className="text-[15px] font-semibold text-default">Filters</p>
@@ -295,6 +312,7 @@ function FilterPanel({
         <LiquidGlassDropdown
           label="Category"
           options={CATEGORY_FILTERS}
+          portal
           value={draftCategoryFilter}
           onChange={setDraftCategoryFilter}
           icon={<Filter className="h-4 w-4" />}
@@ -302,6 +320,7 @@ function FilterPanel({
         <LiquidGlassDropdown
           label="State"
           options={STATE_FILTERS}
+          portal
           value={draftStateFilter}
           onChange={setDraftStateFilter}
           icon={<MapPin className="h-4 w-4" />}
@@ -333,6 +352,120 @@ function FilterPanel({
   );
 }
 
+function DesktopFilterPopover({
+  anchorRef,
+  panelRef,
+  ...filterPanelProps
+}: FilterPanelProps & {
+  anchorRef: React.RefObject<HTMLDivElement | null>;
+  panelRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties | null>(null);
+
+  const updatePanelPosition = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (!anchor || typeof window === "undefined") return;
+
+    const anchorRect = anchor.getBoundingClientRect();
+    const gutter = 17;
+    const panelWidth = Math.min(372, window.innerWidth - gutter * 2);
+    const left = Math.min(
+      Math.max(anchorRect.right - panelWidth, gutter),
+      window.innerWidth - panelWidth - gutter
+    );
+
+    setPanelStyle({
+      "--clients-filter-menu-left": `${left}px`,
+      "--clients-filter-menu-top": `${anchorRect.bottom + 12}px`,
+      "--clients-filter-menu-width": `${panelWidth}px`,
+    } as React.CSSProperties);
+  }, [anchorRef]);
+
+  useEffect(() => {
+    updatePanelPosition();
+    window.addEventListener("resize", updatePanelPosition);
+    window.addEventListener("scroll", updatePanelPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePanelPosition);
+      window.removeEventListener("scroll", updatePanelPosition, true);
+    };
+  }, [updatePanelPosition]);
+
+  if (!panelStyle || typeof document === "undefined") return null;
+
+  return createPortal(
+    <>
+      <button
+        type="button"
+        className="clients-filter-backdrop clients-filter-backdrop--portal"
+        onClick={filterPanelProps.cancelFilters}
+        aria-label="Close filters"
+      />
+      <FilterPanel
+        {...filterPanelProps}
+        className="clients-filter-panel--portal"
+        panelRef={panelRef}
+        style={panelStyle}
+      />
+    </>,
+    document.body
+  );
+}
+
+function MobileFilterLayer(filterPanelProps: FilterPanelProps) {
+  const [phase, setPhase] = useState<"entering" | "open" | "closing">("entering");
+  const closingRef = useRef(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const close = useCallback((afterClose: () => void) => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setPhase("closing");
+    closeTimerRef.current = setTimeout(afterClose, 180);
+  }, []);
+
+  useEffect(() => {
+    const scrollArea = document.getElementById("dashboard-scroll-area");
+    scrollArea?.setAttribute("data-client-sheet-open", "true");
+    openTimerRef.current = setTimeout(() => setPhase("open"), 30);
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close(filterPanelProps.cancelFilters);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      scrollArea?.removeAttribute("data-client-sheet-open");
+      if (openTimerRef.current) clearTimeout(openTimerRef.current);
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    };
+  }, [close, filterPanelProps.cancelFilters]);
+
+  return (
+    <div className={cn("clients-mobile-filter-root", phase === "closing" && "is-closing")} data-state={phase}>
+      <button
+        type="button"
+        className="clients-mobile-filter-backdrop"
+        onClick={() => close(filterPanelProps.cancelFilters)}
+        aria-label="Close filters"
+      />
+      <div className="clients-mobile-filter-shell">
+        <div className="clients-mobile-filter-blur" aria-hidden="true" />
+        <FilterPanel
+          {...filterPanelProps}
+          applyFilters={() => close(filterPanelProps.applyFilters)}
+          cancelFilters={() => close(filterPanelProps.cancelFilters)}
+          className="clients-filter-panel--mobile-portal"
+        />
+      </div>
+    </div>
+  );
+}
+
 function MorphingClientHeader({
   activeFilterCount,
   activeFilterLabel,
@@ -344,6 +477,7 @@ function MorphingClientHeader({
   draftStateFilter,
   filterOpen,
   filterPanelRef,
+  filterPopoverRef,
   isFiltered,
   isMobileViewport,
   loading,
@@ -366,6 +500,7 @@ function MorphingClientHeader({
   draftStateFilter: string;
   filterOpen: boolean;
   filterPanelRef: React.RefObject<HTMLDivElement | null>;
+  filterPopoverRef: React.RefObject<HTMLDivElement | null>;
   isFiltered: boolean;
   isMobileViewport: boolean;
   loading: boolean;
@@ -437,23 +572,17 @@ function MorphingClientHeader({
           <div className="clients-filter-anchor" ref={filterPanelRef}>
             {filterButton("header")}
             {filterOpen && !isMobileViewport && (
-              <>
-                <button
-                  type="button"
-                  className="clients-filter-backdrop"
-                  onClick={cancelFilters}
-                  aria-label="Close filters"
-                />
-                <FilterPanel
-                  activeFilterCount={activeFilterCount}
-                  applyFilters={applyFilters}
-                  cancelFilters={cancelFilters}
-                  draftCategoryFilter={draftCategoryFilter}
-                  draftStateFilter={draftStateFilter}
-                  setDraftCategoryFilter={setDraftCategoryFilter}
-                  setDraftStateFilter={setDraftStateFilter}
-                />
-              </>
+              <DesktopFilterPopover
+                activeFilterCount={activeFilterCount}
+                anchorRef={filterPanelRef}
+                applyFilters={applyFilters}
+                cancelFilters={cancelFilters}
+                draftCategoryFilter={draftCategoryFilter}
+                draftStateFilter={draftStateFilter}
+                panelRef={filterPopoverRef}
+                setDraftCategoryFilter={setDraftCategoryFilter}
+                setDraftStateFilter={setDraftStateFilter}
+              />
             )}
           </div>
 
@@ -762,6 +891,7 @@ export default function ClientsPage() {
   const [deleting, setDeleting] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const filterPanelRef = useRef<HTMLDivElement | null>(null);
+  const filterPopoverRef = useRef<HTMLDivElement | null>(null);
   const requestIdRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -941,7 +1071,18 @@ export default function ClientsPage() {
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (filterOpen && !isMobileViewport && !filterPanelRef.current?.contains(target)) {
+      const isInsideFilterTrigger = filterPanelRef.current?.contains(target);
+      const isInsideFilterPopover = filterPopoverRef.current?.contains(target);
+      const isInsideDropdownPortal =
+        target instanceof Element && Boolean(target.closest(".clients-filter-dropdown-portal"));
+
+      if (
+        filterOpen &&
+        !isMobileViewport &&
+        !isInsideFilterTrigger &&
+        !isInsideFilterPopover &&
+        !isInsideDropdownPortal
+      ) {
         setFilterOpen(false);
         setDraftCategoryFilter(categoryFilter);
         setDraftStateFilter(stateFilter);
@@ -1162,6 +1303,7 @@ export default function ClientsPage() {
           draftStateFilter={draftStateFilter}
           filterOpen={filterOpen}
           filterPanelRef={filterPanelRef}
+          filterPopoverRef={filterPopoverRef}
           isFiltered={isFiltered}
           isMobileViewport={isMobileViewport}
           loading={loading}
@@ -1257,6 +1399,7 @@ export default function ClientsPage() {
         {mobileActionsClient && (
           <ClientMobileSheet
             ariaLabel={`Actions for ${mobileActionsClient.companyName}`}
+            className="clients-action-sheet-root--actions"
             onClose={() => setMobileActionsClient(null)}
           >
             {(close) => (
@@ -1301,28 +1444,15 @@ export default function ClientsPage() {
         )}
 
         {filterOpen && isMobileViewport && (
-          <ClientMobileSheet ariaLabel="Filter clients" onClose={cancelFilters}>
-            {(close) => (
-              <>
-                <div className="clients-action-sheet-card clients-filter-sheet-card">
-                  <FilterPanel
-                    activeFilterCount={activeFilterCount}
-                    applyFilters={() => close(applyFilters)}
-                    cancelFilters={() => close(cancelFilters)}
-                    draftCategoryFilter={draftCategoryFilter}
-                    draftStateFilter={draftStateFilter}
-                    setDraftCategoryFilter={setDraftCategoryFilter}
-                    setDraftStateFilter={setDraftStateFilter}
-                  />
-                </div>
-                <div className="clients-action-sheet-card clients-action-sheet-cancel-card" style={{ animationDelay: "200ms" }}>
-                  <button type="button" className="clients-sheet-action-button cancel" onClick={() => close(cancelFilters)}>
-                    Cancel
-                  </button>
-                </div>
-              </>
-            )}
-          </ClientMobileSheet>
+          <MobileFilterLayer
+            activeFilterCount={activeFilterCount}
+            applyFilters={applyFilters}
+            cancelFilters={cancelFilters}
+            draftCategoryFilter={draftCategoryFilter}
+            draftStateFilter={draftStateFilter}
+            setDraftCategoryFilter={setDraftCategoryFilter}
+            setDraftStateFilter={setDraftStateFilter}
+          />
         )}
 
         <ClientFormModal

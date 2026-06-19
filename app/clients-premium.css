@@ -96,7 +96,13 @@
 }
 
 .dark .clients-floating-header[data-compact="true"] .clients-floating-header-inner {
+  border-color: rgba(255,255,255,0.10) !important;
   background: rgba(7,7,9,0.54) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.14),
+    inset 0 -1px 0 rgba(255,255,255,0.035),
+    0 18px 46px rgba(0,0,0,0.68),
+    0 3px 12px rgba(0,0,0,0.42) !important;
 }
 
 .clients-header-copy {
@@ -444,6 +450,19 @@
   inset: 0 !important;
   z-index: 95 !important;
   background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.clients-filter-backdrop--portal {
+  display: block !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: 100vw !important;
+  min-height: 100vh !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
 }
 
 .clients-filter-panel {
@@ -457,39 +476,48 @@
   overflow: visible !important;
   border: 1px solid rgba(255,255,255,0.78) !important;
   border-radius: 24px !important;
-  background: rgba(255,255,255,0.48) !important;
+  background: rgba(255,255,255,0.30) !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.92),
     0 28px 80px rgba(15,23,42,0.20),
     0 7px 22px rgba(15,23,42,0.08) !important;
-  backdrop-filter: blur(38px) saturate(190%) !important;
-  -webkit-backdrop-filter: blur(38px) saturate(190%) !important;
+  backdrop-filter: blur(48px) saturate(210%) contrast(106%) !important;
+  -webkit-backdrop-filter: blur(48px) saturate(210%) contrast(106%) !important;
   animation: clients-filter-pop 220ms cubic-bezier(0.22, 1, 0.36, 1) both !important;
+}
+
+.clients-filter-panel--portal {
+  position: fixed !important;
+  top: var(--clients-filter-menu-top) !important;
+  right: auto !important;
+  left: var(--clients-filter-menu-left) !important;
+  z-index: 110 !important;
+  width: var(--clients-filter-menu-width) !important;
 }
 
 .clients-filter-panel .liquid-glass-trigger {
   border-color: rgba(255,255,255,0.70) !important;
-  background: rgba(255,255,255,0.42) !important;
+  background: rgba(255,255,255,0.24) !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.76),
     0 10px 24px rgba(15,23,42,0.10) !important;
-  backdrop-filter: blur(32px) saturate(185%) !important;
-  -webkit-backdrop-filter: blur(32px) saturate(185%) !important;
+  backdrop-filter: blur(44px) saturate(205%) contrast(106%) !important;
+  -webkit-backdrop-filter: blur(44px) saturate(205%) contrast(106%) !important;
 }
 
 .clients-filter-panel .liquid-glass-dropdown {
   border: 1px solid rgba(255,255,255,0.76) !important;
-  background: rgba(255,255,255,0.46) !important;
+  background: rgba(255,255,255,0.24) !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.86),
     0 24px 62px rgba(15,23,42,0.18) !important;
-  backdrop-filter: blur(38px) saturate(190%) !important;
-  -webkit-backdrop-filter: blur(38px) saturate(190%) !important;
+  backdrop-filter: blur(56px) saturate(220%) contrast(108%) !important;
+  -webkit-backdrop-filter: blur(56px) saturate(220%) contrast(108%) !important;
 }
 
 .dark .clients-filter-panel {
   border-color: rgba(255,255,255,0.14) !important;
-  background: rgba(10,10,12,0.52) !important;
+  background: rgba(10,10,12,0.36) !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.11),
     0 34px 90px rgba(0,0,0,0.72) !important;
@@ -497,7 +525,7 @@
 
 .dark .clients-filter-panel .liquid-glass-trigger {
   border-color: rgba(255,255,255,0.12) !important;
-  background: rgba(10,10,12,0.42) !important;
+  background: rgba(8,8,10,0.30) !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.10),
     0 12px 28px rgba(0,0,0,0.34) !important;
@@ -505,7 +533,7 @@
 
 .dark .clients-filter-panel .liquid-glass-dropdown {
   border-color: rgba(255,255,255,0.12) !important;
-  background: rgba(10,10,12,0.44) !important;
+  background: rgba(7,7,9,0.34) !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.10),
     0 28px 74px rgba(0,0,0,0.62) !important;
@@ -529,33 +557,33 @@
 
 .clients-page .clients-filter-panel .liquid-glass-trigger {
   border-color: rgba(255,255,255,0.58) !important;
-  background-color: rgba(255,255,255,0.36) !important;
+  background-color: rgba(255,255,255,0.24) !important;
   background-image: none !important;
-  backdrop-filter: blur(36px) saturate(185%) !important;
-  -webkit-backdrop-filter: blur(36px) saturate(185%) !important;
+  backdrop-filter: blur(44px) saturate(205%) contrast(106%) !important;
+  -webkit-backdrop-filter: blur(44px) saturate(205%) contrast(106%) !important;
 }
 
 .clients-page .clients-filter-panel .liquid-glass-dropdown {
   overflow: auto !important;
   border-color: rgba(255,255,255,0.58) !important;
-  background-color: rgba(255,255,255,0.36) !important;
+  background-color: rgba(255,255,255,0.24) !important;
   background-image: none !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.56),
     0 18px 46px rgba(15,23,42,0.18),
     0 3px 12px rgba(15,23,42,0.08) !important;
-  backdrop-filter: blur(40px) saturate(195%) !important;
-  -webkit-backdrop-filter: blur(40px) saturate(195%) !important;
+  backdrop-filter: blur(56px) saturate(220%) contrast(108%) !important;
+  -webkit-backdrop-filter: blur(56px) saturate(220%) contrast(108%) !important;
 }
 
 .dark .clients-page .clients-filter-panel .liquid-glass-trigger {
   border-color: rgba(255,255,255,0.12) !important;
-  background-color: rgba(8,8,10,0.42) !important;
+  background-color: rgba(8,8,10,0.30) !important;
 }
 
 .dark .clients-page .clients-filter-panel .liquid-glass-dropdown {
   border-color: rgba(255,255,255,0.12) !important;
-  background-color: rgba(7,7,9,0.54) !important;
+  background-color: rgba(7,7,9,0.34) !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.10),
     0 18px 46px rgba(0,0,0,0.50),
@@ -594,36 +622,36 @@
 .clients-filter-panel .liquid-glass-trigger,
 .clients-action-sheet-root .clients-filter-panel .liquid-glass-trigger {
   border-color: rgba(255,255,255,0.58) !important;
-  background: rgba(255,255,255,0.36) !important;
+  background: rgba(255,255,255,0.24) !important;
   background-image: none !important;
-  backdrop-filter: blur(36px) saturate(185%) !important;
-  -webkit-backdrop-filter: blur(36px) saturate(185%) !important;
+  backdrop-filter: blur(44px) saturate(205%) contrast(106%) !important;
+  -webkit-backdrop-filter: blur(44px) saturate(205%) contrast(106%) !important;
 }
 
 .clients-filter-panel .liquid-glass-dropdown,
 .clients-action-sheet-root .clients-filter-panel .liquid-glass-dropdown {
   border-color: rgba(255,255,255,0.58) !important;
-  background: rgba(255,255,255,0.36) !important;
+  background: rgba(255,255,255,0.24) !important;
   background-image: none !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.56),
     0 18px 46px rgba(15,23,42,0.18),
     0 3px 12px rgba(15,23,42,0.08) !important;
-  backdrop-filter: blur(40px) saturate(195%) !important;
-  -webkit-backdrop-filter: blur(40px) saturate(195%) !important;
+  backdrop-filter: blur(56px) saturate(220%) contrast(108%) !important;
+  -webkit-backdrop-filter: blur(56px) saturate(220%) contrast(108%) !important;
 }
 
 .dark .clients-filter-panel .liquid-glass-trigger,
 .dark .clients-action-sheet-root .clients-filter-panel .liquid-glass-trigger {
   border-color: rgba(255,255,255,0.12) !important;
-  background: rgba(8,8,10,0.42) !important;
+  background: rgba(8,8,10,0.30) !important;
   background-image: none !important;
 }
 
 .dark .clients-filter-panel .liquid-glass-dropdown,
 .dark .clients-action-sheet-root .clients-filter-panel .liquid-glass-dropdown {
   border-color: rgba(255,255,255,0.12) !important;
-  background: rgba(7,7,9,0.54) !important;
+  background: rgba(7,7,9,0.34) !important;
   background-image: none !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.10),
@@ -686,6 +714,75 @@
 
 .dark .clients-filter-panel .liquid-dropdown-option-selected,
 .dark .clients-action-sheet-root .clients-filter-panel .liquid-dropdown-option-selected {
+  color: rgba(239,250,255,0.96) !important;
+  background: rgba(255,255,255,0.12) !important;
+}
+
+.clients-filter-dropdown-portal {
+  overflow: auto !important;
+  border: 1px solid rgba(255,255,255,0.58) !important;
+  border-radius: 18px !important;
+  background: rgba(255,255,255,0.22) !important;
+  background-image: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.56),
+    0 24px 70px rgba(15,23,42,0.24),
+    0 3px 12px rgba(15,23,42,0.08) !important;
+  backdrop-filter: blur(64px) saturate(230%) contrast(112%) !important;
+  -webkit-backdrop-filter: blur(64px) saturate(230%) contrast(112%) !important;
+}
+
+.dark .clients-filter-dropdown-portal {
+  border-color: rgba(255,255,255,0.12) !important;
+  background: rgba(7,7,9,0.32) !important;
+  background-image: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.10),
+    0 24px 70px rgba(0,0,0,0.66),
+    0 3px 12px rgba(0,0,0,0.30) !important;
+}
+
+.clients-filter-dropdown-portal::before,
+.clients-filter-dropdown-portal::after {
+  display: none !important;
+  opacity: 0 !important;
+  background: none !important;
+}
+
+.clients-filter-dropdown-portal .liquid-dropdown-option {
+  border-color: transparent !important;
+  color: rgba(29,29,31,0.78) !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.clients-filter-dropdown-portal .liquid-dropdown-option:hover,
+.clients-filter-dropdown-portal .liquid-dropdown-option-active {
+  color: rgba(29,29,31,0.88) !important;
+  background: rgba(255,255,255,0.26) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.clients-filter-dropdown-portal .liquid-dropdown-option-selected {
+  color: rgba(0,82,164,0.95) !important;
+  background: rgba(255,255,255,0.34) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.dark .clients-filter-dropdown-portal .liquid-dropdown-option {
+  color: rgba(245,245,247,0.82) !important;
+}
+
+.dark .clients-filter-dropdown-portal .liquid-dropdown-option:hover,
+.dark .clients-filter-dropdown-portal .liquid-dropdown-option-active {
+  color: rgba(245,245,247,0.92) !important;
+  background: rgba(255,255,255,0.08) !important;
+}
+
+.dark .clients-filter-dropdown-portal .liquid-dropdown-option-selected {
   color: rgba(239,250,255,0.96) !important;
   background: rgba(255,255,255,0.12) !important;
 }
@@ -1395,7 +1492,28 @@
   position: absolute !important;
   inset: 0 !important;
   background: rgba(0,0,0,0.18) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   animation: clients-action-overlay-in 220ms ease both !important;
+}
+
+.clients-action-sheet-root--filter .clients-action-sheet-backdrop {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.clients-action-sheet-root--filter .clients-action-sheet {
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+  z-index: 135 !important;
+}
+
+.clients-action-sheet-root--filter.is-closing .clients-action-sheet {
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
 }
 
 .clients-action-sheet-root.is-closing .clients-action-sheet-backdrop {
@@ -1416,6 +1534,12 @@
   animation: clients-sheet-out 240ms ease both !important;
 }
 
+.clients-action-sheet-root--filter.is-closing .clients-action-sheet {
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+}
+
 .clients-action-sheet-card {
   overflow: hidden !important;
   border: 1px solid rgba(255,255,255,0.72) !important;
@@ -1430,6 +1554,35 @@
   border-color: rgba(255,255,255,0.12) !important;
   background: rgba(12,12,14,0.56) !important;
   box-shadow: 0 30px 86px rgba(0,0,0,0.78) !important;
+}
+
+.clients-action-sheet-root--actions .clients-action-sheet-card {
+  position: relative !important;
+  isolation: isolate !important;
+  background: rgb(255,255,255) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.clients-action-sheet-root--actions .clients-action-sheet-card::before {
+  content: none !important;
+  display: none !important;
+}
+
+.clients-action-sheet-root--actions .clients-action-sheet-card > * {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.dark .clients-action-sheet-root--actions .clients-action-sheet-card {
+  border-color: rgba(255,255,255,0.16) !important;
+  background: rgb(12,12,14) !important;
+  box-shadow: 0 30px 86px rgba(0,0,0,0.82) !important;
+}
+
+.dark .clients-action-sheet-root--actions .clients-action-sheet-card::before {
+  content: none !important;
+  display: none !important;
 }
 
 .clients-sheet-action-button {
@@ -1470,18 +1623,239 @@
 .clients-filter-sheet-card {
   padding: 0 !important;
   overflow: visible !important;
-}
-
-.clients-filter-sheet-card .clients-filter-panel {
-  position: static !important;
-  width: 100% !important;
   border: 0 !important;
-  border-radius: 24px !important;
   background: transparent !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+}
+
+.clients-filter-sheet-card .clients-filter-panel {
+  position: static !important;
+  isolation: isolate !important;
+  width: 100% !important;
+  border: 1px solid rgba(255,255,255,0.58) !important;
+  border-radius: 24px !important;
+  overflow: hidden !important;
+  background: rgba(255,255,255,0.44) !important;
+  background-image: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.62),
+    0 22px 58px rgba(15,23,42,0.18) !important;
+  backdrop-filter: blur(96px) saturate(235%) contrast(112%) !important;
+  -webkit-backdrop-filter: blur(96px) saturate(235%) contrast(112%) !important;
   animation: none !important;
+  transform: none !important;
+}
+
+.clients-action-sheet-root--filter .clients-filter-panel::before {
+  content: "" !important;
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+  border-radius: inherit !important;
+  background: rgba(255,255,255,0.38) !important;
+  background-image: none !important;
+  backdrop-filter: blur(120px) saturate(240%) contrast(112%) !important;
+  -webkit-backdrop-filter: blur(120px) saturate(240%) contrast(112%) !important;
+}
+
+.clients-action-sheet-root--filter .clients-filter-panel > * {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.dark .clients-filter-sheet-card .clients-filter-panel {
+  border-color: rgba(255,255,255,0.12) !important;
+  background: rgba(7,7,9,0.52) !important;
+  background-image: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.10),
+    0 18px 46px rgba(0,0,0,0.50) !important;
+}
+
+.dark .clients-action-sheet-root--filter .clients-filter-panel::before {
+  background: rgba(7,7,9,0.44) !important;
+  background-image: none !important;
+}
+
+.clients-action-sheet-root--filter .clients-filter-panel .liquid-glass-trigger {
+  background: rgba(255,255,255,0.26) !important;
+  background-image: none !important;
+  backdrop-filter: blur(48px) saturate(215%) contrast(108%) !important;
+  -webkit-backdrop-filter: blur(48px) saturate(215%) contrast(108%) !important;
+}
+
+.dark .clients-action-sheet-root--filter .clients-filter-panel .liquid-glass-trigger {
+  background: rgba(7,7,9,0.34) !important;
+  background-image: none !important;
+}
+
+.clients-mobile-filter-root {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 160 !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  animation: none !important;
+  transition: none !important;
+}
+
+.clients-mobile-filter-root.is-closing {
+  opacity: 1 !important;
+  animation: none !important;
+}
+
+.clients-mobile-filter-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 0 !important;
+  display: block !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.clients-mobile-filter-shell {
+  position: fixed !important;
+  right: 12px !important;
+  bottom: calc(88px + env(safe-area-inset-bottom)) !important;
+  left: 12px !important;
+  z-index: 1 !important;
+  isolation: isolate !important;
+  display: block !important;
+  width: auto !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  opacity: 1 !important;
+  pointer-events: none !important;
+  transform-origin: 50% 100% !important;
+  animation: none !important;
+}
+
+.clients-mobile-filter-root.is-closing .clients-mobile-filter-shell {
+  opacity: 1 !important;
+  animation: none !important;
+}
+
+.clients-mobile-filter-blur {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 0 !important;
+  border: 1px solid rgba(255,255,255,0.72) !important;
+  border-radius: 24px !important;
+  background: rgba(255,255,255,0.34) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.78),
+    0 24px 70px rgba(15,23,42,0.18) !important;
+  backdrop-filter: blur(52px) saturate(215%) contrast(108%) !important;
+  -webkit-backdrop-filter: blur(52px) saturate(215%) contrast(108%) !important;
+}
+
+.clients-filter-panel--mobile-portal {
+  position: relative !important;
+  inset: auto !important;
+  left: auto !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  z-index: 1 !important;
+  isolation: isolate !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(255,255,255,0.72) !important;
+  border-radius: 24px !important;
+  background: rgba(255,255,255,0.30) !important;
+  background-image: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.80),
+    0 24px 70px rgba(15,23,42,0.18) !important;
+  backdrop-filter: blur(58px) saturate(220%) contrast(110%) !important;
+  -webkit-backdrop-filter: blur(58px) saturate(220%) contrast(110%) !important;
+  pointer-events: auto !important;
+  transform-origin: 50% 100% !important;
+  transform: translateY(18px) scale(0.985) !important;
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1) !important;
+  animation: none !important;
+}
+
+.clients-mobile-filter-root[data-state="open"] .clients-filter-panel--mobile-portal {
+  transform: translateY(0) scale(1) !important;
+}
+
+.clients-mobile-filter-root[data-state="closing"] .clients-filter-panel--mobile-portal {
+  transform: translateY(14px) scale(0.988) !important;
+  transition-duration: 180ms !important;
+}
+
+.clients-filter-panel--mobile-portal::before {
+  content: "" !important;
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+  border-radius: inherit !important;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.44), rgba(255,255,255,0.22)) !important;
+  background-image: none !important;
+  backdrop-filter: blur(68px) saturate(225%) contrast(110%) !important;
+  -webkit-backdrop-filter: blur(68px) saturate(225%) contrast(110%) !important;
+}
+
+.clients-filter-panel--mobile-portal > * {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.clients-filter-panel--mobile-portal .liquid-glass-trigger {
+  background: rgba(255,255,255,0.34) !important;
+  background-image: none !important;
+  backdrop-filter: blur(44px) saturate(210%) contrast(108%) !important;
+  -webkit-backdrop-filter: blur(44px) saturate(210%) contrast(108%) !important;
+}
+
+.dark .clients-mobile-filter-blur,
+.dark .clients-filter-panel--mobile-portal {
+  border-color: rgba(255,255,255,0.14) !important;
+  background: rgba(8,8,10,0.36) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.12),
+    0 24px 70px rgba(0,0,0,0.72) !important;
+}
+
+.dark .clients-filter-panel--mobile-portal::before {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04)) !important;
+}
+
+.dark .clients-filter-panel--mobile-portal .liquid-glass-trigger {
+  background: rgba(8,8,10,0.34) !important;
+}
+
+@media (max-width: 767px) {
+  .clients-filter-dropdown-portal {
+    z-index: 220 !important;
+    max-height: min(292px, calc(100vh - 120px)) !important;
+    background: rgba(255,255,255,0.34) !important;
+    background-image: none !important;
+    backdrop-filter: blur(64px) saturate(230%) contrast(112%) !important;
+    -webkit-backdrop-filter: blur(64px) saturate(230%) contrast(112%) !important;
+    transform: none !important;
+  }
+
+  .dark .clients-filter-dropdown-portal {
+    background: rgba(7,7,9,0.40) !important;
+    background-image: none !important;
+  }
 }
 
 @media (max-width: 1280px) {
@@ -1878,6 +2252,34 @@
   to {
     opacity: 0;
     transform: translateY(28px) scale(0.98);
+  }
+}
+
+@keyframes clients-mobile-filter-root-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes clients-mobile-filter-root-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes clients-mobile-filter-panel-in {
+  from {
+    transform: translateY(18px) scale(0.985);
+  }
+  to {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes clients-mobile-filter-panel-out {
+  from {
+    transform: translateY(0) scale(1);
+  }
+  to {
+    transform: translateY(14px) scale(0.988);
   }
 }
 

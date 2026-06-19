@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -19,6 +20,7 @@ interface LiquidGlassDropdownProps {
   className?: string;
   disabled?: boolean;
   icon?: React.ReactNode;
+  portal?: boolean;
 }
 
 export default function LiquidGlassDropdown({
@@ -28,15 +30,18 @@ export default function LiquidGlassDropdown({
   label,
   onChange,
   options,
+  portal = false,
   value,
 }: LiquidGlassDropdownProps) {
   const listboxId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const triggerLight = useLiquidGlassLight<HTMLButtonElement>();
   const menuLight = useLiquidGlassLight<HTMLDivElement>();
   const reducedMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<React.CSSProperties | null>(null);
   const unavailable = disabled || options.length === 0;
   const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value));
   const [activeIndex, setActiveIndex] = useState(selectedIndex);
@@ -52,6 +57,35 @@ export default function LiquidGlassDropdown({
     if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus());
   }, []);
 
+  const updateMenuPosition = useCallback(() => {
+    if (!portal || !triggerRef.current || typeof window === "undefined") return;
+
+    const rect = triggerRef.current.getBoundingClientRect();
+    const gutter = 12;
+    const menuGap = 8;
+    const menuMaxHeight = 288;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const width = Math.min(rect.width, viewportWidth - gutter * 2);
+    const left = Math.min(Math.max(gutter, rect.left), Math.max(gutter, viewportWidth - width - gutter));
+    const spaceBelow = viewportHeight - rect.bottom - gutter;
+    const spaceAbove = rect.top - gutter;
+    const openBelow = spaceBelow >= 220 || spaceBelow >= spaceAbove;
+    const maxHeight = Math.max(160, Math.min(menuMaxHeight, openBelow ? spaceBelow : spaceAbove));
+    const top = openBelow
+      ? Math.min(rect.bottom + menuGap, viewportHeight - maxHeight - gutter)
+      : Math.max(gutter, rect.top - maxHeight - menuGap);
+
+    setMenuPosition({
+      left,
+      maxHeight,
+      position: "fixed",
+      top,
+      width,
+      zIndex: 180,
+    });
+  }, [portal]);
+
   const selectIndex = useCallback((index: number) => {
     const option = options[index];
     if (!option) return;
@@ -64,12 +98,28 @@ export default function LiquidGlassDropdown({
     if (!open) return;
 
     const handleOutsidePointer = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) close();
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      close();
     };
 
     document.addEventListener("pointerdown", handleOutsidePointer);
     return () => document.removeEventListener("pointerdown", handleOutsidePointer);
   }, [close, open]);
+
+  useEffect(() => {
+    if (!open || !portal) return;
+
+    updateMenuPosition();
+    const handleLayoutChange = () => updateMenuPosition();
+
+    window.addEventListener("resize", handleLayoutChange);
+    window.addEventListener("scroll", handleLayoutChange, true);
+    return () => {
+      window.removeEventListener("resize", handleLayoutChange);
+      window.removeEventListener("scroll", handleLayoutChange, true);
+    };
+  }, [open, portal, updateMenuPosition]);
 
   useEffect(() => {
     if (open) setActiveIndex(selectedIndex);
@@ -136,6 +186,58 @@ export default function LiquidGlassDropdown({
     }
   };
 
+  const dropdownMenu = open ? (
+    <motion.div
+      ref={menuRef}
+      id={listboxId}
+      role="listbox"
+      aria-label={label}
+      aria-activedescendant={optionIds[activeIndex]}
+      initial={reducedMotion ? false : { opacity: 0, y: -7, scale: 0.975 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -5, scale: 0.982 }}
+      transition={reducedMotion ? { duration: 0.1 } : { type: "spring", stiffness: 420, damping: 30, mass: 0.62 }}
+      style={{
+        transformOrigin: "top center",
+        ...(portal ? menuPosition ?? { position: "fixed", visibility: "hidden" } : null),
+      }}
+      onPointerEnter={menuLight.onPointerEnter}
+      onPointerLeave={menuLight.onPointerLeave}
+      onPointerMove={menuLight.onPointerMove}
+      className={cn(
+        "liquid-glass-dropdown surrounding-light max-h-72 overflow-y-auto rounded-[18px] p-1.5",
+        portal
+          ? "clients-filter-dropdown-portal"
+          : "!absolute left-0 right-0 top-full z-50 mt-2"
+      )}
+    >
+      {options.map((option, index) => {
+        const selected = option.value === value;
+        const active = index === activeIndex;
+        return (
+          <button
+            key={option.value}
+            id={optionIds[index]}
+            type="button"
+            role="option"
+            aria-selected={selected}
+            onMouseEnter={() => setActiveIndex(index)}
+            onClick={() => selectIndex(index)}
+            className={cn(
+              "liquid-dropdown-option flex w-full items-center gap-2 rounded-[12px] px-3 py-2.5 text-left text-sm",
+              "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-500",
+              selected && "liquid-dropdown-option-selected font-semibold",
+              active && !selected && "liquid-dropdown-option-active"
+            )}
+          >
+            <span className="min-w-0 flex-1 truncate">{option.label}</span>
+            {selected && <Check className="h-4 w-4 shrink-0" />}
+          </button>
+        );
+      })}
+    </motion.div>
+  ) : null;
+
   return (
     <div
       ref={rootRef}
@@ -168,50 +270,11 @@ export default function LiquidGlassDropdown({
         />
       </button>
 
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            id={listboxId}
-            role="listbox"
-            aria-label={label}
-            aria-activedescendant={optionIds[activeIndex]}
-            initial={reducedMotion ? false : { opacity: 0, y: -7, scale: 0.975 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -5, scale: 0.982 }}
-            transition={reducedMotion ? { duration: 0.1 } : { type: "spring", stiffness: 420, damping: 30, mass: 0.62 }}
-            style={{ transformOrigin: "top center" }}
-            onPointerEnter={menuLight.onPointerEnter}
-            onPointerLeave={menuLight.onPointerLeave}
-            onPointerMove={menuLight.onPointerMove}
-            className="liquid-glass-dropdown surrounding-light !absolute left-0 right-0 top-full z-50 mt-2 max-h-72 overflow-y-auto rounded-[18px] p-1.5"
-          >
-            {options.map((option, index) => {
-              const selected = option.value === value;
-              const active = index === activeIndex;
-              return (
-                <button
-                  key={option.value}
-                  id={optionIds[index]}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => selectIndex(index)}
-                  className={cn(
-                    "liquid-dropdown-option flex w-full items-center gap-2 rounded-[12px] px-3 py-2.5 text-left text-sm",
-                    "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-500",
-                    selected && "liquid-dropdown-option-selected font-semibold",
-                    active && !selected && "liquid-dropdown-option-active"
-                  )}
-                >
-                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                  {selected && <Check className="h-4 w-4 shrink-0" />}
-                </button>
-              );
-            })}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {portal && typeof document !== "undefined" ? (
+        createPortal(<AnimatePresence>{dropdownMenu}</AnimatePresence>, document.body)
+      ) : (
+        <AnimatePresence>{dropdownMenu}</AnimatePresence>
+      )}
     </div>
   );
 }
