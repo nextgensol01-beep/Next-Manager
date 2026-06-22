@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useDragControls } from "framer-motion";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
@@ -97,12 +97,22 @@ const STANDARD_SERVICES = [
   { label: "Energy Recovery Compliance Services", category: "CAT-I", type: "Energy Recovery", description: "Energy Recovery Compliance Services" },
 ];
 
+const quoteCardSurface =
+  "border border-black/[0.08] bg-white/90 shadow-[0_18px_60px_rgba(0,0,0,0.06)] dark:border-white/[0.10] dark:bg-[#1c1c1e]/90 dark:shadow-[0_22px_70px_rgba(0,0,0,0.52)]";
+const quoteSubtleSurface =
+  "border border-black/[0.08] bg-[#f5f5f7]/80 dark:border-white/[0.10] dark:bg-white/[0.06]";
+const quoteNestedSurface =
+  "border border-black/[0.08] bg-white/70 dark:border-white/[0.10] dark:bg-white/[0.05]";
+const quoteControlSurface =
+  "border border-black/[0.08] bg-white/[0.72] hover:bg-white dark:border-white/[0.10] dark:bg-white/[0.06] dark:hover:bg-white/[0.10]";
+const quoteActiveSurface =
+  "border-white/70 bg-white text-default shadow-[0_10px_30px_rgba(0,0,0,0.08)] dark:border-white/[0.16] dark:bg-white/[0.10] dark:shadow-[0_12px_34px_rgba(0,0,0,0.42)]";
 const surfaceCard =
-  "rounded-[32px] border border-base bg-card/90 shadow-[0_18px_60px_rgba(0,0,0,0.06)] backdrop-blur-xl";
+  `rounded-[32px] ${quoteCardSurface} backdrop-blur-xl`;
 const softInput =
-  "h-12 rounded-2xl border border-base bg-surface/70 px-4 text-sm text-default transition-all duration-200 focus:border-brand-400 focus:bg-card focus:outline-none focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-60";
+  "h-12 rounded-2xl border border-black/[0.08] bg-white/[0.72] px-4 text-sm text-default transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10]";
 const softTextarea =
-  "rounded-[24px] border border-base bg-surface/70 px-4 py-3 text-sm text-default transition-all duration-200 focus:border-brand-400 focus:bg-card focus:outline-none focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-60";
+  "rounded-[24px] border border-black/[0.08] bg-white/[0.72] px-4 py-3 text-sm text-default transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10]";
 const appleButton =
   "inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
 const sectionEyebrow = "text-[11px] font-semibold uppercase text-muted";
@@ -110,6 +120,28 @@ const liquidGlassStyle: React.CSSProperties = {
   backdropFilter: "blur(72px) saturate(240%)",
   WebkitBackdropFilter: "blur(72px) saturate(240%)",
 };
+const floatingGlassPanelStyle: React.CSSProperties = {
+  backgroundColor: "rgba(var(--color-card-rgb),0.58)",
+  backgroundImage: "linear-gradient(180deg, rgba(var(--color-card-rgb),0.70), rgba(var(--color-card-rgb),0.38))",
+  backdropFilter: "blur(32px) saturate(180%)",
+  WebkitBackdropFilter: "blur(32px) saturate(180%)",
+  boxShadow: "0 28px 96px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.14), inset 0 0 0 1px var(--color-border-soft)",
+};
+const quotationCompactDockGlassStyle: React.CSSProperties = {
+  backdropFilter: "blur(36px) saturate(210%)",
+  WebkitBackdropFilter: "blur(36px) saturate(210%)",
+  boxShadow: "0 10px 28px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.22)",
+};
+const quotationExpandedDockGlassStyle: React.CSSProperties = {
+  backdropFilter: "blur(40px) saturate(210%)",
+  WebkitBackdropFilter: "blur(40px) saturate(210%)",
+  boxShadow: "0 22px 68px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.16), inset 0 0 0 1px var(--color-border-soft)",
+};
+const PREVIEW_DOCUMENT_WIDTH = 860;
+
+function clampPreviewScale(value: number) {
+  return Math.min(1.25, Math.max(0.32, Math.round(value * 100) / 100));
+}
 
 function fmt(n: number) { return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function money(n: number) {
@@ -212,15 +244,43 @@ function sanitizeEmailMessageHtml(html: string) {
   const source = document.createElement("div");
   source.innerHTML = html;
 
+  const isBlockElement = (node: Node) => {
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    const tag = (node as HTMLElement).tagName.toLowerCase();
+    return tag === "div" || tag === "p";
+  };
+
+  const cleanNodes = (nodes: Node[]): string => {
+    let result = "";
+    let previousWasBlock = false;
+
+    nodes.forEach(node => {
+      if (isBlockElement(node)) {
+        if (result && !result.endsWith("<br/>")) result += "<br/>";
+        result += cleanNodes(Array.from(node.childNodes)) || "<br/>";
+        previousWasBlock = true;
+        return;
+      }
+
+      const cleanHtml = cleanNode(node);
+      if (!cleanHtml) return;
+      if (previousWasBlock && !result.endsWith("<br/>")) result += "<br/>";
+      result += cleanHtml;
+      previousWasBlock = false;
+    });
+
+    return result;
+  };
+
   const cleanNode = (node: Node): string => {
     if (node.nodeType === Node.TEXT_NODE) {
-      return escapeHtml(node.textContent || "");
+      return escapeHtmlWithLineBreaks(node.textContent || "");
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
 
     const element = node as HTMLElement;
     const tag = element.tagName.toLowerCase();
-    const children = Array.from(element.childNodes).map(cleanNode).join("");
+    const children = cleanNodes(Array.from(element.childNodes));
 
     if (tag === "span") {
       const variable = element.getAttribute("data-email-variable");
@@ -229,16 +289,11 @@ function sanitizeEmailMessageHtml(html: string) {
     if (tag === "strong" || tag === "b") return children ? `<strong>${children}</strong>` : "";
     if (tag === "br") return "<br/>";
     if (tag === "hr") return messageDividerHtml;
-    if (tag === "div" || tag === "p") return children ? `${children}<br/>` : "<br/>";
 
     return children;
   };
 
-  return Array.from(source.childNodes)
-    .map(cleanNode)
-    .join("")
-    .replace(/(<br\/>){3,}/g, "<br/><br/>")
-    .trim();
+  return cleanNodes(Array.from(source.childNodes)).trim();
 }
 
 function applyAutoBoldToMessageHtml(html: string, boldValues: string[]) {
@@ -427,7 +482,12 @@ export default function QuotationDetailPage() {
   const [previewTemplateLoading, setPreviewTemplateLoading] = useState(false);
   const [previewTemplateError, setPreviewTemplateError] = useState("");
   const [previewHeight, setPreviewHeight] = useState(720);
+  const [previewZoomMode, setPreviewZoomMode] = useState<"fit" | "custom">("fit");
+  const [previewScale, setPreviewScale] = useState(1);
+  const [previewFitScale, setPreviewFitScale] = useState(1);
   const [headerOverPreview, setHeaderOverPreview] = useState(false);
+  const [mobileHeaderCollapsed, setMobileHeaderCollapsed] = useState(false);
+  const [isDockExpanded, setIsDockExpanded] = useState(false);
   const [statusDropdown, setStatusDropdown] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [moreMenuAnchor, setMoreMenuAnchor] = useState<"header" | "summary" | null>(null);
@@ -452,16 +512,20 @@ export default function QuotationDetailPage() {
   const quotationTemplatePromiseRef = useRef<Promise<string> | null>(null);
   const emailPdfPromiseRef = useRef<{ html: string; promise: Promise<string> } | null>(null);
   const emailEditorRef = useRef<HTMLDivElement | null>(null);
+  const latestEmailEditorHtmlRef = useRef("");
   const emailTemplateDropdownRef = useRef<HTMLDivElement | null>(null);
   const emailTemplateDropdownButtonRef = useRef<HTMLButtonElement | null>(null);
   const emailTemplateDropdownPanelRef = useRef<HTMLDivElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const previewPanelRef = useRef<HTMLDivElement | null>(null);
+  const previewViewportRef = useRef<HTMLDivElement | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const moreMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mobileHeaderCollapsedRef = useRef(false);
   const isMounted = useRef(true);
   const isInitialLoad = useRef(true);
   const isSwitchingRevision = useRef(false);
+  const dockDragControls = useDragControls();
   useEffect(() => {
     isMounted.current = true;
     return () => {
@@ -471,12 +535,64 @@ export default function QuotationDetailPage() {
   }, []);
 
   useEffect(() => {
+    const scrollArea = document.getElementById("dashboard-scroll-area");
+    let frameId = 0;
+
+    const updateHeaderState = () => {
+      frameId = 0;
+      const isSmallScreen = window.innerWidth < 1280;
+      const scrollTop = scrollArea?.scrollTop ?? window.scrollY;
+      if (!isSmallScreen) {
+        if (mobileHeaderCollapsedRef.current) {
+          mobileHeaderCollapsedRef.current = false;
+          setMobileHeaderCollapsed(false);
+        }
+        setIsDockExpanded(false);
+        return;
+      }
+
+      const nextCollapsed = mobileHeaderCollapsedRef.current
+        ? scrollTop > 44
+        : scrollTop > 96;
+      if (nextCollapsed !== mobileHeaderCollapsedRef.current) {
+        mobileHeaderCollapsedRef.current = nextCollapsed;
+        setMobileHeaderCollapsed(nextCollapsed);
+      }
+    };
+
+    const scheduleHeaderUpdate = () => {
+      if (frameId) return;
+      frameId = requestAnimationFrame(updateHeaderState);
+    };
+
+    scheduleHeaderUpdate();
+    scrollArea?.addEventListener("scroll", scheduleHeaderUpdate, { passive: true });
+    window.addEventListener("scroll", scheduleHeaderUpdate, { passive: true });
+    window.addEventListener("resize", scheduleHeaderUpdate);
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      scrollArea?.removeEventListener("scroll", scheduleHeaderUpdate);
+      window.removeEventListener("scroll", scheduleHeaderUpdate);
+      window.removeEventListener("resize", scheduleHeaderUpdate);
+    };
+  }, []);
+
+  useEffect(() => {
     const editor = emailEditorRef.current;
     if (!editor || document.activeElement === editor) return;
-    if (editor.innerHTML !== emailMessageHtml) {
-      editor.innerHTML = emailMessageHtml;
+    if (editor.innerHTML !== latestEmailEditorHtmlRef.current) {
+      editor.innerHTML = latestEmailEditorHtmlRef.current;
     }
   }, [emailMessageHtml]);
+
+  const setEmailEditorRef = useCallback((node: HTMLDivElement | null) => {
+    emailEditorRef.current = node;
+    if (!node) return;
+    const html = latestEmailEditorHtmlRef.current;
+    if (node.innerHTML !== html) {
+      node.innerHTML = html;
+    }
+  }, []);
 
   const positionEmailTemplateDropdown = useCallback(() => {
     const button = emailTemplateDropdownButtonRef.current;
@@ -595,13 +711,22 @@ export default function QuotationDetailPage() {
 
   const positionMoreMenu = useCallback((button: HTMLButtonElement) => {
     const rect = button.getBoundingClientRect();
-    const menuWidth = 288;
     const viewportPadding = 12;
+    const isDockSheet = window.innerWidth < 1280;
+    const menuWidth = isDockSheet ? Math.min(420, window.innerWidth - viewportPadding * 2) : 288;
     const maxLeft = Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding);
     const preferredLeft = rect.right - menuWidth;
     const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
     const spaceAbove = rect.top - viewportPadding;
-    const preferredHeight = Math.min(520, window.innerHeight - viewportPadding * 2);
+    const preferredHeight = Math.min(isDockSheet ? 460 : 520, window.innerHeight - viewportPadding * 2);
+    if (isDockSheet) {
+      setMoreMenuPosition({
+        top: Math.max(viewportPadding, window.innerHeight - preferredHeight - viewportPadding - 8),
+        left: Math.max(viewportPadding, (window.innerWidth - menuWidth) / 2),
+        maxHeight: preferredHeight,
+      });
+      return;
+    }
     const openAbove = spaceBelow < 360 && spaceAbove > spaceBelow;
     const availableHeight = openAbove ? spaceAbove : spaceBelow;
     const maxHeight = Math.max(120, Math.min(preferredHeight, availableHeight));
@@ -682,13 +807,32 @@ export default function QuotationDetailPage() {
     setPreviewHeight(height + 4);
   }, []);
 
+  const updatePreviewFitScale = useCallback(() => {
+    const viewport = previewViewportRef.current;
+    if (!viewport) return;
+    const nextScale = window.innerWidth >= 1280
+      ? 1
+      : clampPreviewScale(viewport.clientWidth / PREVIEW_DOCUMENT_WIDTH);
+    setPreviewFitScale(current => Math.abs(current - nextScale) < 0.01 ? current : nextScale);
+  }, []);
+
   useEffect(() => {
     const handleResize = () => {
       if (previewIframeRef.current) resizePreview(previewIframeRef.current);
+      updatePreviewFitScale();
     };
+    let resizeObserver: ResizeObserver | null = null;
+    if (previewViewportRef.current && typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(handleResize);
+      resizeObserver.observe(previewViewportRef.current);
+    }
+    requestAnimationFrame(handleResize);
     window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, [resizePreview]);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [activeTab, resizePreview, updatePreviewFitScale]);
 
   useEffect(() => {
     if (activeTab !== "preview") {
@@ -861,6 +1005,15 @@ export default function QuotationDetailPage() {
   const allowedResponseStatuses = quotation
     ? RESPONSE_ACTION_STATUSES.filter((status) => getAllowedQuotationTransitions(quotation.status).includes(status))
     : [];
+  const effectivePreviewScale = previewZoomMode === "fit" ? previewFitScale : previewScale;
+  const previewZoomPercent = Math.round(effectivePreviewScale * 100);
+  const adjustPreviewZoom = (delta: number) => {
+    setPreviewZoomMode("custom");
+    setPreviewScale(clampPreviewScale(effectivePreviewScale + delta));
+  };
+  const primaryDockCompactLabel = isEditable
+    ? (finalising ? "..." : "Finalise")
+    : (emailLoading ? "..." : "Email");
 
   // Finalize
   const handleFinalize = async () => {
@@ -1003,7 +1156,29 @@ export default function QuotationDetailPage() {
     const editor = emailEditorRef.current;
     if (!editor) return;
     const cleanHtml = sanitizeEmailMessageHtml(editor.innerHTML);
+    latestEmailEditorHtmlRef.current = cleanHtml;
     setEmailMessageHtml(cleanHtml);
+  };
+
+  const setEmailEditorHtml = useCallback((html: string) => {
+    const cleanHtml = sanitizeEmailMessageHtml(html);
+    latestEmailEditorHtmlRef.current = cleanHtml;
+    setEmailMessageHtml(cleanHtml);
+    const editor = emailEditorRef.current;
+    if (editor && editor.innerHTML !== cleanHtml) {
+      editor.innerHTML = cleanHtml;
+    }
+  }, []);
+
+  const handleEmailEditorBlur = () => {
+    const editor = emailEditorRef.current;
+    if (!editor) return;
+    const cleanHtml = sanitizeEmailMessageHtml(editor.innerHTML);
+    latestEmailEditorHtmlRef.current = cleanHtml;
+    setEmailMessageHtml(cleanHtml);
+    if (editor.innerHTML !== cleanHtml) {
+      editor.innerHTML = cleanHtml;
+    }
   };
 
   const focusEmailEditor = () => {
@@ -1028,15 +1203,15 @@ export default function QuotationDetailPage() {
     if (!template) {
       setEmailTemplateName("");
       const currentRevision = quotation?.revisions.find(revision => revision.revisionNumber === quotation.currentRevisionNumber);
-      setEmailMessageHtml(quotation && currentRevision ? getDefaultEmailMessageHtml(quotation, currentRevision) : "");
+      setEmailEditorHtml(quotation && currentRevision ? getDefaultEmailMessageHtml(quotation, currentRevision) : "");
       return;
     }
     setEmailTemplateName(template.name);
-    setEmailMessageHtml(sanitizeEmailMessageHtml(template.bodyHtml));
+    setEmailEditorHtml(template.bodyHtml);
   };
 
   const saveEmailMessageTemplate = async (mode: "create" | "update") => {
-    const cleanHtml = sanitizeEmailMessageHtml(emailMessageHtml);
+    const cleanHtml = sanitizeEmailMessageHtml(latestEmailEditorHtmlRef.current);
     const bodyText = htmlToPlainText(cleanHtml);
     const selectedTemplate = emailMessageTemplates.find(template => template._id === selectedEmailTemplateId);
     const name = emailTemplateName.trim() || selectedTemplate?.name || "Quotation message";
@@ -1068,7 +1243,7 @@ export default function QuotationDetailPage() {
       if (!response.ok || !data?.template) {
         throw new Error(data?.error || "Failed to save message");
       }
-      setEmailMessageHtml(data.template.bodyHtml);
+      setEmailEditorHtml(data.template.bodyHtml);
       setEmailTemplateName(data.template.name);
       setSelectedEmailTemplateId(data.template._id);
       await loadEmailMessageTemplates();
@@ -1164,7 +1339,7 @@ export default function QuotationDetailPage() {
     setEmailTemplateName("");
     const currentRevision = quotation.revisions.find(revision => revision.revisionNumber === quotation.currentRevisionNumber);
     setEmailSubject(currentRevision ? getQuotationEmailSubject(quotation, currentRevision) : "");
-    setEmailMessageHtml(currentRevision ? getDefaultEmailMessageHtml(quotation, currentRevision) : "");
+    setEmailEditorHtml(currentRevision ? getDefaultEmailMessageHtml(quotation, currentRevision) : "");
     setClientEmailOptions([]);
     setEmailModalOpen(true);
     void loadEmailMessageTemplates();
@@ -1234,7 +1409,7 @@ export default function QuotationDetailPage() {
       if (!target) return;
       const template = await loadQuotationTemplate();
       const quotationHtml = buildQuotationHTML(template, target.quotation, target.revision);
-      const messageHtml = sanitizeEmailMessageHtml(emailMessageHtml);
+      const messageHtml = sanitizeEmailMessageHtml(latestEmailEditorHtmlRef.current);
       const html = prependEmailMessage(quotationHtml, messageHtml, target.quotation);
       const subject = emailSubject.trim() || getQuotationEmailSubject(target.quotation, target.revision);
       const filename = `${getQuotationDocumentTitle(target.quotation, target.revision)}.pdf`;
@@ -1262,7 +1437,7 @@ export default function QuotationDetailPage() {
         setEmailRecipient("");
         setEmailCc("");
         setEmailSubject("");
-        setEmailMessageHtml("");
+        setEmailEditorHtml("");
         setSelectedEmailTemplateId("");
         setEmailTemplateName("");
         setSelectedToEmails([]);
@@ -1354,7 +1529,7 @@ export default function QuotationDetailPage() {
           animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
           exit={{ opacity: 0, y: -6, scale: 0.97, filter: "blur(6px)" }}
           transition={{ type: "spring", stiffness: 430, damping: 34, mass: 0.75 }}
-          className="fixed isolate z-[100] overflow-hidden rounded-[24px] border border-white/70 bg-white/12 p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.78)] dark:border-white/10 dark:bg-black/15"
+          className="fixed isolate z-[100] overflow-hidden rounded-[24px] border border-white/70 bg-white/[0.12] p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.78)] dark:border-white/[0.12] dark:bg-[#1c1c1e]/[0.82] dark:shadow-[0_28px_80px_rgba(0,0,0,0.64),inset_0_1px_0_rgba(255,255,255,0.08)]"
           style={{
             top: emailTemplateDropdownPosition.top,
             left: emailTemplateDropdownPosition.left,
@@ -1363,7 +1538,7 @@ export default function QuotationDetailPage() {
             WebkitBackdropFilter: "blur(32px) saturate(180%)",
           }}
         >
-          <div className="pointer-events-none absolute inset-0 z-0 bg-white/20 dark:bg-black/15" />
+          <div className="pointer-events-none absolute inset-0 z-0 bg-white/20 dark:bg-white/[0.04]" />
           <div className="pointer-events-none absolute inset-x-5 top-0 z-10 h-px bg-white/90" />
           {[
             { _id: "", name: "Default / unsaved message", bodyHtml: "", bodyText: "" },
@@ -1381,10 +1556,10 @@ export default function QuotationDetailPage() {
                 className={`group/item relative z-10 flex min-h-11 w-full items-center gap-3 rounded-[18px] px-3.5 py-2.5 text-left text-sm font-semibold transition-all duration-200 active:scale-[0.99] ${
                   active
                     ? "bg-brand-600 text-white shadow-[0_10px_26px_rgba(37,99,235,0.28)]"
-                    : "bg-white/10 text-default hover:bg-white/45 hover:shadow-sm dark:bg-white/5 dark:hover:bg-white/10"
+                    : "bg-white/10 text-default hover:bg-white/[0.45] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.10]"
                 }`}
               >
-                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition duration-200 ${active ? "bg-white/18 text-white" : "bg-white/45 text-faint group-hover/item:text-muted dark:bg-white/10"}`}>
+                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition duration-200 ${active ? "bg-white/[0.18] text-white" : "bg-white/[0.45] text-faint group-hover/item:text-muted dark:bg-white/[0.10]"}`}>
                   {active && <Check className="h-3.5 w-3.5" />}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{template.name}</span>
@@ -1402,18 +1577,18 @@ export default function QuotationDetailPage() {
         className="min-h-screen space-y-8 pb-28"
         style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif' }}
       >
-        <div className="sticky top-4 z-40 rounded-[32px] border border-white/50 bg-card/75 px-5 py-5 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur-2xl">
+        <div className="sticky top-4 z-40 rounded-[32px] border border-white/50 bg-white/[0.56] px-5 py-5 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur-2xl dark:border-white/[0.10] dark:bg-[#1c1c1e]/[0.58] dark:shadow-[0_22px_72px_rgba(0,0,0,0.56)]">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-4">
-              <div className="h-11 w-11 animate-pulse rounded-full bg-surface" />
+              <div className="h-11 w-11 animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08]" />
               <div className="space-y-3">
-                <div className="h-8 w-52 animate-pulse rounded-full bg-surface" />
-                <div className="h-4 w-72 max-w-[70vw] animate-pulse rounded-full bg-surface" />
+                <div className="h-8 w-52 animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08]" />
+                <div className="h-4 w-72 max-w-[70vw] animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08]" />
               </div>
             </div>
             <div className="space-y-3 lg:text-right">
-              <div className="h-3 w-24 animate-pulse rounded-full bg-surface lg:ml-auto" />
-              <div className="h-8 w-40 animate-pulse rounded-full bg-surface" />
+              <div className="h-3 w-24 animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08] lg:ml-auto" />
+              <div className="h-8 w-40 animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08]" />
             </div>
           </div>
         </div>
@@ -1421,22 +1596,22 @@ export default function QuotationDetailPage() {
           <div className="space-y-6">
             {[0, 1, 2].map(i => (
               <div key={i} className={`${surfaceCard} p-6 sm:p-8`}>
-                <div className="mb-6 h-5 w-44 animate-pulse rounded-full bg-surface" />
+                <div className="mb-6 h-5 w-44 animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08]" />
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div className="h-12 animate-pulse rounded-2xl bg-surface" />
-                  <div className="h-12 animate-pulse rounded-2xl bg-surface" />
-                  <div className="h-24 animate-pulse rounded-[24px] bg-surface sm:col-span-2" />
+                  <div className="h-12 animate-pulse rounded-2xl bg-black/[0.08] dark:bg-white/[0.08]" />
+                  <div className="h-12 animate-pulse rounded-2xl bg-black/[0.08] dark:bg-white/[0.08]" />
+                  <div className="h-24 animate-pulse rounded-[24px] bg-black/[0.08] dark:bg-white/[0.08] sm:col-span-2" />
                 </div>
               </div>
             ))}
           </div>
           <div className={`${surfaceCard} h-96 p-6`}>
-            <div className="h-4 w-28 animate-pulse rounded-full bg-surface" />
-            <div className="mt-6 h-12 w-48 animate-pulse rounded-full bg-surface" />
+            <div className="h-4 w-28 animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08]" />
+            <div className="mt-6 h-12 w-48 animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08]" />
             <div className="mt-8 space-y-4">
-              <div className="h-4 animate-pulse rounded-full bg-surface" />
-              <div className="h-4 animate-pulse rounded-full bg-surface" />
-              <div className="h-12 animate-pulse rounded-full bg-surface" />
+              <div className="h-4 animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08]" />
+              <div className="h-4 animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08]" />
+              <div className="h-12 animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08]" />
             </div>
           </div>
         </div>
@@ -1446,23 +1621,136 @@ export default function QuotationDetailPage() {
 
   if (!quotation) return null;
 
-  const menuItemClass = "relative z-10 flex w-full items-center gap-3 rounded-2xl bg-white/12 px-3.5 py-3 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white/5 dark:hover:bg-white/10";
+  const summaryBreakdownRows = [
+    { label: "EPR Credits", value: liveItemsSubtotal },
+    { label: "GST on Credits", value: liveItemsGst },
+    ...(liveCC > 0 ? [{ label: "Consultation", value: liveCC }] : []),
+    ...(liveCCGst > 0 ? [{ label: "GST on Consultation", value: liveCCGst }] : []),
+    ...(liveGF > 0 ? [{ label: "Government Fees", value: liveGF }] : []),
+  ];
+  const summaryMetaRows = [
+    { label: "Current Revision", value: `Rev ${quotation.currentRevisionNumber}`, mono: true },
+    ...(quotation.validTill ? [{ label: "Valid Till", value: fmtDate(quotation.validTill), mono: false }] : []),
+    ...(quotation.sentAt ? [{ label: "Sent", value: fmtDate(quotation.sentAt), mono: false }] : []),
+  ];
+  const hasPrimaryDockAction = isEditable || canCreateEmailDraft;
+  const primaryDockActionDisabled = isEditable ? finalising : emailLoading;
+  const handlePrimaryDockAction = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (primaryDockActionDisabled) return;
+    if (isEditable) {
+      handleFinalize();
+      return;
+    }
+    openEmailDraftModal();
+  };
+  const renderSummaryIdentity = () => (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <p className="font-mono text-xs text-faint">{quotation.quotationNumber || "DRAFT"}{quotation.quotationNumber ? ` - Rev ${quotation.currentRevisionNumber}` : ""}</p>
+        <p className="mt-2 truncate text-lg font-semibold leading-snug text-default">{quotation.clientName}</p>
+        <p className="mt-1 text-sm text-muted">FY {quotation.financialYear}</p>
+      </div>
+      <QuotationStatusPill status={quotation.status} />
+    </div>
+  );
+  const renderSummaryTotal = (compact = false) => (
+    <div className={`my-6 rounded-[28px] p-5 ${quoteSubtleSurface}`}>
+      <p className="text-xs font-semibold uppercase text-muted">Grand Total</p>
+      <p className={`mt-2 font-mono font-semibold leading-none tabular-nums text-default ${compact ? "text-3xl sm:text-4xl" : "text-4xl"}`}>{money(liveGrand)}</p>
+    </div>
+  );
+  const renderQuotationSummaryActions = (variant: "sidebar" | "dock") => {
+    const isDock = variant === "dock";
+    return (
+      <div className={`mt-6 grid gap-2 ${isDock ? "sm:grid-cols-2" : ""}`}>
+        {isEditable ? (
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); handleFinalize(); }}
+            disabled={finalising}
+            className="btn-primary w-full justify-center gap-2 rounded-full py-3 shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98]"
+          >
+            <Sparkles className="h-4 w-4" />
+            {finalising ? "Finalising..." : "Finalise Quote"}
+          </button>
+        ) : canCreateEmailDraft ? (
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); openEmailDraftModal(); }}
+            disabled={emailLoading}
+            className="btn-primary w-full justify-center gap-2 rounded-full py-3 shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98]"
+          >
+            <Mail className="h-4 w-4" />
+            {emailLoading ? "Creating..." : "Email Draft"}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            openMoreMenu(event, "summary");
+          }}
+          className={`btn-secondary w-full justify-center gap-2 rounded-full bg-white/90 py-3 text-sm transition duration-200 active:scale-[0.98] dark:bg-white/[0.06] dark:hover:bg-white/[0.10] ${isDock && !hasPrimaryDockAction ? "sm:col-span-2" : ""}`}
+        >
+          <MoreHorizontal className="h-4 w-4" /> More
+        </button>
+      </div>
+    );
+  };
+  const renderQuotationSummaryDetails = (variant: "sidebar" | "dock") => {
+    const isDock = variant === "dock";
+    const rowClass = isDock
+      ? `flex items-center justify-between gap-4 rounded-2xl px-3.5 py-3 ${quoteNestedSurface}`
+      : "flex items-center justify-between gap-4";
+    const rowsClass = isDock ? "grid gap-3 text-sm sm:grid-cols-2" : "space-y-3 text-sm";
+
+    return (
+      <>
+        <div className={rowsClass}>
+          {summaryBreakdownRows.map(({ label, value }) => (
+            <div key={label} className={rowClass}>
+              <span className="text-muted">{label}</span>
+              <span className="font-mono font-medium tabular-nums text-default">{money(value)}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="my-6 h-px bg-base" />
+
+        <div className={rowsClass}>
+          {summaryMetaRows.map(({ label, value, mono }) => (
+            <div key={label} className={rowClass}>
+              <span className="text-muted">{label}</span>
+              <span className={`text-default ${mono ? "font-mono font-medium" : ""}`}>{value}</span>
+            </div>
+          ))}
+        </div>
+
+        {isDock && !isEditable && !canCreateEmailDraft && emailDraftUnavailableMessage && (
+          <div className={`mt-5 rounded-2xl px-4 py-3 text-sm leading-relaxed text-muted ${quoteSubtleSurface}`}>
+            {emailDraftUnavailableMessage}
+          </div>
+        )}
+
+        {renderQuotationSummaryActions(variant)}
+      </>
+    );
+  };
+
+  const menuItemClass = "relative z-10 flex w-full items-center gap-3 rounded-2xl bg-white/[0.12] px-3.5 py-3 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white/[0.05] dark:hover:bg-white/[0.10]";
   const moreMenu = (
     <div
-      className="fixed isolate z-50 w-72 max-w-[calc(100vw-24px)] origin-top-right overflow-y-auto rounded-[24px] border border-white/65 p-2 shadow-[0_26px_90px_rgba(0,0,0,0.22)] transition-all duration-200 dark:border-white/10"
+      className="fixed isolate z-50 w-[min(420px,calc(100vw-24px))] origin-top-right overflow-y-auto rounded-[24px] border border-white/[0.65] p-2 shadow-[0_26px_90px_rgba(0,0,0,0.22)] transition-all duration-200 dark:border-white/10 xl:w-72 xl:max-w-[calc(100vw-24px)]"
       onClick={(event) => event.stopPropagation()}
       style={{
         top: moreMenuPosition.top,
         left: moreMenuPosition.left,
         maxHeight: moreMenuPosition.maxHeight,
-        backgroundColor: "rgba(218, 223, 232, 0.24)",
-        backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.16), rgba(225,230,238,0.06))",
-        backdropFilter: "blur(32px) saturate(180%)",
-        WebkitBackdropFilter: "blur(32px) saturate(180%)",
-        boxShadow: "0 28px 96px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.72), inset 0 0 0 1px rgba(255,255,255,0.28)",
+        ...floatingGlassPanelStyle,
       }}
     >
-      <div className="pointer-events-none absolute inset-0 z-0 bg-[#eef1f6]/15 dark:bg-black/10" />
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[#eef1f6]/[0.15] dark:bg-black/10" />
       <div className="pointer-events-none absolute inset-x-4 top-0 z-0 h-px bg-white/90" />
       <button
         onClick={() => { setMoreMenuOpen(false); handlePrintPreview(); }}
@@ -1515,7 +1803,7 @@ export default function QuotationDetailPage() {
               <button
                 key={s}
                 onClick={() => updateStatus(s)}
-                className="flex w-full items-center gap-3 rounded-2xl bg-white/12 px-3.5 py-2.5 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] dark:bg-white/5 dark:hover:bg-white/10"
+                className="flex w-full items-center gap-3 rounded-2xl bg-white/[0.12] px-3.5 py-2.5 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] dark:bg-white/[0.05] dark:hover:bg-white/[0.10]"
               >
                 <span className={`h-2 w-2 rounded-full ${cfg.dot}`} />
                 <span>{cfg.label}</span>
@@ -1527,7 +1815,7 @@ export default function QuotationDetailPage() {
       <button
         disabled
         title="Archive workflow is not available for quotations yet"
-        className="relative z-10 mt-1 flex w-full cursor-not-allowed items-center gap-3 rounded-2xl bg-white/10 px-3.5 py-3 text-left text-sm text-faint opacity-50 dark:bg-white/5"
+        className="relative z-10 mt-1 flex w-full cursor-not-allowed items-center gap-3 rounded-2xl bg-white/10 px-3.5 py-3 text-left text-sm text-faint opacity-50 dark:bg-white/[0.05]"
       >
         <AlertTriangle className="h-4 w-4" />
         <span>
@@ -1540,58 +1828,51 @@ export default function QuotationDetailPage() {
 
   return (
     <div
-      className="min-h-screen pb-28"
+      className="min-h-screen pb-[calc(9rem+env(safe-area-inset-bottom))] xl:pb-28"
       style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif' }}
     >
       {/* ─── TOP BAR ─── */}
       <div
         ref={stickyHeaderRef}
-        className="sticky top-4 z-40 mb-8 rounded-[32px] border border-white/50 bg-card/75 px-5 py-4 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur-2xl transition-[background-color,border-color,color,box-shadow] duration-200 dark:border-white/10 dark:bg-card/80 sm:px-6"
-        style={headerOverPreview ? {
-          "--color-text": "#1d1d1f",
-          "--color-text-muted": "#424245",
-          "--color-text-faint": "#6e6e73",
-          "--color-card": "#ffffff",
-          "--color-card-rgb": "255,255,255",
-          "--color-surface": "#f5f5f7",
-          "--color-border": "rgba(0,0,0,0.09)",
-          "--color-border-soft": "rgba(0,0,0,0.05)",
-          backgroundColor: "rgba(255,255,255,0.68)",
-          borderColor: "rgba(255,255,255,0.72)",
-          backdropFilter: "blur(28px) saturate(180%)",
-          WebkitBackdropFilter: "blur(28px) saturate(180%)",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.78)",
-        } as React.CSSProperties : undefined}
+        className={`sticky z-40 backdrop-blur-2xl transition-all duration-300 ${
+          mobileHeaderCollapsed
+            ? "top-2 mb-5 rounded-[26px] px-3 py-3 sm:px-4 xl:top-4 xl:mb-8 xl:rounded-[32px] xl:px-5 xl:py-4"
+            : "top-4 mb-8 rounded-[32px] px-5 py-4 sm:px-6"
+        } ${
+          headerOverPreview
+            ? "border border-white/75 bg-white/[0.62] shadow-[0_20px_60px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.58)] dark:border-white/[0.16] dark:bg-[#111113]/[0.68] dark:shadow-[0_26px_80px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(255,255,255,0.10)]"
+            : "border border-white/50 bg-white/[0.56] shadow-[0_20px_60px_rgba(0,0,0,0.08)] dark:border-white/[0.10] dark:bg-[#1c1c1e]/[0.58] dark:shadow-[0_22px_72px_rgba(0,0,0,0.56)]"
+        }`}
       >
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-0 items-start gap-4">
+        <div className={`flex flex-col ${mobileHeaderCollapsed ? "gap-3" : "gap-5"} xl:flex-row xl:items-center xl:justify-between`}>
+          <div className={`flex min-w-0 ${mobileHeaderCollapsed ? "items-center gap-3" : "items-start gap-4"}`}>
             <button
               onClick={() => router.push("/dashboard/quotations")}
-              className="mt-1 shrink-0 rounded-full border border-base bg-surface/80 p-3 text-muted transition duration-200 hover:-translate-y-0.5 hover:bg-card hover:text-default hover:shadow-sm active:scale-[0.98]"
+              className={`shrink-0 rounded-full text-muted transition duration-200 hover:-translate-y-0.5 hover:text-default hover:shadow-sm active:scale-[0.98] ${mobileHeaderCollapsed ? "mt-0 p-2.5" : "mt-1 p-3"} ${quoteControlSurface}`}
               title="Back to quotations"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
             <div className="min-w-0">
-              <h1 className="min-w-0 truncate text-3xl font-semibold leading-tight text-default sm:text-4xl">
+              <h1 className={`min-w-0 truncate font-semibold leading-tight text-default transition-all duration-300 ${mobileHeaderCollapsed ? "text-lg sm:text-xl" : "text-3xl sm:text-4xl"}`}>
                 {quotation.quotationNumber ? (
                   <span>{quotation.quotationNumber}</span>
                 ) : (
                   <span className="text-muted">Untitled Draft</span>
                 )}
               </h1>
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted">
-                <span className="font-medium text-default">{quotation.clientName}</span>
-                <QuotationStatusPill status={quotation.status} forceLight={headerOverPreview} />
-                <span className="text-faint">FY {quotation.financialYear}</span>
-                {quotation.validTill && <span className="text-faint">Valid till {fmtDate(quotation.validTill)}</span>}
+              <div className={`mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-muted transition-all duration-300 ${mobileHeaderCollapsed ? "text-xs" : "text-sm"}`}>
+                <span className={`font-medium text-default ${mobileHeaderCollapsed ? "hidden sm:inline" : ""}`}>{quotation.clientName}</span>
+                <QuotationStatusPill status={quotation.status} />
+                <span className={`text-faint ${mobileHeaderCollapsed ? "hidden sm:inline" : ""}`}>FY {quotation.financialYear}</span>
+                {quotation.validTill && <span className={`text-faint ${mobileHeaderCollapsed ? "hidden md:inline" : ""}`}>Valid till {fmtDate(quotation.validTill)}</span>}
                 {savedStatus === "saving" && <span className="animate-pulse text-xs text-muted">Saving...</span>}
                 {savedStatus === "saved" && <span className="flex items-center gap-1 text-xs text-emerald-500"><CheckCircle2 className="h-3 w-3" />Saved</span>}
               </div>
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between lg:justify-end">
+          <div className="hidden flex-col gap-3 xl:flex xl:flex-row xl:items-center xl:justify-end">
             <div className="sm:text-right">
               <p className="text-xs font-semibold uppercase text-muted">Grand Total</p>
               <p className="mt-1 text-3xl font-semibold leading-none text-default">{money(liveGrand)}</p>
@@ -1601,7 +1882,7 @@ export default function QuotationDetailPage() {
                 <button
                   onClick={handleFinalize}
                   disabled={finalising}
-                  className="btn-primary gap-2 rounded-full px-5 py-3 text-sm shadow-sm shadow-brand-600/15 transition duration-200 active:scale-[0.98]"
+                  className="btn-primary gap-2 rounded-full px-5 py-3 text-sm shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98]"
                 >
                   <Sparkles className="h-4 w-4" />
                   {finalising ? "Finalising..." : "Finalise Quote"}
@@ -1611,21 +1892,21 @@ export default function QuotationDetailPage() {
                 <button
                   onClick={openEmailDraftModal}
                   disabled={emailLoading}
-                  className="btn-primary gap-2 rounded-full px-5 py-3 text-sm shadow-sm shadow-brand-600/15 transition duration-200 active:scale-[0.98]"
+                  className="btn-primary gap-2 rounded-full px-5 py-3 text-sm shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98]"
                 >
                   <Mail className="h-4 w-4" />
                   {emailLoading ? "Creating..." : "Email Draft"}
                 </button>
               )}
               {!isEditable && !canCreateEmailDraft && (
-                <div className="hidden rounded-full border border-base bg-surface/80 px-4 py-2 text-sm text-muted sm:block">
+                <div className={`hidden rounded-full px-4 py-2 text-sm text-muted sm:block ${quoteControlSurface}`}>
                   {QUOTATION_STATUS_CONFIG[quotation.status].label}
                 </div>
               )}
               <div className="relative">
                 <button
                   onClick={(e) => openMoreMenu(e, "header")}
-                  className="inline-flex items-center gap-2 rounded-full border border-base bg-surface/80 px-4 py-3 text-muted transition duration-200 hover:-translate-y-0.5 hover:bg-card hover:text-default hover:shadow-sm active:scale-[0.98]"
+                  className={`inline-flex items-center gap-2 rounded-full px-4 py-3 text-muted transition duration-200 hover:-translate-y-0.5 hover:text-default hover:shadow-sm active:scale-[0.98] ${quoteControlSurface}`}
                   title="More actions"
                 >
                   <MoreHorizontal className="h-5 w-5" />
@@ -1639,15 +1920,15 @@ export default function QuotationDetailPage() {
 
       {/* ─── REVISION STEPPER ─── */}
       {quotation.revisions.length > 0 && (
-        <div className="mb-6 flex max-w-full items-center gap-2 overflow-x-auto rounded-[28px] border border-base bg-surface/70 p-2 shadow-sm backdrop-blur-xl">
+        <div className={`mb-6 flex max-w-full items-center gap-2 overflow-x-auto rounded-[28px] p-2 shadow-sm backdrop-blur-xl ${quoteSubtleSurface}`}>
           {quotation.revisions.map(rev => (
             <button
               key={rev.revisionNumber}
               onClick={() => setSelectedRevNum(rev.revisionNumber)}
               className={`flex shrink-0 items-center gap-3 rounded-full border px-4 py-2.5 text-sm font-medium transition-all duration-200 whitespace-nowrap active:scale-[0.98] ${
                 selectedRevNum === rev.revisionNumber
-                  ? "border-white/70 bg-card text-default shadow-[0_10px_30px_rgba(0,0,0,0.08)]"
-                  : "border-transparent text-muted hover:bg-card/70 hover:text-default"
+                  ? quoteActiveSurface
+                  : "border-transparent text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.08]"
               }`}
             >
               <span className={`h-2 w-2 rounded-full shrink-0 ${rev.isFinalised ? "bg-emerald-400" : "bg-amber-400"}`} title={rev.isFinalised ? "Finalised" : "Draft"} />
@@ -1660,7 +1941,7 @@ export default function QuotationDetailPage() {
             <button
               onClick={handleCreateRevision}
               disabled={creatingRevision}
-              className="flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-base px-4 py-2.5 text-xs text-muted transition-all duration-200 hover:bg-card hover:text-default active:scale-[0.98]"
+              className="flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-black/[0.12] px-4 py-2.5 text-xs text-muted transition-all duration-200 hover:bg-white/70 hover:text-default active:scale-[0.98] dark:border-white/[0.16] dark:hover:bg-white/[0.08]"
             >
               <Plus className="w-3 h-3" /> New Revision
             </button>
@@ -1670,7 +1951,7 @@ export default function QuotationDetailPage() {
 
       {/* ─── DIFF BANNER ─── */}
       {diffChanges.length > 0 && selectedRevNum !== null && selectedRevNum > 0 && (
-        <div className="mb-6 rounded-[28px] border border-base bg-card/80 p-4 shadow-sm backdrop-blur-xl sm:p-5">
+        <div className={`mb-6 rounded-[28px] p-4 shadow-sm backdrop-blur-xl sm:p-5 ${quoteCardSurface}`}>
           <div className="mb-3 flex items-center gap-3">
             <div className="rounded-full bg-amber-100/70 p-2 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
               <GitBranch className="h-4 w-4" />
@@ -1682,7 +1963,7 @@ export default function QuotationDetailPage() {
           </div>
           <div className="grid gap-2 md:grid-cols-3">
             {diffChanges.map((change, i) => (
-              <div key={i} className="rounded-2xl border border-base bg-surface/70 p-3.5 text-sm">
+              <div key={i} className={`rounded-2xl p-3.5 text-sm ${quoteSubtleSurface}`}>
                 <p className="mb-2 text-xs font-semibold uppercase text-muted">{change.field}</p>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-muted line-through opacity-70">{change.from}</span>
@@ -1696,7 +1977,7 @@ export default function QuotationDetailPage() {
       )}
 
       {/* ─── MAIN TABS ─── */}
-      <div className="mb-8 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-base bg-surface/70 p-1.5 shadow-sm">
+      <div className={`mb-8 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full p-1.5 shadow-sm ${quoteSubtleSurface}`}>
         {[
           { key: "editor", label: isEditable ? "Editor" : "Details", icon: FileText },
           { key: "preview", label: "Preview", icon: Eye },
@@ -1706,7 +1987,7 @@ export default function QuotationDetailPage() {
             key={key}
             onClick={() => setActiveTab(key as "editor" | "preview" | "timeline")}
             className={`flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium transition-all duration-200 active:scale-[0.98] ${
-              activeTab === key ? "bg-card shadow-[0_10px_30px_rgba(0,0,0,0.08)] text-default" : "text-muted hover:bg-card/60 hover:text-default"
+              activeTab === key ? quoteActiveSurface : "text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.08]"
             }`}
           >
             <Icon className="w-3.5 h-3.5" />{label}
@@ -1718,9 +1999,9 @@ export default function QuotationDetailPage() {
       {activeTab === "editor" && (
         <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,7fr)_minmax(340px,3fr)]">
           {/* LEFT — FORM */}
-          <div className="order-2 space-y-8 xl:order-1">
+          <div className="order-1 space-y-8">
             {!isEditable && selectedRevNum !== quotation.currentRevisionNumber && (
-              <div className="flex items-center gap-3 rounded-2xl border border-base bg-surface/70 p-4">
+              <div className={`flex items-center gap-3 rounded-2xl p-4 ${quoteSubtleSurface}`}>
                 <EyeOff className="w-4 h-4 text-muted shrink-0" />
                 <p className="text-sm text-muted">
                   Viewing Rev {selectedRevNum} (read-only). The current revision is Rev {quotation.currentRevisionNumber}.
@@ -1763,7 +2044,7 @@ export default function QuotationDetailPage() {
                       {items.map((item, idx) => {
                         const { gstAmt, total } = calcItem(item);
                         return (
-                          <article key={item._id} className="rounded-[24px] border border-base bg-surface/70 p-5 transition duration-200 hover:-translate-y-0.5 hover:bg-card hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] sm:p-6">
+                          <article key={item._id} className={`rounded-[24px] p-5 transition duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] dark:hover:bg-white/[0.08] dark:hover:shadow-[0_18px_52px_rgba(0,0,0,0.42)] sm:p-6 ${quoteSubtleSurface}`}>
                             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                               <div className="min-w-0">
                                 <p className={sectionEyebrow}>Item {idx + 1}</p>
@@ -1783,7 +2064,7 @@ export default function QuotationDetailPage() {
                                 { label: "Unit Price", value: money(item.rate), mono: true },
                                 { label: "GST", value: `${item.gstPercent}%`, mono: true },
                               ].map(({ label, value, mono }) => (
-                                <div key={label} className="rounded-2xl border border-base bg-card/70 px-4 py-3">
+                                <div key={label} className={`rounded-2xl px-4 py-3 ${quoteNestedSurface}`}>
                                   <p className={sectionEyebrow}>{label}</p>
                                   <p className={`mt-1 text-sm font-medium text-default ${mono ? "font-mono tabular-nums" : ""}`}>{value}</p>
                                 </div>
@@ -1794,7 +2075,7 @@ export default function QuotationDetailPage() {
                       })}
                     </div>
                   ) : (
-                    <div className="rounded-[24px] border border-dashed border-base bg-surface/70 p-8 text-center text-sm text-muted">No line items in this revision.</div>
+                    <div className="rounded-[24px] border border-dashed border-black/[0.12] bg-[#f5f5f7]/80 p-8 text-center text-sm text-muted dark:border-white/[0.16] dark:bg-white/[0.06]">No line items in this revision.</div>
                   )}
                 </div>
 
@@ -1812,7 +2093,7 @@ export default function QuotationDetailPage() {
                       { label: "Government Fees", value: money(liveGF), helper: "CPCB / SPCB / portal charges" },
                       { label: "Grand Total", value: money(liveGrand), emphasis: true },
                     ].map(({ label, value, helper, emphasis }) => (
-                      <div key={label} className="rounded-[24px] border border-base bg-surface/70 p-5">
+                      <div key={label} className={`rounded-[24px] p-5 ${quoteSubtleSurface}`}>
                         <p className={sectionEyebrow}>{label}</p>
                         <p className={`mt-2 font-mono font-semibold tabular-nums text-default ${emphasis ? "text-2xl" : "text-lg"}`}>{value}</p>
                         {helper && <p className="mt-2 text-xs text-muted">{helper}</p>}
@@ -1842,13 +2123,13 @@ export default function QuotationDetailPage() {
                       {showSuggestions && clientSuggestions.length > 0 && (
                         <div
                           onClick={e => e.stopPropagation()}
-                          className="absolute left-0 right-0 top-full z-50 mt-2 max-h-72 isolate overflow-y-auto rounded-[24px] border border-white/75 bg-white/32 p-2 shadow-[0_22px_70px_rgba(0,0,0,0.16)] dark:border-white/10 dark:bg-card/45"
+                          className="absolute left-0 right-0 top-full z-50 mt-2 max-h-72 isolate overflow-y-auto rounded-[24px] border border-white/75 bg-white/[0.32] p-2 shadow-[0_22px_70px_rgba(0,0,0,0.16)] dark:border-white/[0.12] dark:bg-[#1c1c1e]/80 dark:shadow-[0_26px_80px_rgba(0,0,0,0.58)]"
                           style={liquidGlassStyle}
                         >
-                          <div className="pointer-events-none absolute inset-0 z-0 bg-white/30 dark:bg-card/40" style={liquidGlassStyle} />
+                          <div className="pointer-events-none absolute inset-0 z-0 bg-white/30 dark:bg-white/[0.04]" style={liquidGlassStyle} />
                           <div className="pointer-events-none absolute inset-x-4 top-0 z-0 h-px bg-white/90" />
                           {clientSuggestions.map(client => (
-                            <button key={client.clientId} type="button" onClick={() => { setClientName(client.companyName); setClientId(client.clientId); setClientAddress(client.address || ""); setClientGst(client.gstNumber || ""); setClientState(client.state || ""); setShowSuggestions(false); }} className="relative z-10 w-full rounded-[20px] bg-white/12 px-4 py-3 text-left text-sm text-default transition duration-200 hover:bg-white/70 active:scale-[0.98] dark:bg-white/5 dark:hover:bg-white/10">
+                            <button key={client.clientId} type="button" onClick={() => { setClientName(client.companyName); setClientId(client.clientId); setClientAddress(client.address || ""); setClientGst(client.gstNumber || ""); setClientState(client.state || ""); setShowSuggestions(false); }} className="relative z-10 w-full rounded-[20px] bg-white/[0.12] px-4 py-3 text-left text-sm text-default transition duration-200 hover:bg-white/70 active:scale-[0.98] dark:bg-white/[0.05] dark:hover:bg-white/[0.10]">
                               <p className="font-semibold">{client.companyName}</p>
                               <p className="mt-1 text-xs text-muted">{[client.gstNumber ? `GST ${client.gstNumber}` : "", client.state].filter(Boolean).join(" - ") || "Client record"}</p>
                             </button>
@@ -1873,13 +2154,13 @@ export default function QuotationDetailPage() {
                     {items.map((item, idx) => {
                       const { gstAmt, total } = calcItem(item);
                       return (
-                        <article key={item._id} className="rounded-[24px] border border-base bg-surface/70 p-5 transition duration-200 hover:-translate-y-0.5 hover:bg-card hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] sm:p-6">
+                        <article key={item._id} className={`rounded-[24px] p-5 transition duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] dark:hover:bg-white/[0.08] dark:hover:shadow-[0_18px_52px_rgba(0,0,0,0.42)] sm:p-6 ${quoteSubtleSurface}`}>
                           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                             <div className="min-w-0 flex-1">
                               <div className="mb-2 flex items-center justify-between gap-3"><label className={sectionEyebrow}>Product / Service</label><span className="text-xs text-faint">Item {idx + 1}</span></div>
                               <input list={`services-list-${item._id}`} className={`${softInput} w-full`} value={item.description} onChange={e => { const val = e.target.value; updateItem(idx, "description", val); const matched = STANDARD_SERVICES.find(s => s.description === val); if (matched) { updateItem(idx, "category", matched.category); updateItem(idx, "type", matched.type); } }} disabled={!isEditable} />
                               <datalist id={`services-list-${item._id}`}>{STANDARD_SERVICES.map(s => <option key={s.label} value={s.description}>{s.category} - {s.type}</option>)}</datalist>
-                              <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">{STANDARD_SERVICES.slice(0, 4).map(service => <button key={service.label} type="button" onClick={() => { updateItem(idx, "description", service.description); updateItem(idx, "category", service.category); updateItem(idx, "type", service.type); }} disabled={!isEditable} className="shrink-0 rounded-full border border-transparent bg-card/60 px-2.5 py-1 text-[11px] font-medium text-faint transition duration-200 hover:-translate-y-0.5 hover:border-base hover:bg-surface hover:text-muted active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">{service.category} {service.type}</button>)}</div>
+                              <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">{STANDARD_SERVICES.slice(0, 4).map(service => <button key={service.label} type="button" onClick={() => { updateItem(idx, "description", service.description); updateItem(idx, "category", service.category); updateItem(idx, "type", service.type); }} disabled={!isEditable} className="shrink-0 rounded-full border border-transparent bg-white/60 px-2.5 py-1 text-[11px] font-medium text-faint transition duration-200 hover:-translate-y-0.5 hover:border-black/[0.08] hover:bg-[#f5f5f7] hover:text-muted active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white/[0.06] dark:hover:border-white/[0.12] dark:hover:bg-white/[0.10]">{service.category} {service.type}</button>)}</div>
                             </div>
                             <div className="flex items-start justify-between gap-3 sm:block sm:min-w-40 sm:text-right">
                               <div><p className={sectionEyebrow}>Total</p><p className="mt-1 font-mono text-xl font-semibold tabular-nums text-default">{money(total)}</p>{item.gstPercent > 0 && <p className="mt-1 text-xs text-muted">GST {money(gstAmt)}</p>}</div>
@@ -1918,83 +2199,13 @@ export default function QuotationDetailPage() {
           </div>
 
           {/* RIGHT — STATUS + QUICK SUMMARY */}
-          <div className="order-1 xl:order-2">
+          <div className="hidden xl:order-2 xl:block">
             <div className="xl:sticky xl:top-32">
               {/* Summary card */}
-              <div className="rounded-[32px] border border-white/70 bg-card/90 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.10)] backdrop-blur-xl dark:border-white/10 dark:bg-card/80">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="font-mono text-xs text-faint">{quotation.quotationNumber || "DRAFT"}{quotation.quotationNumber ? ` - Rev ${quotation.currentRevisionNumber}` : ""}</p>
-                    <p className="mt-2 truncate text-lg font-semibold leading-snug text-default">{quotation.clientName}</p>
-                    <p className="mt-1 text-sm text-muted">FY {quotation.financialYear}</p>
-                  </div>
-                  <QuotationStatusPill status={quotation.status} />
-                </div>
-
-                <div className="my-6 rounded-[28px] border border-base bg-surface/70 p-5">
-                  <p className="text-xs font-semibold uppercase text-muted">Grand Total</p>
-                  <p className="mt-2 font-mono text-4xl font-semibold leading-none tabular-nums text-default">{money(liveGrand)}</p>
-                </div>
-
-                <div className="space-y-3 text-sm">
-                  {[
-                    { label: "EPR Credits", value: liveItemsSubtotal },
-                    { label: "GST on Credits", value: liveItemsGst },
-                    ...(liveCC > 0 ? [{ label: "Consultation", value: liveCC }] : []),
-                    ...(liveCCGst > 0 ? [{ label: "GST on Consultation", value: liveCCGst }] : []),
-                    ...(liveGF > 0 ? [{ label: "Government Fees", value: liveGF }] : []),
-                  ].map(({ label, value }) => (
-                    <div key={label} className="flex items-center justify-between gap-4">
-                      <span className="text-muted">{label}</span>
-                      <span className="font-mono font-medium tabular-nums text-default">{money(value)}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="my-6 h-px bg-base" />
-
-                <div className="space-y-3 text-sm">
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-muted">Current Revision</span>
-                    <span className="font-mono font-medium text-default">Rev {quotation.currentRevisionNumber}</span>
-                  </div>
-                  {quotation.validTill && (
-                    <div className="flex items-center justify-between gap-4">
-                      <span className="text-muted">Valid Till</span>
-                      <span className="text-default">{fmtDate(quotation.validTill)}</span>
-                    </div>
-                  )}
-                  {quotation.sentAt && (
-                    <div className="flex items-center justify-between gap-4">
-                      <span className="text-muted">Sent</span>
-                      <span className="text-default">{fmtDate(quotation.sentAt)}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-6 grid gap-2">
-                  {isEditable ? (
-                    <button onClick={handleFinalize} disabled={finalising} className="btn-primary w-full justify-center gap-2 rounded-full py-3 shadow-sm shadow-brand-600/15 transition duration-200 active:scale-[0.98]">
-                      <Sparkles className="h-4 w-4" />
-                      {finalising ? "Finalising..." : "Finalise Quote"}
-                    </button>
-                  ) : canCreateEmailDraft ? (
-                    <button onClick={openEmailDraftModal} disabled={emailLoading} className="btn-primary w-full justify-center gap-2 rounded-full py-3 shadow-sm shadow-brand-600/15 transition duration-200 active:scale-[0.98]">
-                      <Mail className="h-4 w-4" />
-                      {emailLoading ? "Creating..." : "Email Draft"}
-                    </button>
-                  ) : null}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={(e) => openMoreMenu(e, "summary")}
-                      className="btn-secondary w-full justify-center gap-2 rounded-full bg-card/90 py-3 text-sm transition duration-200 active:scale-[0.98]"
-                    >
-                      <MoreHorizontal className="h-4 w-4" /> More
-                    </button>
-                  </div>
-                </div>
-
+              <div className={`rounded-[32px] p-6 backdrop-blur-xl ${quoteCardSurface}`}>
+                {renderSummaryIdentity()}
+                {renderSummaryTotal()}
+                {renderQuotationSummaryDetails("sidebar")}
               </div>
             </div>
           </div>
@@ -2003,13 +2214,46 @@ export default function QuotationDetailPage() {
 
       {/* ─── PREVIEW TAB ─── */}
       {activeTab === "preview" && (
-        <div ref={previewPanelRef} className="rounded-[32px] border border-base bg-[#f5f5f7] p-4 shadow-sm sm:p-8 dark:bg-surface">
-          <div className="mb-6 flex flex-col gap-4 rounded-[28px] border border-white/70 bg-card/85 p-4 shadow-sm backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between dark:border-white/10">
+        <div ref={previewPanelRef} className="rounded-[32px] border border-black/[0.08] bg-[#f5f5f7] p-4 shadow-sm sm:p-8 dark:border-white/[0.10] dark:bg-[#050506] dark:shadow-[0_26px_80px_rgba(0,0,0,0.58)]">
+          <div className={`mb-6 flex flex-col gap-4 rounded-[28px] p-4 shadow-sm backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between ${quoteCardSurface}`}>
             <div>
               <p className="font-mono text-xs text-faint">{quotation.quotationNumber || "DRAFT"} - Rev {selectedRevNum ?? quotation.currentRevisionNumber}</p>
               <h3 className="mt-1 text-lg font-semibold text-default">Quotation Preview</h3>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className={`flex items-center gap-1 rounded-full p-1 ${quoteControlSurface}`}>
+                <button
+                  type="button"
+                  onClick={() => setPreviewZoomMode("fit")}
+                  className={`h-8 rounded-full px-3 text-xs font-semibold transition duration-200 active:scale-[0.98] ${previewZoomMode === "fit" ? "bg-brand-600 text-white shadow-sm shadow-brand-600/20" : "text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.10]"}`}
+                >
+                  Fit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => adjustPreviewZoom(-0.1)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition duration-200 hover:bg-white/70 hover:text-default active:scale-[0.98] dark:hover:bg-white/[0.10]"
+                  aria-label="Zoom out preview"
+                >
+                  <Minus className="h-3.5 w-3.5" />
+                </button>
+                <span className="min-w-12 text-center font-mono text-xs font-semibold tabular-nums text-default">{previewZoomPercent}%</span>
+                <button
+                  type="button"
+                  onClick={() => adjustPreviewZoom(0.1)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition duration-200 hover:bg-white/70 hover:text-default active:scale-[0.98] dark:hover:bg-white/[0.10]"
+                  aria-label="Zoom in preview"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setPreviewZoomMode("custom"); setPreviewScale(1); }}
+                  className={`h-8 rounded-full px-3 text-xs font-semibold transition duration-200 active:scale-[0.98] ${previewZoomMode === "custom" && Math.abs(previewScale - 1) < 0.01 ? "bg-brand-600 text-white shadow-sm shadow-brand-600/20" : "text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.10]"}`}
+                >
+                  100%
+                </button>
+              </div>
               <button onClick={handlePrintPreview} disabled={pdfLoading} className={`${appleButton} border border-base bg-card text-default hover:bg-surface`}>
                 <Printer className="mr-2 h-4 w-4" />{pdfLoading ? "Opening..." : "Print"}
               </button>
@@ -2021,14 +2265,14 @@ export default function QuotationDetailPage() {
                 </div>
               </div>
           {previewTemplateLoading && (
-            <div className="mx-auto max-w-[860px] rounded-[28px] border border-base bg-white p-8 shadow-[0_30px_90px_rgba(0,0,0,0.10)]">
-              <div className="mb-6 h-5 w-44 animate-pulse rounded-full bg-surface" />
+            <div className="mx-auto max-w-[860px] rounded-[28px] border border-black/[0.10] bg-white p-8 text-slate-500 shadow-[0_30px_90px_rgba(0,0,0,0.10)] dark:border-white/[0.14] dark:shadow-[0_30px_90px_rgba(0,0,0,0.62)]">
+              <div className="mb-6 h-5 w-44 animate-pulse rounded-full bg-slate-200" />
               <div className="space-y-3">
-                <div className="h-4 animate-pulse rounded-full bg-surface" />
-                <div className="h-4 w-5/6 animate-pulse rounded-full bg-surface" />
-                <div className="h-56 animate-pulse rounded-[24px] bg-surface" />
+                <div className="h-4 animate-pulse rounded-full bg-slate-200" />
+                <div className="h-4 w-5/6 animate-pulse rounded-full bg-slate-200" />
+                <div className="h-56 animate-pulse rounded-[24px] bg-slate-100" />
               </div>
-              <p className="mt-6 text-center text-sm text-muted">Preparing preview...</p>
+              <p className="mt-6 text-center text-sm text-slate-500">Preparing preview...</p>
             </div>
           )}
           {previewTemplateError && (
@@ -2039,19 +2283,37 @@ export default function QuotationDetailPage() {
             </div>
           )}
           {previewHtml && (
-            <iframe
-              ref={previewIframeRef}
-              title="Quotation preview"
-              srcDoc={previewHtml}
-              className="mx-auto block w-full max-w-[860px] rounded-2xl border border-base bg-white shadow-[0_30px_90px_rgba(0,0,0,0.12)]"
-              style={{ height: previewHeight }}
-              sandbox="allow-same-origin"
-              scrolling="no"
-              onLoad={event => {
-                const iframe = event.currentTarget;
-                requestAnimationFrame(() => resizePreview(iframe));
-              }}
-            />
+            <div ref={previewViewportRef} className="-mx-2 overflow-auto pb-2 sm:mx-0">
+              <div
+                className="mx-auto"
+                style={{
+                  width: PREVIEW_DOCUMENT_WIDTH * effectivePreviewScale,
+                  height: previewHeight * effectivePreviewScale,
+                }}
+              >
+                <iframe
+                  ref={previewIframeRef}
+                  title="Quotation preview"
+                  srcDoc={previewHtml}
+                  className="block rounded-[14px] border border-black/[0.08] bg-white shadow-none dark:border-white/[0.12] sm:rounded-2xl sm:shadow-[0_18px_54px_rgba(0,0,0,0.10)] sm:dark:shadow-[0_24px_70px_rgba(0,0,0,0.58)]"
+                  style={{
+                    width: PREVIEW_DOCUMENT_WIDTH,
+                    height: previewHeight,
+                    transform: `scale(${effectivePreviewScale})`,
+                    transformOrigin: "top left",
+                  }}
+                  sandbox="allow-same-origin"
+                  scrolling="no"
+                  onLoad={event => {
+                    const iframe = event.currentTarget;
+                    requestAnimationFrame(() => {
+                      resizePreview(iframe);
+                      updatePreviewFitScale();
+                    });
+                  }}
+                />
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -2070,7 +2332,7 @@ export default function QuotationDetailPage() {
                   <div className="z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-base bg-card text-brand-500 shadow-sm">
                     <Activity className="h-4 w-4" />
                   </div>
-                  <div className="flex-1 rounded-[24px] border border-base bg-surface/70 p-4 transition duration-200 hover:-translate-y-0.5 hover:bg-card hover:shadow-[0_16px_44px_rgba(0,0,0,0.06)]">
+                  <div className={`flex-1 rounded-[24px] p-4 transition duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_16px_44px_rgba(0,0,0,0.06)] dark:hover:bg-white/[0.08] dark:hover:shadow-[0_16px_44px_rgba(0,0,0,0.42)] ${quoteSubtleSurface}`}>
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-sm font-semibold text-default">{activity.action}</p>
                       <p className="text-xs text-faint">{fmtDate(activity.timestamp)} - {fmtTime(activity.timestamp)}</p>
@@ -2081,7 +2343,7 @@ export default function QuotationDetailPage() {
               ))}
             </div>
           ) : (
-            <div className="rounded-[28px] border border-dashed border-base bg-surface/70 p-8 text-center">
+            <div className="rounded-[28px] border border-dashed border-black/[0.12] bg-[#f5f5f7]/80 p-8 text-center dark:border-white/[0.16] dark:bg-white/[0.06]">
               <Activity className="mx-auto mb-3 h-6 w-6 text-muted" />
               <p className="text-sm font-semibold text-default">No activity yet</p>
               <p className="mt-1 text-sm text-muted">Actions like finalising, sending, and revisions will appear here.</p>
@@ -2090,25 +2352,108 @@ export default function QuotationDetailPage() {
         </div>
       )}
 
-      {activeTab === "editor" && (isEditable || canCreateEmailDraft) && (
-        <div className="fixed inset-x-3 bottom-3 z-40 rounded-[24px] border border-white/70 bg-card/90 p-2 shadow-[0_18px_60px_rgba(0,0,0,0.16)] backdrop-blur-xl xl:hidden dark:border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="min-w-0 flex-1 px-2">
-              <p className="text-[11px] font-semibold uppercase text-muted">Grand Total</p>
-              <p className="truncate font-mono text-lg font-semibold tabular-nums text-default">{money(liveGrand)}</p>
-            </div>
-            {isEditable ? (
-              <button onClick={handleFinalize} disabled={finalising} className="btn-primary shrink-0 gap-2 rounded-[20px] px-4 py-3 transition duration-200 active:scale-[0.98]">
-                <Sparkles className="h-4 w-4" />
-                {finalising ? "Finalising..." : "Finalise"}
-              </button>
-            ) : (
-              <button onClick={openEmailDraftModal} disabled={emailLoading} className="btn-primary shrink-0 gap-2 rounded-[20px] px-4 py-3 transition duration-200 active:scale-[0.98]">
-                <Mail className="h-4 w-4" />
-                Email
+      {!emailModalOpen && markSentPrompt === null && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-3 xl:hidden">
+          <motion.div
+            layout
+            drag="y"
+            dragControls={dockDragControls}
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={0.16}
+            dragListener={false}
+            dragMomentum={false}
+            dragSnapToOrigin
+            animate={{ y: 0 }}
+            whileDrag={{ scale: 0.992 }}
+            onDragEnd={(_, info) => {
+              const wantsExpand = info.offset.y < -18 || info.velocity.y < -220;
+              const wantsCollapse = info.offset.y > 22 || info.velocity.y > 220;
+              if (isDockExpanded && wantsCollapse) {
+                setIsDockExpanded(false);
+              } else if (!isDockExpanded && wantsExpand) {
+                setIsDockExpanded(true);
+              }
+            }}
+            transition={{ type: "spring", stiffness: 420, damping: 38, mass: 0.9 }}
+            className={`pointer-events-auto mx-auto w-full max-w-[min(44rem,calc(100vw-1rem))] overflow-hidden border transition-colors duration-300 ${
+              isDockExpanded
+                ? "rounded-[34px] border-white/[0.42] bg-white/[0.72] p-4 dark:border-white/[0.12] dark:bg-[#0a0a0b]/[0.78] sm:p-5"
+                : "rounded-[22px] border-black/[0.06] bg-[#f5f5f7]/[0.84] p-1 dark:border-white/[0.10] dark:bg-black/[0.72]"
+            }`}
+            style={isDockExpanded ? quotationExpandedDockGlassStyle : quotationCompactDockGlassStyle}
+          >
+            {isDockExpanded && (
+              <button
+                type="button"
+                onPointerDown={(event) => dockDragControls.start(event)}
+                onClick={() => setIsDockExpanded(false)}
+                className="mx-auto mb-2 flex h-6 w-full items-center justify-center rounded-full text-muted transition duration-200 active:scale-[0.98]"
+                aria-label="Collapse quotation summary"
+                style={{ touchAction: "none" }}
+              >
+                <span className="h-1.5 w-12 rounded-full bg-black/[0.16] dark:bg-white/[0.18]" />
               </button>
             )}
-          </div>
+
+            {!isDockExpanded && (
+              <div className="flex h-12 items-center gap-1.5">
+                <button
+                  type="button"
+                  onPointerDown={(event) => dockDragControls.start(event)}
+                  onClick={() => setIsDockExpanded(true)}
+                  className="flex h-full min-w-0 flex-1 flex-col items-start justify-center rounded-[18px] px-3.5 text-left outline-none transition duration-200 active:scale-[0.99] focus-visible:ring-4 focus-visible:ring-brand-500/15"
+                  aria-label="Expand quotation summary"
+                  style={{ touchAction: "none" }}
+                >
+                  <span className="text-[10px] font-semibold uppercase leading-none text-muted">Grand Total</span>
+                  <span className="mt-1 truncate font-mono text-[17px] font-semibold leading-none tabular-nums text-default">{money(liveGrand)}</span>
+                </button>
+                {hasPrimaryDockAction ? (
+                  <button
+                    type="button"
+                    onClick={handlePrimaryDockAction}
+                    disabled={primaryDockActionDisabled}
+                    className="btn-primary h-9 shrink-0 gap-1.5 rounded-[10px] px-3.5 text-[13px] shadow-sm shadow-brand-600/[0.14] transition duration-200 active:scale-[0.98]"
+                    aria-label={isEditable ? "Finalise quotation" : "Create email draft"}
+                  >
+                    {isEditable ? <Sparkles className="h-3.5 w-3.5" /> : <Mail className="h-3.5 w-3.5" />}
+                    <span className="whitespace-nowrap">{primaryDockCompactLabel}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openMoreMenu(event, "summary");
+                    }}
+                    className={`flex h-9 shrink-0 items-center gap-1.5 rounded-[10px] px-3.5 text-[13px] font-semibold text-default transition duration-200 active:scale-[0.98] ${quoteControlSurface}`}
+                  >
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                    More
+                  </button>
+                )}
+              </div>
+            )}
+
+            <AnimatePresence initial={false}>
+              {isDockExpanded && (
+                <motion.div
+                  key="quotation-dock-summary"
+                  initial={{ opacity: 0, height: 0, y: 10 }}
+                  animate={{ opacity: 1, height: "auto", y: 0 }}
+                  exit={{ opacity: 0, height: 0, y: 10 }}
+                  transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-2">
+                    {renderSummaryIdentity()}
+                    {renderSummaryTotal(true)}
+                    {renderQuotationSummaryDetails("dock")}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
         </div>
       )}
 
@@ -2120,17 +2465,17 @@ export default function QuotationDetailPage() {
         title="Create Email Draft"
         size="xl"
         hideHeader
-        className="rounded-[36px] border-white/70 shadow-[0_34px_110px_rgba(0,0,0,0.28)] backdrop-blur-2xl dark:border-white/10"
-        bgColor="rgba(232,232,235,0.86)"
+        className="mt-auto h-auto max-h-[94dvh] rounded-b-none rounded-t-[32px] border-white/70 shadow-[0_34px_110px_rgba(0,0,0,0.28)] backdrop-blur-2xl sm:mt-0 sm:h-full sm:max-h-[90vh] sm:rounded-[36px] dark:border-white/[0.12] dark:shadow-[0_38px_120px_rgba(0,0,0,0.74)]"
+        bgColor="rgba(var(--color-card-rgb),0.92)"
       >
         <form
-          className="flex max-h-[90vh] flex-col overflow-hidden bg-transparent"
+          className="flex max-h-[94dvh] flex-col overflow-hidden bg-transparent sm:max-h-[90vh]"
           onSubmit={(e) => {
             e.preventDefault();
             handleEmailDraft();
           }}
         >
-          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/35 bg-white/20 px-5 py-5 backdrop-blur-2xl sm:px-6 dark:border-white/10 dark:bg-white/5">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/[0.35] bg-white/20 px-5 py-5 backdrop-blur-2xl sm:px-6 dark:border-white/[0.10] dark:bg-white/[0.04]">
             <div className="flex min-w-0 items-start gap-4">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-500/10 text-brand-600 shadow-sm">
                 <Mail className="h-5 w-5" />
@@ -2143,21 +2488,21 @@ export default function QuotationDetailPage() {
             <button
               type="button"
               onClick={() => { if (!emailLoading) setEmailModalOpen(false); }}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/60 bg-white/55 text-muted shadow-sm backdrop-blur-xl transition duration-200 hover:bg-white/80 hover:text-default active:scale-[0.98] dark:border-white/10 dark:bg-white/10"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/60 bg-white/[0.55] text-muted shadow-sm backdrop-blur-xl transition duration-200 hover:bg-white/80 hover:text-default active:scale-[0.98] dark:border-white/[0.12] dark:bg-white/[0.07] dark:hover:bg-white/[0.12]"
               aria-label="Close email draft modal"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
 
-          <div className="flex-1 space-y-6 overflow-y-auto bg-[#d8d8dc]/55 px-5 py-5 backdrop-blur-2xl sm:px-6 dark:bg-surface/70">
+          <div className="flex-1 space-y-6 overflow-y-auto bg-[#d8d8dc]/[0.55] px-5 py-5 backdrop-blur-2xl sm:px-6 dark:bg-[#0b0b0d]/[0.92]">
             <section>
               <p className={sectionEyebrow}>Recipients</p>
               {clientEmailOptions.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-3">
                   {clientEmailOptions.map(option => (
-                    <div key={option.id} className="flex h-14 min-w-[220px] max-w-[270px] items-center gap-2 rounded-full border border-white/80 bg-white/92 px-2.5 py-2 shadow-[0_8px_22px_rgba(0,0,0,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-white dark:border-white/10 dark:bg-card/85">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f1f1f3] text-[11px] font-semibold text-muted shadow-inner dark:bg-surface">
+                    <div key={option.id} className="flex h-14 min-w-[220px] max-w-[270px] items-center gap-2 rounded-full border border-white/80 bg-white/[0.92] px-2.5 py-2 shadow-[0_8px_22px_rgba(0,0,0,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-white dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.10] dark:shadow-[0_10px_28px_rgba(0,0,0,0.36)]">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f1f1f3] text-[11px] font-semibold text-muted shadow-inner dark:bg-white/[0.08]">
                         {option.name.split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase() || "C"}
                       </div>
                       <div className="min-w-0 flex-1 leading-none">
@@ -2165,11 +2510,11 @@ export default function QuotationDetailPage() {
                         <p className="mt-0.5 truncate text-[11px] leading-3 text-muted">{option.email}</p>
                       </div>
                       <div className="flex shrink-0 gap-1">
-                        <label className={`cursor-pointer rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition duration-200 ${selectedToEmails.includes(option.email) ? "bg-brand-600 text-white shadow-sm shadow-brand-600/20" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-surface"}`}>
+                        <label className={`cursor-pointer rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition duration-200 ${selectedToEmails.includes(option.email) ? "bg-brand-600 text-white shadow-sm shadow-brand-600/20" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"}`}>
                           <input type="checkbox" checked={selectedToEmails.includes(option.email)} onChange={() => toggleContactEmail(option.email, "to")} className="sr-only" />
                           To
                         </label>
-                        <label className={`cursor-pointer rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition duration-200 ${selectedCcEmails.includes(option.email) ? "bg-muted text-white shadow-sm" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-surface"}`}>
+                        <label className={`cursor-pointer rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition duration-200 ${selectedCcEmails.includes(option.email) ? "bg-muted text-white shadow-sm dark:bg-white/[0.22]" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"}`}>
                           <input type="checkbox" checked={selectedCcEmails.includes(option.email)} onChange={() => toggleContactEmail(option.email, "cc")} className="sr-only" />
                           CC
                         </label>
@@ -2178,18 +2523,18 @@ export default function QuotationDetailPage() {
                   ))}
                 </div>
               ) : (
-                <div className="mt-3 rounded-[24px] border border-dashed border-white/70 bg-white/60 p-4 text-sm text-muted shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-card/70">No saved client contacts found. Add recipients manually below.</div>
+                <div className="mt-3 rounded-[24px] border border-dashed border-white/70 bg-white/60 p-4 text-sm text-muted shadow-sm backdrop-blur-xl dark:border-white/[0.14] dark:bg-white/[0.06]">No saved client contacts found. Add recipients manually below.</div>
               )}
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div>
                   <label className="label">Additional To</label>
-                  <input type="text" className={`${softInput} w-full border-white/75 bg-white/88 shadow-[0_8px_24px_rgba(0,0,0,0.06)] focus:bg-white dark:border-base dark:bg-card`} value={emailRecipient} onChange={(e) => setEmailRecipient(e.target.value)} placeholder="client@example.com" autoFocus={clientEmailOptions.length === 0} />
+                  <input type="text" className={`${softInput} w-full border-white/75 bg-white/[0.88] shadow-[0_8px_24px_rgba(0,0,0,0.06)] focus:bg-white dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10]`} value={emailRecipient} onChange={(e) => setEmailRecipient(e.target.value)} placeholder="client@example.com" autoFocus={clientEmailOptions.length === 0} />
                   <p className="mt-1 text-xs text-faint">Separate multiple email addresses with commas.</p>
                 </div>
                 <div>
                   <label className="label">Additional CC</label>
-                  <input type="text" className={`${softInput} w-full border-white/75 bg-white/88 shadow-[0_8px_24px_rgba(0,0,0,0.06)] focus:bg-white dark:border-base dark:bg-card`} value={emailCc} onChange={(e) => setEmailCc(e.target.value)} placeholder="accounts@example.com, owner@example.com" />
+                  <input type="text" className={`${softInput} w-full border-white/75 bg-white/[0.88] shadow-[0_8px_24px_rgba(0,0,0,0.06)] focus:bg-white dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10]`} value={emailCc} onChange={(e) => setEmailCc(e.target.value)} placeholder="accounts@example.com, owner@example.com" />
                   <p className="mt-1 text-xs text-faint">Separate multiple emails with commas.</p>
                 </div>
               </div>
@@ -2197,7 +2542,7 @@ export default function QuotationDetailPage() {
 
             <section>
               <label className={sectionEyebrow}>Subject</label>
-              <input className="mt-3 h-12 w-full rounded-full border border-white/75 bg-white/88 px-5 text-sm font-medium text-default shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-base dark:bg-card" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Quotation subject" />
+              <input className="mt-3 h-12 w-full rounded-full border border-white/75 bg-white/[0.88] px-5 text-sm font-medium text-default shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10]" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Quotation subject" />
             </section>
 
             <section>
@@ -2211,7 +2556,7 @@ export default function QuotationDetailPage() {
                     type="button"
                     onClick={() => saveEmailMessageTemplate("create")}
                     disabled={emailTemplateLoading || emailTemplateLimitReached}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-white/75 bg-white/78 px-3 text-xs font-semibold text-default shadow-sm transition duration-200 hover:bg-white active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10 dark:bg-card/80"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-white/75 bg-white/[0.78] px-3 text-xs font-semibold text-default shadow-sm transition duration-200 hover:bg-white active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.11]"
                     title={emailTemplateLimitReached ? `Limit reached: ${MAX_EMAIL_MESSAGE_TEMPLATES} saved messages` : "Save as a new message"}
                   >
                     <Save className="h-3.5 w-3.5" /> Save New
@@ -2220,7 +2565,7 @@ export default function QuotationDetailPage() {
                     type="button"
                     onClick={() => saveEmailMessageTemplate("update")}
                     disabled={emailTemplateLoading || !selectedEmailTemplate}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-white/75 bg-white/78 px-3 text-xs font-semibold text-default shadow-sm transition duration-200 hover:bg-white active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10 dark:bg-card/80"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-white/75 bg-white/[0.78] px-3 text-xs font-semibold text-default shadow-sm transition duration-200 hover:bg-white active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.11]"
                   >
                     Update
                   </button>
@@ -2228,14 +2573,14 @@ export default function QuotationDetailPage() {
                     type="button"
                     onClick={deleteEmailMessageTemplate}
                     disabled={emailTemplateLoading || !selectedEmailTemplate}
-                    className="inline-flex h-9 items-center justify-center rounded-full border border-white/75 bg-white/78 px-3 text-xs font-semibold text-red-500 shadow-sm transition duration-200 hover:bg-white active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10 dark:bg-card/80"
+                    className="inline-flex h-9 items-center justify-center rounded-full border border-white/75 bg-white/[0.78] px-3 text-xs font-semibold text-red-500 shadow-sm transition duration-200 hover:bg-white active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.11]"
                   >
                     Delete
                   </button>
                 </div>
               </div>
 
-              <div className="mt-3 rounded-[32px] border border-white/75 bg-white/72 p-2.5 shadow-[0_16px_44px_rgba(0,0,0,0.08)] backdrop-blur-2xl dark:border-base dark:bg-card/80">
+              <div className="mt-3 rounded-[32px] border border-white/75 bg-white/[0.72] p-2.5 shadow-[0_16px_44px_rgba(0,0,0,0.08)] backdrop-blur-2xl dark:border-white/[0.10] dark:bg-[#151517]/[0.92] dark:shadow-[0_18px_56px_rgba(0,0,0,0.46)]">
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
                   <div ref={emailTemplateDropdownRef} className="relative z-30">
                     <button
@@ -2246,10 +2591,10 @@ export default function QuotationDetailPage() {
                         setEmailTemplateDropdownOpen(open => !open);
                       }}
                       disabled={emailTemplateLoading}
-                      className={`group flex h-11 w-full items-center justify-between gap-3 rounded-full border px-4 text-left text-sm font-semibold text-default shadow-[0_10px_28px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.86)] backdrop-blur-2xl transition-all duration-300 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/10 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 ${
+                      className={`group flex h-11 w-full items-center justify-between gap-3 rounded-full border px-4 text-left text-sm font-semibold text-default shadow-[0_10px_28px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.86)] backdrop-blur-2xl transition-all duration-300 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/10 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.10] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] ${
                         emailTemplateDropdownOpen
-                          ? "border-brand-300 bg-white/94 ring-4 ring-brand-500/10 dark:bg-card"
-                          : "border-white/80 bg-white/78 hover:bg-white/92 dark:bg-surface/90"
+                          ? "border-brand-300 bg-white/[0.94] ring-4 ring-brand-500/10 dark:bg-white/[0.10]"
+                          : "border-white/80 bg-white/[0.78] hover:bg-white/[0.92] dark:bg-white/[0.06] dark:hover:bg-white/[0.10]"
                       }`}
                     >
                       <span className="min-w-0 truncate">
@@ -2261,7 +2606,7 @@ export default function QuotationDetailPage() {
                     </button>
                   </div>
                   <input
-                    className="h-11 rounded-full border border-white/75 bg-white/88 px-4 text-sm font-medium text-default shadow-sm transition duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-base dark:bg-surface"
+                    className="h-11 rounded-full border border-white/75 bg-white/[0.88] px-4 text-sm font-medium text-default shadow-sm transition duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10]"
                     value={emailTemplateName}
                     onChange={(event) => setEmailTemplateName(event.target.value)}
                     placeholder="Saved message name"
@@ -2270,13 +2615,13 @@ export default function QuotationDetailPage() {
                   />
                 </div>
 
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-[20px] border border-white/65 bg-white/58 px-2 py-1.5 shadow-inner dark:border-white/10 dark:bg-surface/70">
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-[20px] border border-white/[0.65] bg-white/[0.58] px-2 py-1.5 shadow-inner dark:border-white/[0.10] dark:bg-white/[0.05]">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <button
                       type="button"
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => runEmailEditorCommand("bold")}
-                      className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition duration-200 hover:bg-white hover:text-default active:scale-[0.96] dark:hover:bg-card"
+                      className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition duration-200 hover:bg-white hover:text-default active:scale-[0.96] dark:hover:bg-white/[0.10]"
                       title="Bold selected text"
                     >
                       <Bold className="h-4 w-4" />
@@ -2285,17 +2630,17 @@ export default function QuotationDetailPage() {
                       type="button"
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => runEmailEditorCommand("divider")}
-                      className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition duration-200 hover:bg-white hover:text-default active:scale-[0.96] dark:hover:bg-card"
+                      className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition duration-200 hover:bg-white hover:text-default active:scale-[0.96] dark:hover:bg-white/[0.10]"
                       title="Insert separating line"
                     >
                       <Minus className="h-4 w-4" />
                     </button>
-                    <span className="mx-0.5 h-5 w-px bg-black/8 dark:bg-white/10" aria-hidden="true" />
+                    <span className="mx-0.5 h-5 w-px bg-black/[0.08] dark:bg-white/10" aria-hidden="true" />
                     <button
                       type="button"
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => runEmailEditorCommand("clientName")}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/75 bg-white/68 px-2.5 text-[11px] font-semibold text-default shadow-sm transition duration-200 hover:bg-white active:scale-[0.97] dark:border-white/10 dark:bg-card/75"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/75 bg-white/[0.68] px-2.5 text-[11px] font-semibold text-default shadow-sm transition duration-200 hover:bg-white active:scale-[0.97] dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.11]"
                       title="Insert client name variable"
                     >
                       <UserRound className="h-3.5 w-3.5 text-brand-600" />
@@ -2305,7 +2650,7 @@ export default function QuotationDetailPage() {
                       type="button"
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => runEmailEditorCommand("financialYear")}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/75 bg-white/68 px-2.5 text-[11px] font-semibold text-default shadow-sm transition duration-200 hover:bg-white active:scale-[0.97] dark:border-white/10 dark:bg-card/75"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/75 bg-white/[0.68] px-2.5 text-[11px] font-semibold text-default shadow-sm transition duration-200 hover:bg-white active:scale-[0.97] dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.11]"
                       title="Insert financial year variable"
                     >
                       <CalendarDays className="h-3.5 w-3.5 text-brand-600" />
@@ -2316,21 +2661,20 @@ export default function QuotationDetailPage() {
                 </div>
 
                 <div
-                  ref={emailEditorRef}
+                  ref={setEmailEditorRef}
                   contentEditable={!emailLoading}
                   suppressContentEditableWarning
-                  className="mt-2 min-h-60 w-full overflow-y-auto rounded-[26px] border border-white/70 bg-white/92 px-5 py-5 text-sm leading-relaxed text-default shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-base dark:bg-card"
+                  className="mt-2 min-h-60 w-full overflow-y-auto rounded-[26px] border border-white/70 bg-white/[0.92] px-5 py-5 text-sm leading-relaxed text-default shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-white/[0.10] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] dark:focus:bg-white/[0.10]"
                   onInput={syncEmailEditorState}
-                  onBlur={syncEmailEditorState}
+                  onBlur={handleEmailEditorBlur}
                   data-placeholder="Add a short message for the client"
-                  dangerouslySetInnerHTML={{ __html: emailMessageHtml }}
                 />
               </div>
               <p className="mt-2 text-xs text-faint">This message appears above the quotation and can be edited in Gmail after the draft is created.</p>
             </section>
 
             <section>
-              <div className="flex items-center gap-3 rounded-[24px] border border-white/75 bg-white/88 px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.06)] dark:border-base dark:bg-card">
+              <div className="flex items-center gap-3 rounded-[24px] border border-white/75 bg-white/[0.88] px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.06)] dark:border-white/[0.10] dark:bg-white/[0.07]">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/10 text-red-500">
                   <FileText className="h-5 w-5" />
                 </div>
@@ -2342,8 +2686,8 @@ export default function QuotationDetailPage() {
             </section>
           </div>
 
-          <div className="flex shrink-0 items-center justify-end gap-3 border-t border-white/35 bg-white/45 px-5 py-4 shadow-[0_-12px_36px_rgba(0,0,0,0.04)] backdrop-blur-2xl sm:px-6 dark:border-white/10 dark:bg-card/70">
-            <button type="button" className={`${appleButton} border border-white/70 bg-white/70 text-default shadow-sm hover:bg-white dark:border-base dark:bg-surface dark:hover:bg-card`} disabled={emailLoading} onClick={() => setEmailModalOpen(false)}>Cancel</button>
+          <div className="flex shrink-0 items-center justify-end gap-3 border-t border-white/[0.35] bg-white/[0.45] px-5 py-4 shadow-[0_-12px_36px_rgba(0,0,0,0.04)] backdrop-blur-2xl sm:px-6 dark:border-white/[0.10] dark:bg-white/[0.05]">
+            <button type="button" className={`${appleButton} border border-white/70 bg-white/70 text-default shadow-sm hover:bg-white dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.11]`} disabled={emailLoading} onClick={() => setEmailModalOpen(false)}>Cancel</button>
             <button type="submit" className={`${appleButton} bg-brand-600 text-white shadow-sm shadow-brand-600/20 hover:bg-brand-700`} disabled={emailLoading || (selectedToEmails.length === 0 && !emailRecipient.trim())}>
               <Send className="mr-2 h-4 w-4" />
               {emailLoading ? "Creating..." : "Create Gmail Draft"}
@@ -2359,7 +2703,7 @@ export default function QuotationDetailPage() {
         size="sm"
       >
         <div className="space-y-5">
-          <div className="flex items-start gap-4 rounded-[28px] border border-base bg-surface/70 p-5">
+          <div className={`flex items-start gap-4 rounded-[28px] p-5 ${quoteSubtleSurface}`}>
             <div className="rounded-full bg-brand-500/10 p-3 text-brand-600">
               <Mail className="h-5 w-5" />
             </div>
