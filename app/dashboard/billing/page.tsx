@@ -330,16 +330,19 @@ export default function BillingPage() {
     setStatsContentHeight,
     isMobile,
   } = useBillingScrollState({ activeTab, anyModalOpen });
+  const mobileStickyTop = isMobile ? 68 : 0;
+  const billingDockOffset = isMobile ? 0 : 24;
+  const searchStickyTop = isMobile ? Math.max(topControlsHeight, 100) : topControlsHeight;
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div>
       <PageHeader title="Billing & Payments" description="Manage invoices and payment collection">
-        <div className="glass-tray flex-wrap gap-y-1.5">
-          <button className="glass-pill" onClick={exportBillingCsv} disabled={filteredBillings.length === 0}><Download className="w-3.5 h-3.5" /><span className="hidden xs:inline sm:inline">Export CSV</span><span className="xs:hidden sm:hidden">Export</span></button>
-          <button className="glass-pill" onClick={() => setBulkReminderOpen(true)}><Mail className="w-3.5 h-3.5" /><span className="hidden xs:inline sm:inline">Bulk Reminders</span><span className="xs:hidden sm:hidden">Reminders</span></button>
-          <button className="glass-pill" onClick={openAdvancePaymentModal}><Plus className="w-3.5 h-3.5" /><span className="hidden xs:inline sm:inline">Record Advance</span><span className="xs:hidden sm:hidden">Advance</span></button>
-          <button className="glass-pill glass-pill-active" onClick={openBillingModal}><Plus className="w-3.5 h-3.5" /><span className="hidden xs:inline sm:inline">Add Billing</span><span className="xs:hidden sm:hidden">Add</span></button>
+        <div className="glass-tray !grid w-full grid-cols-2 !gap-1.5 sm:!inline-flex sm:w-auto sm:flex-wrap sm:!gap-x-1 sm:!gap-y-1.5">
+          <button className="glass-pill glass-pill-active order-1 h-9 w-full sm:order-4 sm:h-auto sm:w-auto" onClick={openBillingModal}><Plus className="w-3.5 h-3.5" /><span className="hidden xs:inline sm:inline">Add Billing</span><span className="xs:hidden sm:hidden">Add</span></button>
+          <button className="glass-pill order-2 h-9 w-full sm:order-2 sm:h-auto sm:w-auto" onClick={() => setBulkReminderOpen(true)}><Mail className="w-3.5 h-3.5" /><span className="hidden xs:inline sm:inline">Bulk Reminders</span><span className="xs:hidden sm:hidden">Reminders</span></button>
+          <button className="glass-pill order-3 h-9 w-full sm:order-1 sm:h-auto sm:w-auto" onClick={exportBillingCsv} disabled={filteredBillings.length === 0}><Download className="w-3.5 h-3.5" /><span className="hidden xs:inline sm:inline">Export CSV</span><span className="xs:hidden sm:hidden">Export</span></button>
+          <button className="glass-pill order-4 h-9 w-full sm:order-3 sm:h-auto sm:w-auto" onClick={openAdvancePaymentModal}><Plus className="w-3.5 h-3.5" /><span className="hidden xs:inline sm:inline">Record Advance</span><span className="xs:hidden sm:hidden">Advance</span></button>
         </div>
       </PageHeader>
 
@@ -354,7 +357,8 @@ export default function BillingPage() {
         onHeightChange={setTopControlsHeight}
         merged={headerMerged && activeTab === "billing"}
         docked={headerDocked && activeTab === "billing"}
-        dockOffset={isMobile ? 16 : 24}
+        dockOffset={billingDockOffset}
+        stickyTop={mobileStickyTop}
       />
 
       {activeTab === "billing" && (
@@ -384,9 +388,10 @@ export default function BillingPage() {
             filterOptions={filterOptions}
             merged={headerMerged}
             docked={headerDocked}
-            dockOffset={isMobile ? 16 : 24}
-            stickyTop={topControlsHeight}
+            dockOffset={billingDockOffset}
+            stickyTop={searchStickyTop}
             stickyTopOffset={isMobile ? undefined : searchBarStickyTop}
+            stickyViewportOffset={mobileStickyTop}
           />
          
         </>

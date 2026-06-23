@@ -44,13 +44,24 @@ export function useBillingScrollState({ activeTab, anyModalOpen }: UseBillingScr
     if (isMobile) {
       el.style.overflow = "";
       syntheticY.set(HEADER_MERGE_SCROLL);
+      let frameId = 0;
+      const updateMobileDocked = () => {
+        frameId = 0;
+        const scrollY = window.scrollY;
+        setHeaderDocked((current) => {
+          if (!current && scrollY > 76) return true;
+          if (current && scrollY < 44) return false;
+          return current;
+        });
+      };
       const onWindowScroll = () => {
-        const next = window.scrollY > 60;
-        setHeaderDocked((current) => (current === next ? current : next));
+        if (frameId) return;
+        frameId = requestAnimationFrame(updateMobileDocked);
       };
       window.addEventListener("scroll", onWindowScroll, { passive: true });
       onWindowScroll();
       return () => {
+        if (frameId) cancelAnimationFrame(frameId);
         window.removeEventListener("scroll", onWindowScroll);
         setHeaderDocked(false);
       };

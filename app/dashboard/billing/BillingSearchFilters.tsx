@@ -19,6 +19,7 @@ interface BillingSearchFiltersProps {
   onHeightChange?: (height: number) => void;
   sticky?: boolean;
   compact?: boolean;
+  stickyViewportOffset?: number;
   /**
    * px offset from top of scroll container (static portion).
    * Pass the measured height of BillingTopControls so this bar
@@ -53,8 +54,10 @@ export default function BillingSearchFilters({
   sticky = true,
   stickyTop = 88,
   stickyTopOffset,
+  stickyViewportOffset = 0,
 }: BillingSearchFiltersProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const resolvedStickyTop = stickyTop + stickyViewportOffset;
 
   React.useEffect(() => {
     const node = containerRef.current;
@@ -85,9 +88,9 @@ export default function BillingSearchFilters({
       ref={containerRef as React.Ref<HTMLDivElement>}
       className={`left-0 overflow-hidden border border-base bg-card/95 backdrop-blur-xl transition-all duration-300 ease-in-out ${
         docked
-          ? "-mx-4 mb-0 w-[calc(100%+2rem)] rounded-none border-x-0 border-t-0 border-b shadow-sm md:-mx-6 md:w-[calc(100%+3rem)]"
+          ? "mx-0 mb-0 w-full rounded-t-none rounded-b-2xl border-t-0 shadow-sm md:-mx-6 md:w-[calc(100%+3rem)] md:rounded-none md:border-x-0 md:border-t-0 md:border-b"
           : merged
-            ? "mb-3 w-full rounded-t-none rounded-b-2xl border-t-0 shadow-sm"
+            ? "mb-3 w-full rounded-2xl shadow-sm md:rounded-t-none md:rounded-b-2xl md:border-t-0"
             : "mb-3 w-full rounded-2xl shadow-sm"
       }`}
       style={
@@ -98,7 +101,7 @@ export default function BillingSearchFilters({
               // topControlsHeight + animated stats height. When present,
               // framer-motion drives `top` directly without React re-renders,
               // so the bar smoothly tracks the collapsing stats section.
-              top: docked ? stickyTop - dockOffset : stickyTopOffset ?? stickyTop,
+              top: docked ? resolvedStickyTop - dockOffset : stickyTopOffset ?? resolvedStickyTop,
               zIndex: 31,
             }
           : undefined

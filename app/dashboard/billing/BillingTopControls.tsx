@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { FileText, Wallet } from "lucide-react";
 import FYTabBar from "@/components/ui/FYTabBar";
 import type { BillingTab } from "./types";
@@ -16,6 +16,7 @@ interface BillingTopControlsProps {
   merged?: boolean;
   docked?: boolean;
   dockOffset?: number;
+  stickyTop?: number;
   compact?: boolean;
 }
 
@@ -35,6 +36,7 @@ export default function BillingTopControls({
   merged = false,
   docked = false,
   dockOffset = 0,
+  stickyTop = 0,
   compact = false,
 }: BillingTopControlsProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -43,41 +45,54 @@ export default function BillingTopControls({
     { value: "advances" as BillingTab, label: "Advance Payments", count: advanceCount,  Icon: Wallet   },
   ];
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = containerRef.current;
     if (!node || !onHeightChange) return;
+    let frameId = 0;
 
     const measure = () => {
       onHeightChange(Math.ceil(node.getBoundingClientRect().height));
     };
+    const scheduleMeasure = () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        frameId = 0;
+        measure();
+      });
+    };
 
     measure();
-    window.addEventListener("resize", measure);
+    scheduleMeasure();
+    window.addEventListener("resize", scheduleMeasure);
 
     if (typeof ResizeObserver === "undefined") {
-      return () => window.removeEventListener("resize", measure);
+      return () => {
+        if (frameId) cancelAnimationFrame(frameId);
+        window.removeEventListener("resize", scheduleMeasure);
+      };
     }
 
     const observer = new ResizeObserver(measure);
     observer.observe(node);
 
     return () => {
+      if (frameId) cancelAnimationFrame(frameId);
       observer.disconnect();
-      window.removeEventListener("resize", measure);
+      window.removeEventListener("resize", scheduleMeasure);
     };
-  }, [onHeightChange]);
+  }, [onHeightChange, merged, docked, compact]);
 
   return (
     <div
       ref={containerRef}
       className={`left-0 overflow-hidden border border-base bg-card/95 backdrop-blur-xl transition-all duration-300 ease-in-out ${
         docked
-          ? "-mx-4 mb-0 w-[calc(100%+2rem)] rounded-none border-x-0 border-t-0 border-b shadow-sm md:-mx-6 md:w-[calc(100%+3rem)]"
+          ? "mx-0 mb-0 w-full rounded-t-2xl rounded-b-none shadow-sm md:-mx-6 md:w-[calc(100%+3rem)] md:rounded-none md:border-x-0 md:border-t-0 md:border-b"
           : merged
-            ? "mb-0 w-full rounded-t-2xl rounded-b-none shadow-sm"
+            ? "mb-2 w-full rounded-2xl shadow-sm md:mb-0 md:rounded-t-2xl md:rounded-b-none"
             : "mb-3 w-full rounded-2xl shadow-sm"
       }`}
-      style={{ position: "sticky", top: docked ? -dockOffset : 0, zIndex: 32 }}
+      style={{ position: "sticky", top: docked ? stickyTop - dockOffset : stickyTop, zIndex: 32 }}
     >
       {/* Row 1 — FY picker */}
       <div className={compact ? "px-1 py-0.5" : "px-1 py-1"}>

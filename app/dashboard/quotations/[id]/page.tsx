@@ -108,13 +108,13 @@ const quoteControlSurface =
 const quoteActiveSurface =
   "border-white/70 bg-white text-default shadow-[0_10px_30px_rgba(0,0,0,0.08)] dark:border-white/[0.16] dark:bg-white/[0.10] dark:shadow-[0_12px_34px_rgba(0,0,0,0.42)]";
 const surfaceCard =
-  `rounded-[32px] ${quoteCardSurface} backdrop-blur-xl`;
+  `rounded-[24px] sm:rounded-[32px] ${quoteCardSurface} backdrop-blur-xl`;
 const softInput =
-  "h-12 rounded-2xl border border-black/[0.08] bg-white/[0.72] px-4 text-sm text-default transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10]";
+  "h-11 rounded-xl border border-black/[0.08] bg-white/[0.72] px-3.5 text-sm text-default transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10] sm:h-12 sm:rounded-2xl sm:px-4";
 const softTextarea =
-  "rounded-[24px] border border-black/[0.08] bg-white/[0.72] px-4 py-3 text-sm text-default transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10]";
+  "rounded-[20px] border border-black/[0.08] bg-white/[0.72] px-3.5 py-3 text-sm text-default transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10] sm:rounded-[24px] sm:px-4";
 const appleButton =
-  "inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 sm:px-5 sm:py-2.5";
 const sectionEyebrow = "text-[11px] font-semibold uppercase text-muted";
 const liquidGlassStyle: React.CSSProperties = {
   backdropFilter: "blur(72px) saturate(240%)",
@@ -130,17 +130,34 @@ const floatingGlassPanelStyle: React.CSSProperties = {
 const quotationCompactDockGlassStyle: React.CSSProperties = {
   backdropFilter: "blur(36px) saturate(210%)",
   WebkitBackdropFilter: "blur(36px) saturate(210%)",
-  boxShadow: "0 10px 28px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.22)",
+  boxShadow: "0 10px 26px rgba(0,0,0,0.13), inset 0 1px 0 rgba(255,255,255,0.26), inset 0 -1px 0 rgba(255,255,255,0.08)",
 };
 const quotationExpandedDockGlassStyle: React.CSSProperties = {
   backdropFilter: "blur(40px) saturate(210%)",
   WebkitBackdropFilter: "blur(40px) saturate(210%)",
-  boxShadow: "0 22px 68px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.16), inset 0 0 0 1px var(--color-border-soft)",
+  boxShadow: "0 22px 64px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.18), inset 0 0 0 1px var(--color-border-soft)",
 };
 const PREVIEW_DOCUMENT_WIDTH = 860;
 
 function clampPreviewScale(value: number) {
   return Math.min(1.25, Math.max(0.32, Math.round(value * 100) / 100));
+}
+
+function clamp01(value: number) {
+  return Math.min(1, Math.max(0, value));
+}
+
+function easeOutCubic(value: number) {
+  const progress = clamp01(value);
+  return 1 - Math.pow(1 - progress, 3);
+}
+
+function lerp(from: number, to: number, progress: number) {
+  return from + (to - from) * progress;
+}
+
+function px(value: number) {
+  return `${value.toFixed(2)}px`;
 }
 
 function fmt(n: number) { return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -486,7 +503,6 @@ export default function QuotationDetailPage() {
   const [previewScale, setPreviewScale] = useState(1);
   const [previewFitScale, setPreviewFitScale] = useState(1);
   const [headerOverPreview, setHeaderOverPreview] = useState(false);
-  const [mobileHeaderCollapsed, setMobileHeaderCollapsed] = useState(false);
   const [isDockExpanded, setIsDockExpanded] = useState(false);
   const [statusDropdown, setStatusDropdown] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
@@ -521,11 +537,48 @@ export default function QuotationDetailPage() {
   const previewViewportRef = useRef<HTMLDivElement | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const moreMenuButtonRef = useRef<HTMLButtonElement | null>(null);
-  const mobileHeaderCollapsedRef = useRef(false);
+  const isDockExpandedRef = useRef(false);
   const isMounted = useRef(true);
   const isInitialLoad = useRef(true);
   const isSwitchingRevision = useRef(false);
   const dockDragControls = useDragControls();
+  const dockPointerStartRef = useRef<{ x: number; y: number; mode: "compact" | "expanded" } | null>(null);
+  const dockDragIntentRef = useRef(false);
+  const dockSuppressClickUntilRef = useRef(0);
+
+  const startDockGesture = (event: React.PointerEvent<HTMLElement>, mode: "compact" | "expanded") => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    dockPointerStartRef.current = { x: event.clientX, y: event.clientY, mode };
+    dockDragIntentRef.current = false;
+    dockDragControls.start(event);
+  };
+
+  const trackDockGesture = (event: React.PointerEvent<HTMLElement>) => {
+    const start = dockPointerStartRef.current;
+    if (!start) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (Math.hypot(dx, dy) > 6) {
+      dockDragIntentRef.current = true;
+    }
+  };
+
+  const cancelDockGesture = () => {
+    dockPointerStartRef.current = null;
+    dockDragIntentRef.current = false;
+  };
+
+  const consumeDockClickSuppression = () => {
+    const shouldSuppress = dockDragIntentRef.current || Date.now() < dockSuppressClickUntilRef.current;
+    dockPointerStartRef.current = null;
+    dockDragIntentRef.current = false;
+    return shouldSuppress;
+  };
+
+  useEffect(() => {
+    isDockExpandedRef.current = isDockExpanded;
+  }, [isDockExpanded]);
+
   useEffect(() => {
     isMounted.current = true;
     return () => {
@@ -538,31 +591,58 @@ export default function QuotationDetailPage() {
     const scrollArea = document.getElementById("dashboard-scroll-area");
     let frameId = 0;
 
-    const updateHeaderState = () => {
+    const updateHeaderMorph = () => {
       frameId = 0;
-      const isSmallScreen = window.innerWidth < 1280;
-      const scrollTop = scrollArea?.scrollTop ?? window.scrollY;
-      if (!isSmallScreen) {
-        if (mobileHeaderCollapsedRef.current) {
-          mobileHeaderCollapsedRef.current = false;
-          setMobileHeaderCollapsed(false);
-        }
-        setIsDockExpanded(false);
-        return;
-      }
+      const header = stickyHeaderRef.current;
+      if (!header) return;
 
-      const nextCollapsed = mobileHeaderCollapsedRef.current
-        ? scrollTop > 44
-        : scrollTop > 96;
-      if (nextCollapsed !== mobileHeaderCollapsedRef.current) {
-        mobileHeaderCollapsedRef.current = nextCollapsed;
-        setMobileHeaderCollapsed(nextCollapsed);
+      const viewportWidth = window.innerWidth;
+      const isDesktop = viewportWidth >= 1280;
+      const isNativeMobileScroll = viewportWidth < 768;
+      const isSmallPhone = viewportWidth < 640;
+      const scrollTop = Math.max(0, isNativeMobileScroll ? window.scrollY : (scrollArea?.scrollTop ?? window.scrollY));
+      const start = isDesktop ? 12 : 8;
+      const end = isDesktop ? 180 : 136;
+      const progress = easeOutCubic((scrollTop - start) / (end - start));
+      const headerTop = isNativeMobileScroll
+        ? 68
+        : lerp(16, isDesktop ? 12 : 8, progress);
+
+      header.style.setProperty("--quote-header-progress", progress.toFixed(4));
+      header.style.setProperty("--quote-header-top", px(headerTop));
+      header.style.setProperty("--quote-header-margin", px(lerp(isDesktop ? 32 : 22, isDesktop ? 24 : 16, progress)));
+      header.style.setProperty("--quote-header-radius", px(lerp(isDesktop ? 32 : 28, isDesktop ? 28 : 24, progress)));
+      header.style.setProperty("--quote-header-pad-x", px(lerp(isDesktop ? 24 : 16, isDesktop ? 20 : 12, progress)));
+      header.style.setProperty("--quote-header-pad-y", px(lerp(isDesktop ? 16 : 14, isDesktop ? 12 : 10, progress)));
+      header.style.setProperty("--quote-header-section-gap", px(lerp(20, isDesktop ? 14 : 12, progress)));
+      header.style.setProperty("--quote-header-identity-gap", px(lerp(16, isDesktop ? 14 : 12, progress)));
+      header.style.setProperty("--quote-header-back-pad", px(lerp(12, 10, progress)));
+      header.style.setProperty("--quote-header-back-mt", px(lerp(4, 0, progress)));
+      header.style.setProperty("--quote-header-title-size", px(lerp(isDesktop ? 36 : isSmallPhone ? 28 : 32, isDesktop ? 28 : isSmallPhone ? 20 : 23, progress)));
+      header.style.setProperty("--quote-header-meta-size", px(lerp(14, 12, progress)));
+      header.style.setProperty("--quote-header-meta-top", px(lerp(8, 6, progress)));
+      header.style.setProperty("--quote-header-meta-row-gap", px(lerp(8, 6, progress)));
+      header.style.setProperty("--quote-header-meta-col-gap", px(isDesktop ? lerp(12, 10, progress) : lerp(12, 0, progress)));
+      header.style.setProperty("--quote-header-secondary-opacity", (isDesktop ? lerp(1, 0.9, progress) : clamp01(1 - progress * 1.2)).toFixed(3));
+      header.style.setProperty("--quote-header-secondary-width", isDesktop ? "999px" : px(lerp(260, 0, progress)));
+      header.style.setProperty("--quote-header-total-size", px(lerp(30, 24, progress)));
+      header.style.setProperty("--quote-header-action-pad-x", px(lerp(20, 16, progress)));
+      header.style.setProperty("--quote-header-action-pad-y", px(lerp(12, 10, progress)));
+      header.style.setProperty("--quote-header-bg-alpha", lerp(0.56, isDesktop ? 0.66 : 0.72, progress).toFixed(3));
+      header.style.setProperty("--quote-header-shadow-y", px(lerp(20, isDesktop ? 16 : 14, progress)));
+      header.style.setProperty("--quote-header-shadow-blur", px(lerp(60, isDesktop ? 46 : 40, progress)));
+      header.style.setProperty("--quote-header-shadow-alpha", lerp(0.08, isDesktop ? 0.16 : 0.18, progress).toFixed(3));
+      header.style.setProperty("--quote-header-highlight-alpha", lerp(0.2, 0.32, progress).toFixed(3));
+
+      if (isDesktop && isDockExpandedRef.current) {
+        isDockExpandedRef.current = false;
+        setIsDockExpanded(false);
       }
     };
 
     const scheduleHeaderUpdate = () => {
       if (frameId) return;
-      frameId = requestAnimationFrame(updateHeaderState);
+      frameId = requestAnimationFrame(updateHeaderMorph);
     };
 
     scheduleHeaderUpdate();
@@ -863,6 +943,7 @@ export default function QuotationDetailPage() {
     resizeObserver.observe(header);
     resizeObserver.observe(previewPanel);
     scrollArea.addEventListener("scroll", updateOverlap, { passive: true });
+    window.addEventListener("scroll", updateOverlap, { passive: true });
     window.addEventListener("resize", updateOverlap);
     updateOverlap();
 
@@ -870,6 +951,7 @@ export default function QuotationDetailPage() {
       cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
       scrollArea.removeEventListener("scroll", updateOverlap);
+      window.removeEventListener("scroll", updateOverlap);
       window.removeEventListener("resize", updateOverlap);
     };
   }, [activeTab, previewHeight]);
@@ -1574,10 +1656,10 @@ export default function QuotationDetailPage() {
   if (loading) {
     return (
       <div
-        className="min-h-screen space-y-8 pb-28"
+        className="min-h-screen space-y-5 pb-24 sm:space-y-8 sm:pb-28"
         style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif' }}
       >
-        <div className="sticky top-4 z-40 rounded-[32px] border border-white/50 bg-white/[0.56] px-5 py-5 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur-2xl dark:border-white/[0.10] dark:bg-[#1c1c1e]/[0.58] dark:shadow-[0_22px_72px_rgba(0,0,0,0.56)]">
+        <div className="sticky top-[68px] z-40 rounded-[28px] border border-white/50 bg-white/[0.56] px-4 py-4 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur-2xl sm:rounded-[32px] sm:px-5 sm:py-5 md:top-4 dark:border-white/[0.10] dark:bg-[#1c1c1e]/[0.58] dark:shadow-[0_22px_72px_rgba(0,0,0,0.56)]">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-4">
               <div className="h-11 w-11 animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08]" />
@@ -1592,10 +1674,10 @@ export default function QuotationDetailPage() {
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,7fr)_minmax(340px,3fr)]">
+        <div className="grid grid-cols-1 gap-5 sm:gap-8 xl:grid-cols-[minmax(0,7fr)_minmax(340px,3fr)]">
           <div className="space-y-6">
             {[0, 1, 2].map(i => (
-              <div key={i} className={`${surfaceCard} p-6 sm:p-8`}>
+              <div key={i} className={`${surfaceCard} p-4 sm:p-8`}>
                 <div className="mb-6 h-5 w-44 animate-pulse rounded-full bg-black/[0.08] dark:bg-white/[0.08]" />
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="h-12 animate-pulse rounded-2xl bg-black/[0.08] dark:bg-white/[0.08]" />
@@ -1655,7 +1737,7 @@ export default function QuotationDetailPage() {
     </div>
   );
   const renderSummaryTotal = (compact = false) => (
-    <div className={`my-6 rounded-[28px] p-5 ${quoteSubtleSurface}`}>
+    <div className={`${compact ? "my-4 rounded-[24px] p-4" : "my-6 rounded-[28px] p-5"} ${quoteSubtleSurface}`}>
       <p className="text-xs font-semibold uppercase text-muted">Grand Total</p>
       <p className={`mt-2 font-mono font-semibold leading-none tabular-nums text-default ${compact ? "text-3xl sm:text-4xl" : "text-4xl"}`}>{money(liveGrand)}</p>
     </div>
@@ -1663,13 +1745,13 @@ export default function QuotationDetailPage() {
   const renderQuotationSummaryActions = (variant: "sidebar" | "dock") => {
     const isDock = variant === "dock";
     return (
-      <div className={`mt-6 grid gap-2 ${isDock ? "sm:grid-cols-2" : ""}`}>
+      <div className={`${isDock ? "mt-4" : "mt-6"} grid gap-2 ${isDock ? "sm:grid-cols-2" : ""}`}>
         {isEditable ? (
           <button
             type="button"
             onClick={(event) => { event.stopPropagation(); handleFinalize(); }}
             disabled={finalising}
-            className="btn-primary w-full justify-center gap-2 rounded-full py-3 shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98]"
+            className={`btn-primary w-full justify-center gap-2 rounded-full shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98] ${isDock ? "py-2.5" : "py-3"}`}
           >
             <Sparkles className="h-4 w-4" />
             {finalising ? "Finalising..." : "Finalise Quote"}
@@ -1679,7 +1761,7 @@ export default function QuotationDetailPage() {
             type="button"
             onClick={(event) => { event.stopPropagation(); openEmailDraftModal(); }}
             disabled={emailLoading}
-            className="btn-primary w-full justify-center gap-2 rounded-full py-3 shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98]"
+            className={`btn-primary w-full justify-center gap-2 rounded-full shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98] ${isDock ? "py-2.5" : "py-3"}`}
           >
             <Mail className="h-4 w-4" />
             {emailLoading ? "Creating..." : "Email Draft"}
@@ -1691,7 +1773,7 @@ export default function QuotationDetailPage() {
             event.stopPropagation();
             openMoreMenu(event, "summary");
           }}
-          className={`btn-secondary w-full justify-center gap-2 rounded-full bg-white/90 py-3 text-sm transition duration-200 active:scale-[0.98] dark:bg-white/[0.06] dark:hover:bg-white/[0.10] ${isDock && !hasPrimaryDockAction ? "sm:col-span-2" : ""}`}
+          className={`btn-secondary w-full justify-center gap-2 rounded-full bg-white/90 text-sm transition duration-200 active:scale-[0.98] dark:bg-white/[0.06] dark:hover:bg-white/[0.10] ${isDock ? "py-2.5" : "py-3"} ${isDock && !hasPrimaryDockAction ? "sm:col-span-2" : ""}`}
         >
           <MoreHorizontal className="h-4 w-4" /> More
         </button>
@@ -1701,9 +1783,9 @@ export default function QuotationDetailPage() {
   const renderQuotationSummaryDetails = (variant: "sidebar" | "dock") => {
     const isDock = variant === "dock";
     const rowClass = isDock
-      ? `flex items-center justify-between gap-4 rounded-2xl px-3.5 py-3 ${quoteNestedSurface}`
+      ? `flex items-center justify-between gap-4 rounded-[18px] px-3 py-2.5 ${quoteNestedSurface}`
       : "flex items-center justify-between gap-4";
-    const rowsClass = isDock ? "grid gap-3 text-sm sm:grid-cols-2" : "space-y-3 text-sm";
+    const rowsClass = isDock ? "grid gap-2.5 text-sm sm:grid-cols-2" : "space-y-3 text-sm";
 
     return (
       <>
@@ -1716,7 +1798,7 @@ export default function QuotationDetailPage() {
           ))}
         </div>
 
-        <div className="my-6 h-px bg-base" />
+        <div className={`${isDock ? "my-4" : "my-6"} h-px bg-base`} />
 
         <div className={rowsClass}>
           {summaryMetaRows.map(({ label, value, mono }) => (
@@ -1738,7 +1820,7 @@ export default function QuotationDetailPage() {
     );
   };
 
-  const menuItemClass = "relative z-10 flex w-full items-center gap-3 rounded-2xl bg-white/[0.12] px-3.5 py-3 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white/[0.05] dark:hover:bg-white/[0.10]";
+  const menuItemClass = "relative z-10 flex w-full items-center gap-3 rounded-2xl bg-white/[0.12] px-3.5 py-3 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 dark:bg-transparent dark:hover:bg-white/[0.08]";
   const moreMenu = (
     <div
       className="fixed isolate z-50 w-[min(420px,calc(100vw-24px))] origin-top-right overflow-y-auto rounded-[24px] border border-white/[0.65] p-2 shadow-[0_26px_90px_rgba(0,0,0,0.22)] transition-all duration-200 dark:border-white/10 xl:w-72 xl:max-w-[calc(100vw-24px)]"
@@ -1751,7 +1833,7 @@ export default function QuotationDetailPage() {
       }}
     >
       <div className="pointer-events-none absolute inset-0 z-0 bg-[#eef1f6]/[0.15] dark:bg-black/10" />
-      <div className="pointer-events-none absolute inset-x-4 top-0 z-0 h-px bg-white/90" />
+      <div className="pointer-events-none absolute inset-x-4 top-0 z-0 h-px bg-white/70 dark:bg-white/[0.12]" />
       <button
         onClick={() => { setMoreMenuOpen(false); handlePrintPreview(); }}
         disabled={pdfLoading}
@@ -1803,7 +1885,7 @@ export default function QuotationDetailPage() {
               <button
                 key={s}
                 onClick={() => updateStatus(s)}
-                className="flex w-full items-center gap-3 rounded-2xl bg-white/[0.12] px-3.5 py-2.5 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] dark:bg-white/[0.05] dark:hover:bg-white/[0.10]"
+                className="flex w-full items-center gap-3 rounded-2xl bg-white/[0.12] px-3.5 py-2.5 text-left text-sm text-default transition hover:bg-white/70 active:scale-[0.98] dark:bg-transparent dark:hover:bg-white/[0.08]"
               >
                 <span className={`h-2 w-2 rounded-full ${cfg.dot}`} />
                 <span>{cfg.label}</span>
@@ -1815,7 +1897,7 @@ export default function QuotationDetailPage() {
       <button
         disabled
         title="Archive workflow is not available for quotations yet"
-        className="relative z-10 mt-1 flex w-full cursor-not-allowed items-center gap-3 rounded-2xl bg-white/10 px-3.5 py-3 text-left text-sm text-faint opacity-50 dark:bg-white/[0.05]"
+        className="relative z-10 mt-1 flex w-full cursor-not-allowed items-center gap-3 rounded-2xl bg-white/10 px-3.5 py-3 text-left text-sm text-faint opacity-50 dark:bg-transparent"
       >
         <AlertTriangle className="h-4 w-4" />
         <span>
@@ -1826,63 +1908,116 @@ export default function QuotationDetailPage() {
     </div>
   );
 
+  const quoteHeaderStyle = {
+    top: "var(--quote-header-top, 16px)",
+    marginBottom: "var(--quote-header-margin, 32px)",
+    borderRadius: "var(--quote-header-radius, 32px)",
+    padding: "var(--quote-header-pad-y, 16px) var(--quote-header-pad-x, 20px)",
+    backgroundColor: "rgba(var(--color-card-rgb), var(--quote-header-bg-alpha, 0.56))",
+    backgroundImage: "linear-gradient(180deg, rgba(255,255,255,var(--quote-header-highlight-alpha, 0.20)), rgba(255,255,255,0))",
+    boxShadow: headerOverPreview
+      ? "0 var(--quote-header-shadow-y, 20px) calc(var(--quote-header-shadow-blur, 60px) + 16px) rgba(0,0,0,var(--quote-header-shadow-alpha, 0.08)), inset 0 1px 0 rgba(255,255,255,var(--quote-header-highlight-alpha, 0.20))"
+      : "0 var(--quote-header-shadow-y, 20px) var(--quote-header-shadow-blur, 60px) rgba(0,0,0,var(--quote-header-shadow-alpha, 0.08)), inset 0 1px 0 rgba(255,255,255,var(--quote-header-highlight-alpha, 0.20))",
+    willChange: "top, margin-bottom, border-radius, padding, background-color, box-shadow",
+  } as React.CSSProperties;
+  const quoteHeaderSecondaryStyle = {
+    maxWidth: "var(--quote-header-secondary-width, 260px)",
+    opacity: "var(--quote-header-secondary-opacity, 1)",
+  } as React.CSSProperties;
+  const quoteHeaderActionStyle = {
+    padding: "var(--quote-header-action-pad-y, 12px) var(--quote-header-action-pad-x, 20px)",
+  } as React.CSSProperties;
+
   return (
     <div
-      className="min-h-screen pb-[calc(9rem+env(safe-area-inset-bottom))] xl:pb-28"
+      className="min-h-screen pb-[calc(4.75rem+env(safe-area-inset-bottom))] sm:pb-[calc(7rem+env(safe-area-inset-bottom))] xl:pb-28"
       style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif' }}
     >
       {/* ─── TOP BAR ─── */}
       <div
         ref={stickyHeaderRef}
-        className={`sticky z-40 backdrop-blur-2xl transition-all duration-300 ${
-          mobileHeaderCollapsed
-            ? "top-2 mb-5 rounded-[26px] px-3 py-3 sm:px-4 xl:top-4 xl:mb-8 xl:rounded-[32px] xl:px-5 xl:py-4"
-            : "top-4 mb-8 rounded-[32px] px-5 py-4 sm:px-6"
-        } ${
+        className={`sticky z-20 border backdrop-blur-2xl dark:!bg-none xl:z-40 ${
           headerOverPreview
-            ? "border border-white/75 bg-white/[0.62] shadow-[0_20px_60px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.58)] dark:border-white/[0.16] dark:bg-[#111113]/[0.68] dark:shadow-[0_26px_80px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(255,255,255,0.10)]"
-            : "border border-white/50 bg-white/[0.56] shadow-[0_20px_60px_rgba(0,0,0,0.08)] dark:border-white/[0.10] dark:bg-[#1c1c1e]/[0.58] dark:shadow-[0_22px_72px_rgba(0,0,0,0.56)]"
+            ? "border-white/75 dark:border-white/[0.16]"
+            : "border-white/50 dark:border-white/[0.10]"
         }`}
+        style={quoteHeaderStyle}
       >
-        <div className={`flex flex-col ${mobileHeaderCollapsed ? "gap-3" : "gap-5"} xl:flex-row xl:items-center xl:justify-between`}>
-          <div className={`flex min-w-0 ${mobileHeaderCollapsed ? "items-center gap-3" : "items-start gap-4"}`}>
+        <div
+          className="flex flex-col xl:flex-row xl:items-center xl:justify-between"
+          style={{ gap: "var(--quote-header-section-gap, 20px)" }}
+        >
+          <div className="flex min-w-0 items-start" style={{ gap: "var(--quote-header-identity-gap, 16px)" }}>
             <button
               onClick={() => router.push("/dashboard/quotations")}
-              className={`shrink-0 rounded-full text-muted transition duration-200 hover:-translate-y-0.5 hover:text-default hover:shadow-sm active:scale-[0.98] ${mobileHeaderCollapsed ? "mt-0 p-2.5" : "mt-1 p-3"} ${quoteControlSurface}`}
+              className={`shrink-0 rounded-full text-muted transition duration-200 hover:-translate-y-0.5 hover:text-default hover:shadow-sm active:scale-[0.98] ${quoteControlSurface}`}
               title="Back to quotations"
+              style={{ marginTop: "var(--quote-header-back-mt, 4px)", padding: "var(--quote-header-back-pad, 12px)" }}
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
             <div className="min-w-0">
-              <h1 className={`min-w-0 truncate font-semibold leading-tight text-default transition-all duration-300 ${mobileHeaderCollapsed ? "text-lg sm:text-xl" : "text-3xl sm:text-4xl"}`}>
+              <h1
+                className="min-w-0 truncate font-semibold leading-tight text-default"
+                style={{ fontSize: "var(--quote-header-title-size, clamp(30px, 7.8vw, 36px))" }}
+              >
                 {quotation.quotationNumber ? (
                   <span>{quotation.quotationNumber}</span>
                 ) : (
                   <span className="text-muted">Untitled Draft</span>
                 )}
               </h1>
-              <div className={`mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-muted transition-all duration-300 ${mobileHeaderCollapsed ? "text-xs" : "text-sm"}`}>
-                <span className={`font-medium text-default ${mobileHeaderCollapsed ? "hidden sm:inline" : ""}`}>{quotation.clientName}</span>
+              <div
+                className="flex flex-wrap items-center text-muted"
+                style={{
+                  columnGap: "var(--quote-header-meta-col-gap, 12px)",
+                  rowGap: "var(--quote-header-meta-row-gap, 8px)",
+                  fontSize: "var(--quote-header-meta-size, 14px)",
+                  marginTop: "var(--quote-header-meta-top, 8px)",
+                }}
+              >
+                <span
+                  className="inline-block overflow-hidden truncate whitespace-nowrap align-bottom font-medium text-default"
+                  style={quoteHeaderSecondaryStyle}
+                >
+                  {quotation.clientName}
+                </span>
                 <QuotationStatusPill status={quotation.status} />
-                <span className={`text-faint ${mobileHeaderCollapsed ? "hidden sm:inline" : ""}`}>FY {quotation.financialYear}</span>
-                {quotation.validTill && <span className={`text-faint ${mobileHeaderCollapsed ? "hidden md:inline" : ""}`}>Valid till {fmtDate(quotation.validTill)}</span>}
+                <span
+                  className="inline-block overflow-hidden whitespace-nowrap align-bottom text-faint"
+                  style={quoteHeaderSecondaryStyle}
+                >
+                  FY {quotation.financialYear}
+                </span>
+                {quotation.validTill && (
+                  <span
+                    className="inline-block overflow-hidden whitespace-nowrap align-bottom text-faint"
+                    style={quoteHeaderSecondaryStyle}
+                  >
+                    Valid till {fmtDate(quotation.validTill)}
+                  </span>
+                )}
                 {savedStatus === "saving" && <span className="animate-pulse text-xs text-muted">Saving...</span>}
                 {savedStatus === "saved" && <span className="flex items-center gap-1 text-xs text-emerald-500"><CheckCircle2 className="h-3 w-3" />Saved</span>}
               </div>
             </div>
           </div>
 
-          <div className="hidden flex-col gap-3 xl:flex xl:flex-row xl:items-center xl:justify-end">
+          <div
+            className="hidden flex-col xl:flex xl:flex-row xl:items-center xl:justify-end"
+            style={{ gap: "var(--quote-header-identity-gap, 16px)" }}
+          >
             <div className="sm:text-right">
               <p className="text-xs font-semibold uppercase text-muted">Grand Total</p>
-              <p className="mt-1 text-3xl font-semibold leading-none text-default">{money(liveGrand)}</p>
+              <p className="mt-1 font-semibold leading-none text-default" style={{ fontSize: "var(--quote-header-total-size, 30px)" }}>{money(liveGrand)}</p>
             </div>
             <div className="flex items-center gap-2">
               {isEditable && (
                 <button
                   onClick={handleFinalize}
                   disabled={finalising}
-                  className="btn-primary gap-2 rounded-full px-5 py-3 text-sm shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98]"
+                  className="btn-primary gap-2 rounded-full text-sm shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98]"
+                  style={quoteHeaderActionStyle}
                 >
                   <Sparkles className="h-4 w-4" />
                   {finalising ? "Finalising..." : "Finalise Quote"}
@@ -1892,7 +2027,8 @@ export default function QuotationDetailPage() {
                 <button
                   onClick={openEmailDraftModal}
                   disabled={emailLoading}
-                  className="btn-primary gap-2 rounded-full px-5 py-3 text-sm shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98]"
+                  className="btn-primary gap-2 rounded-full text-sm shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98]"
+                  style={quoteHeaderActionStyle}
                 >
                   <Mail className="h-4 w-4" />
                   {emailLoading ? "Creating..." : "Email Draft"}
@@ -1906,8 +2042,9 @@ export default function QuotationDetailPage() {
               <div className="relative">
                 <button
                   onClick={(e) => openMoreMenu(e, "header")}
-                  className={`inline-flex items-center gap-2 rounded-full px-4 py-3 text-muted transition duration-200 hover:-translate-y-0.5 hover:text-default hover:shadow-sm active:scale-[0.98] ${quoteControlSurface}`}
+                  className={`inline-flex items-center gap-2 rounded-full text-muted transition duration-200 hover:-translate-y-0.5 hover:text-default hover:shadow-sm active:scale-[0.98] ${quoteControlSurface}`}
                   title="More actions"
+                  style={quoteHeaderActionStyle}
                 >
                   <MoreHorizontal className="h-5 w-5" />
                   <span className="hidden text-sm font-medium sm:inline">More</span>
@@ -1920,12 +2057,12 @@ export default function QuotationDetailPage() {
 
       {/* ─── REVISION STEPPER ─── */}
       {quotation.revisions.length > 0 && (
-        <div className={`mb-6 flex max-w-full items-center gap-2 overflow-x-auto rounded-[28px] p-2 shadow-sm backdrop-blur-xl ${quoteSubtleSurface}`}>
+        <div className={`scrollbar-none mb-4 flex max-w-full items-center gap-1.5 overflow-x-auto rounded-[22px] p-1.5 shadow-sm backdrop-blur-xl sm:mb-6 sm:gap-2 sm:rounded-[28px] sm:p-2 ${quoteSubtleSurface}`}>
           {quotation.revisions.map(rev => (
             <button
               key={rev.revisionNumber}
               onClick={() => setSelectedRevNum(rev.revisionNumber)}
-              className={`flex shrink-0 items-center gap-3 rounded-full border px-4 py-2.5 text-sm font-medium transition-all duration-200 whitespace-nowrap active:scale-[0.98] ${
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-medium transition-all duration-200 whitespace-nowrap active:scale-[0.98] sm:gap-3 sm:px-4 sm:py-2.5 sm:text-sm ${
                 selectedRevNum === rev.revisionNumber
                   ? quoteActiveSurface
                   : "border-transparent text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.08]"
@@ -1941,7 +2078,7 @@ export default function QuotationDetailPage() {
             <button
               onClick={handleCreateRevision}
               disabled={creatingRevision}
-              className="flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-black/[0.12] px-4 py-2.5 text-xs text-muted transition-all duration-200 hover:bg-white/70 hover:text-default active:scale-[0.98] dark:border-white/[0.16] dark:hover:bg-white/[0.08]"
+              className="flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-black/[0.12] px-3 py-2 text-xs text-muted transition-all duration-200 hover:bg-white/70 hover:text-default active:scale-[0.98] dark:border-white/[0.16] dark:hover:bg-white/[0.08] sm:px-4 sm:py-2.5"
             >
               <Plus className="w-3 h-3" /> New Revision
             </button>
@@ -1951,7 +2088,7 @@ export default function QuotationDetailPage() {
 
       {/* ─── DIFF BANNER ─── */}
       {diffChanges.length > 0 && selectedRevNum !== null && selectedRevNum > 0 && (
-        <div className={`mb-6 rounded-[28px] p-4 shadow-sm backdrop-blur-xl sm:p-5 ${quoteCardSurface}`}>
+        <div className={`mb-4 rounded-[24px] p-4 shadow-sm backdrop-blur-xl sm:mb-6 sm:rounded-[28px] sm:p-5 ${quoteCardSurface}`}>
           <div className="mb-3 flex items-center gap-3">
             <div className="rounded-full bg-amber-100/70 p-2 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
               <GitBranch className="h-4 w-4" />
@@ -1977,7 +2114,7 @@ export default function QuotationDetailPage() {
       )}
 
       {/* ─── MAIN TABS ─── */}
-      <div className={`mb-8 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full p-1.5 shadow-sm ${quoteSubtleSurface}`}>
+      <div className={`mb-5 grid w-full grid-cols-3 gap-1 rounded-full p-1 shadow-sm sm:scrollbar-none sm:mb-8 sm:flex sm:w-fit sm:max-w-full sm:overflow-x-auto sm:p-1.5 ${quoteSubtleSurface}`}>
         {[
           { key: "editor", label: isEditable ? "Editor" : "Details", icon: FileText },
           { key: "preview", label: "Preview", icon: Eye },
@@ -1986,7 +2123,7 @@ export default function QuotationDetailPage() {
           <button
             key={key}
             onClick={() => setActiveTab(key as "editor" | "preview" | "timeline")}
-            className={`flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium transition-all duration-200 active:scale-[0.98] ${
+            className={`flex min-w-0 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium transition-all duration-200 active:scale-[0.98] sm:gap-2 sm:px-5 sm:py-2.5 sm:text-sm ${
               activeTab === key ? quoteActiveSurface : "text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.08]"
             }`}
           >
@@ -1997,9 +2134,9 @@ export default function QuotationDetailPage() {
 
       {/* ─── EDITOR TAB ─── */}
       {activeTab === "editor" && (
-        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,7fr)_minmax(340px,3fr)]">
+        <div className="grid grid-cols-1 gap-5 sm:gap-8 xl:grid-cols-[minmax(0,7fr)_minmax(340px,3fr)]">
           {/* LEFT — FORM */}
-          <div className="order-1 space-y-8">
+          <div className="order-1 space-y-5 sm:space-y-8">
             {!isEditable && selectedRevNum !== quotation.currentRevisionNumber && (
               <div className={`flex items-center gap-3 rounded-2xl p-4 ${quoteSubtleSurface}`}>
                 <EyeOff className="w-4 h-4 text-muted shrink-0" />
@@ -2011,8 +2148,8 @@ export default function QuotationDetailPage() {
 
             {!isEditable && (
               <>
-                <div className={`${surfaceCard} p-6 sm:p-8`}>
-                  <div className="mb-6">
+                <div className={`${surfaceCard} p-4 sm:p-8`}>
+                  <div className="mb-4 sm:mb-6">
                     <h3 className="flex items-center gap-2 text-xl font-semibold text-default"><Building2 className="h-5 w-5 text-muted" />Quotation Details</h3>
                     <p className="mt-1 text-sm text-muted">Client and validity information for this quotation.</p>
                   </div>
@@ -2034,7 +2171,7 @@ export default function QuotationDetailPage() {
                   </div>
                 </div>
 
-                <div className={`${surfaceCard} p-5 sm:p-6`}>
+                <div className={`${surfaceCard} p-4 sm:p-6`}>
                   <div className="mb-5 flex items-center justify-between gap-4">
                     <h3 className="flex items-center gap-2 text-base font-semibold text-default"><IndianRupee className="h-4 w-4 text-muted" />Line Items</h3>
                     <p className="text-xs text-muted">{items.length} {items.length === 1 ? "item" : "items"}</p>
@@ -2044,7 +2181,7 @@ export default function QuotationDetailPage() {
                       {items.map((item, idx) => {
                         const { gstAmt, total } = calcItem(item);
                         return (
-                          <article key={item._id} className={`rounded-[24px] p-5 transition duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] dark:hover:bg-white/[0.08] dark:hover:shadow-[0_18px_52px_rgba(0,0,0,0.42)] sm:p-6 ${quoteSubtleSurface}`}>
+                          <article key={item._id} className={`rounded-[20px] p-4 transition duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] dark:hover:bg-white/[0.08] dark:hover:shadow-[0_18px_52px_rgba(0,0,0,0.42)] sm:rounded-[24px] sm:p-6 ${quoteSubtleSurface}`}>
                             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                               <div className="min-w-0">
                                 <p className={sectionEyebrow}>Item {idx + 1}</p>
@@ -2064,7 +2201,7 @@ export default function QuotationDetailPage() {
                                 { label: "Unit Price", value: money(item.rate), mono: true },
                                 { label: "GST", value: `${item.gstPercent}%`, mono: true },
                               ].map(({ label, value, mono }) => (
-                                <div key={label} className={`rounded-2xl px-4 py-3 ${quoteNestedSurface}`}>
+                                <div key={label} className={`rounded-2xl px-3 py-2.5 sm:px-4 sm:py-3 ${quoteNestedSurface}`}>
                                   <p className={sectionEyebrow}>{label}</p>
                                   <p className={`mt-1 text-sm font-medium text-default ${mono ? "font-mono tabular-nums" : ""}`}>{value}</p>
                                 </div>
@@ -2079,8 +2216,8 @@ export default function QuotationDetailPage() {
                   )}
                 </div>
 
-                <div className={`${surfaceCard} p-6 sm:p-8`}>
-                  <div className="mb-6 flex items-center gap-2">
+                <div className={`${surfaceCard} p-4 sm:p-8`}>
+                  <div className="mb-4 flex items-center gap-2 sm:mb-6">
                     <Receipt className="h-5 w-5 text-muted" />
                     <div>
                       <h3 className="text-xl font-semibold text-default">Charges</h3>
@@ -2093,7 +2230,7 @@ export default function QuotationDetailPage() {
                       { label: "Government Fees", value: money(liveGF), helper: "CPCB / SPCB / portal charges" },
                       { label: "Grand Total", value: money(liveGrand), emphasis: true },
                     ].map(({ label, value, helper, emphasis }) => (
-                      <div key={label} className={`rounded-[24px] p-5 ${quoteSubtleSurface}`}>
+                      <div key={label} className={`rounded-[20px] p-4 sm:rounded-[24px] sm:p-5 ${quoteSubtleSurface}`}>
                         <p className={sectionEyebrow}>{label}</p>
                         <p className={`mt-2 font-mono font-semibold tabular-nums text-default ${emphasis ? "text-2xl" : "text-lg"}`}>{value}</p>
                         {helper && <p className="mt-2 text-xs text-muted">{helper}</p>}
@@ -2102,7 +2239,7 @@ export default function QuotationDetailPage() {
                   </div>
                 </div>
 
-                <div className={`${surfaceCard} p-6 sm:p-8`}>
+                <div className={`${surfaceCard} p-4 sm:p-8`}>
                   <h3 className="text-xl font-semibold text-default">Notes / Terms</h3>
                   <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-default">{notes || "No notes or special terms."}</p>
                 </div>
@@ -2111,8 +2248,8 @@ export default function QuotationDetailPage() {
 
             {isEditable && (
               <>
-                <div className={`${surfaceCard} p-6 sm:p-8`}>
-                  <div className="mb-6">
+                <div className={`${surfaceCard} p-4 sm:p-8`}>
+                  <div className="mb-4 sm:mb-6">
                     <h3 className="flex items-center gap-2 text-xl font-semibold text-default"><Building2 className="h-5 w-5 text-muted" />Client details</h3>
                     <p className="mt-1 text-sm text-muted">Who this quotation is prepared for.</p>
                   </div>
@@ -2145,22 +2282,22 @@ export default function QuotationDetailPage() {
                   </div>
                 </div>
 
-                <div className={`${surfaceCard} p-5 sm:p-6`}>
+                <div className={`${surfaceCard} p-4 sm:p-6`}>
                   <div className="mb-5 flex items-center justify-between gap-4">
                     <h3 className="flex items-center gap-2 text-base font-semibold text-default"><IndianRupee className="h-4 w-4 text-muted" />Line Items</h3>
-                    <button onClick={() => setItems(prev => [...prev, newItem()])} className="glass-btn glass-btn-primary rounded-full px-4 py-2 transition duration-200 active:scale-[0.98]"><Plus className="h-3.5 w-3.5" /> Add Item</button>
+                    <button onClick={() => setItems(prev => [...prev, newItem()])} className="glass-btn glass-btn-primary shrink-0 rounded-full px-3 py-2 transition duration-200 active:scale-[0.98] sm:px-4"><Plus className="h-3.5 w-3.5" /> Add Item</button>
                   </div>
                   <div className="space-y-4">
                     {items.map((item, idx) => {
                       const { gstAmt, total } = calcItem(item);
                       return (
-                        <article key={item._id} className={`rounded-[24px] p-5 transition duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] dark:hover:bg-white/[0.08] dark:hover:shadow-[0_18px_52px_rgba(0,0,0,0.42)] sm:p-6 ${quoteSubtleSurface}`}>
+                        <article key={item._id} className={`rounded-[20px] p-4 transition duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] dark:hover:bg-white/[0.08] dark:hover:shadow-[0_18px_52px_rgba(0,0,0,0.42)] sm:rounded-[24px] sm:p-6 ${quoteSubtleSurface}`}>
                           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                             <div className="min-w-0 flex-1">
                               <div className="mb-2 flex items-center justify-between gap-3"><label className={sectionEyebrow}>Product / Service</label><span className="text-xs text-faint">Item {idx + 1}</span></div>
                               <input list={`services-list-${item._id}`} className={`${softInput} w-full`} value={item.description} onChange={e => { const val = e.target.value; updateItem(idx, "description", val); const matched = STANDARD_SERVICES.find(s => s.description === val); if (matched) { updateItem(idx, "category", matched.category); updateItem(idx, "type", matched.type); } }} disabled={!isEditable} />
                               <datalist id={`services-list-${item._id}`}>{STANDARD_SERVICES.map(s => <option key={s.label} value={s.description}>{s.category} - {s.type}</option>)}</datalist>
-                              <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">{STANDARD_SERVICES.slice(0, 4).map(service => <button key={service.label} type="button" onClick={() => { updateItem(idx, "description", service.description); updateItem(idx, "category", service.category); updateItem(idx, "type", service.type); }} disabled={!isEditable} className="shrink-0 rounded-full border border-transparent bg-white/60 px-2.5 py-1 text-[11px] font-medium text-faint transition duration-200 hover:-translate-y-0.5 hover:border-black/[0.08] hover:bg-[#f5f5f7] hover:text-muted active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white/[0.06] dark:hover:border-white/[0.12] dark:hover:bg-white/[0.10]">{service.category} {service.type}</button>)}</div>
+                              <div className="scrollbar-none mt-3 flex gap-1.5 overflow-x-auto pb-1">{STANDARD_SERVICES.slice(0, 4).map(service => <button key={service.label} type="button" onClick={() => { updateItem(idx, "description", service.description); updateItem(idx, "category", service.category); updateItem(idx, "type", service.type); }} disabled={!isEditable} className="shrink-0 rounded-full border border-transparent bg-white/60 px-2.5 py-1 text-[11px] font-medium text-faint transition duration-200 hover:-translate-y-0.5 hover:border-black/[0.08] hover:bg-[#f5f5f7] hover:text-muted active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white/[0.06] dark:hover:border-white/[0.12] dark:hover:bg-white/[0.10]">{service.category} {service.type}</button>)}</div>
                             </div>
                             <div className="flex items-start justify-between gap-3 sm:block sm:min-w-40 sm:text-right">
                               <div><p className={sectionEyebrow}>Total</p><p className="mt-1 font-mono text-xl font-semibold tabular-nums text-default">{money(total)}</p>{item.gstPercent > 0 && <p className="mt-1 text-xs text-muted">GST {money(gstAmt)}</p>}</div>
@@ -2181,8 +2318,8 @@ export default function QuotationDetailPage() {
                   <button onClick={() => setItems(prev => [...prev, newItem()])} className={`${appleButton} mt-4 border border-base bg-surface text-default hover:bg-card`}><Plus className="mr-2 h-4 w-4" />Add Item</button>
                 </div>
 
-                <div className={`${surfaceCard} p-6 sm:p-8`}>
-                  <div className="mb-6"><h3 className="flex items-center gap-2 text-xl font-semibold text-default"><Receipt className="h-5 w-5 text-muted" />Additional charges</h3><p className="mt-1 text-sm text-muted">Consultation, tax, and statutory fees.</p></div>
+                <div className={`${surfaceCard} p-4 sm:p-8`}>
+                  <div className="mb-4 sm:mb-6"><h3 className="flex items-center gap-2 text-xl font-semibold text-default"><Receipt className="h-5 w-5 text-muted" />Additional charges</h3><p className="mt-1 text-sm text-muted">Consultation, tax, and statutory fees.</p></div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                     <div><label className="label">Consultation Charges</label><input type="number" min="0" step="0.01" className={`${softInput} w-full font-mono tabular-nums`} value={consultationCharges} onChange={e => setConsultationCharges(e.target.value)} disabled={!isEditable} /></div>
                     <div><label className="label">Consultation GST %</label><select className={`${softInput} w-full`} value={consultationGstPercent} onChange={e => setConsultationGstPercent(e.target.value)} disabled={!isEditable}>{GST_OPTIONS.map(g => <option key={g} value={g}>{g}%</option>)}</select></div>
@@ -2190,7 +2327,7 @@ export default function QuotationDetailPage() {
                   </div>
                 </div>
 
-                <div className={`${surfaceCard} p-6 sm:p-8`}>
+                <div className={`${surfaceCard} p-4 sm:p-8`}>
                   <div className="mb-5"><h3 className="text-xl font-semibold text-default">Notes / Terms</h3><p className="mt-1 text-sm text-muted">Payment terms, validity, or client-facing conditions.</p></div>
                   <textarea className={`${softTextarea} min-h-36 w-full resize-y`} rows={5} value={notes} onChange={e => setNotes(e.target.value)} disabled={!isEditable} placeholder="Payment terms, validity, special conditions..." />
                 </div>
@@ -2214,14 +2351,14 @@ export default function QuotationDetailPage() {
 
       {/* ─── PREVIEW TAB ─── */}
       {activeTab === "preview" && (
-        <div ref={previewPanelRef} className="rounded-[32px] border border-black/[0.08] bg-[#f5f5f7] p-4 shadow-sm sm:p-8 dark:border-white/[0.10] dark:bg-[#050506] dark:shadow-[0_26px_80px_rgba(0,0,0,0.58)]">
-          <div className={`mb-6 flex flex-col gap-4 rounded-[28px] p-4 shadow-sm backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between ${quoteCardSurface}`}>
+        <div ref={previewPanelRef} className="rounded-[24px] border border-black/[0.08] bg-[#f5f5f7] p-3 shadow-sm sm:rounded-[32px] sm:p-8 dark:border-white/[0.10] dark:bg-[#050506] dark:shadow-[0_26px_80px_rgba(0,0,0,0.58)]">
+          <div className={`mb-4 flex flex-col gap-3 rounded-[24px] p-3 shadow-sm backdrop-blur-xl sm:mb-6 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:rounded-[28px] sm:p-4 ${quoteCardSurface}`}>
             <div>
               <p className="font-mono text-xs text-faint">{quotation.quotationNumber || "DRAFT"} - Rev {selectedRevNum ?? quotation.currentRevisionNumber}</p>
               <h3 className="mt-1 text-lg font-semibold text-default">Quotation Preview</h3>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className={`flex items-center gap-1 rounded-full p-1 ${quoteControlSurface}`}>
+            <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+              <div className={`col-span-2 flex w-full items-center justify-between gap-1 rounded-full p-1 sm:col-span-1 sm:w-auto ${quoteControlSurface}`}>
                 <button
                   type="button"
                   onClick={() => setPreviewZoomMode("fit")}
@@ -2237,7 +2374,7 @@ export default function QuotationDetailPage() {
                 >
                   <Minus className="h-3.5 w-3.5" />
                 </button>
-                <span className="min-w-12 text-center font-mono text-xs font-semibold tabular-nums text-default">{previewZoomPercent}%</span>
+                <span className="min-w-10 text-center font-mono text-xs font-semibold tabular-nums text-default sm:min-w-12">{previewZoomPercent}%</span>
                 <button
                   type="button"
                   onClick={() => adjustPreviewZoom(0.1)}
@@ -2254,18 +2391,18 @@ export default function QuotationDetailPage() {
                   100%
                 </button>
               </div>
-              <button onClick={handlePrintPreview} disabled={pdfLoading} className={`${appleButton} border border-base bg-card text-default hover:bg-surface`}>
+              <button onClick={handlePrintPreview} disabled={pdfLoading} className={`${appleButton} ${canCreateEmailDraft ? "" : "col-span-2"} w-full border border-base bg-card text-default hover:bg-surface sm:w-auto`}>
                 <Printer className="mr-2 h-4 w-4" />{pdfLoading ? "Opening..." : "Print"}
               </button>
               {canCreateEmailDraft && (
-                <button onClick={openEmailDraftModal} disabled={emailLoading} className={`${appleButton} border border-base bg-card text-default hover:bg-surface`}>
+                <button onClick={openEmailDraftModal} disabled={emailLoading} className={`${appleButton} w-full border border-base bg-card text-default hover:bg-surface sm:w-auto`}>
                   <Mail className="mr-2 h-4 w-4" />Email Draft
                 </button>
                   )}
                 </div>
               </div>
           {previewTemplateLoading && (
-            <div className="mx-auto max-w-[860px] rounded-[28px] border border-black/[0.10] bg-white p-8 text-slate-500 shadow-[0_30px_90px_rgba(0,0,0,0.10)] dark:border-white/[0.14] dark:shadow-[0_30px_90px_rgba(0,0,0,0.62)]">
+            <div className="mx-auto max-w-[860px] rounded-[24px] border border-black/[0.10] bg-white p-5 text-slate-500 shadow-[0_30px_90px_rgba(0,0,0,0.10)] sm:rounded-[28px] sm:p-8 dark:border-white/[0.14] dark:shadow-[0_30px_90px_rgba(0,0,0,0.62)]">
               <div className="mb-6 h-5 w-44 animate-pulse rounded-full bg-slate-200" />
               <div className="space-y-3">
                 <div className="h-4 animate-pulse rounded-full bg-slate-200" />
@@ -2320,8 +2457,8 @@ export default function QuotationDetailPage() {
 
       {/* Activity tab */}
       {activeTab === "timeline" && (
-        <div className={`${surfaceCard} max-w-3xl p-6 sm:p-8`}>
-          <div className="mb-8">
+        <div className={`${surfaceCard} max-w-3xl p-4 sm:p-8`}>
+          <div className="mb-5 sm:mb-8">
             <h3 className="text-xl font-semibold text-default">Activity</h3>
             <p className="mt-1 text-sm text-muted">Complete history for this quotation.</p>
           </div>
@@ -2353,21 +2490,25 @@ export default function QuotationDetailPage() {
       )}
 
       {!emailModalOpen && markSentPrompt === null && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-3 xl:hidden">
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] xl:hidden">
           <motion.div
-            layout
             drag="y"
             dragControls={dockDragControls}
-            dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={0.16}
+            dragConstraints={{ top: -28, bottom: 28 }}
+            dragElastic={0.06}
             dragListener={false}
             dragMomentum={false}
             dragSnapToOrigin
             animate={{ y: 0 }}
-            whileDrag={{ scale: 0.992 }}
+            whileDrag={{ scale: 0.994 }}
             onDragEnd={(_, info) => {
-              const wantsExpand = info.offset.y < -18 || info.velocity.y < -220;
-              const wantsCollapse = info.offset.y > 22 || info.velocity.y > 220;
+              const meaningfulDrag = Math.abs(info.offset.y) > 8 || Math.abs(info.velocity.y) > 80;
+              if (meaningfulDrag) {
+                dockSuppressClickUntilRef.current = Date.now() + 240;
+              }
+              cancelDockGesture();
+              const wantsExpand = info.offset.y < -20 || info.velocity.y < -220;
+              const wantsCollapse = info.offset.y > 24 || info.velocity.y > 220;
               if (isDockExpanded && wantsCollapse) {
                 setIsDockExpanded(false);
               } else if (!isDockExpanded && wantsExpand) {
@@ -2375,7 +2516,7 @@ export default function QuotationDetailPage() {
               }
             }}
             transition={{ type: "spring", stiffness: 420, damping: 38, mass: 0.9 }}
-            className={`pointer-events-auto mx-auto w-full max-w-[min(44rem,calc(100vw-1rem))] overflow-hidden border transition-colors duration-300 ${
+            className={`pointer-events-auto mx-auto w-full max-w-[44rem] overflow-hidden border transition-colors duration-300 ${
               isDockExpanded
                 ? "rounded-[34px] border-white/[0.42] bg-white/[0.72] p-4 dark:border-white/[0.12] dark:bg-[#0a0a0b]/[0.78] sm:p-5"
                 : "rounded-[22px] border-black/[0.06] bg-[#f5f5f7]/[0.84] p-1 dark:border-white/[0.10] dark:bg-black/[0.72]"
@@ -2385,9 +2526,14 @@ export default function QuotationDetailPage() {
             {isDockExpanded && (
               <button
                 type="button"
-                onPointerDown={(event) => dockDragControls.start(event)}
-                onClick={() => setIsDockExpanded(false)}
-                className="mx-auto mb-2 flex h-6 w-full items-center justify-center rounded-full text-muted transition duration-200 active:scale-[0.98]"
+                onPointerDown={(event) => startDockGesture(event, "expanded")}
+                onPointerMove={trackDockGesture}
+                onPointerCancel={cancelDockGesture}
+                onClick={() => {
+                  if (consumeDockClickSuppression()) return;
+                  setIsDockExpanded(false);
+                }}
+                className="mb-2 flex h-8 w-full cursor-grab items-center justify-center rounded-[22px] text-muted transition duration-200 active:cursor-grabbing active:scale-[0.99]"
                 aria-label="Collapse quotation summary"
                 style={{ touchAction: "none" }}
               >
@@ -2396,24 +2542,29 @@ export default function QuotationDetailPage() {
             )}
 
             {!isDockExpanded && (
-              <div className="flex h-12 items-center gap-1.5">
+              <div className="flex h-11 items-center gap-1.5">
                 <button
                   type="button"
-                  onPointerDown={(event) => dockDragControls.start(event)}
-                  onClick={() => setIsDockExpanded(true)}
+                  onPointerDown={(event) => startDockGesture(event, "compact")}
+                  onPointerMove={trackDockGesture}
+                  onPointerCancel={cancelDockGesture}
+                  onClick={() => {
+                    if (consumeDockClickSuppression()) return;
+                    setIsDockExpanded(true);
+                  }}
                   className="flex h-full min-w-0 flex-1 flex-col items-start justify-center rounded-[18px] px-3.5 text-left outline-none transition duration-200 active:scale-[0.99] focus-visible:ring-4 focus-visible:ring-brand-500/15"
                   aria-label="Expand quotation summary"
                   style={{ touchAction: "none" }}
                 >
                   <span className="text-[10px] font-semibold uppercase leading-none text-muted">Grand Total</span>
-                  <span className="mt-1 truncate font-mono text-[17px] font-semibold leading-none tabular-nums text-default">{money(liveGrand)}</span>
+                  <span className="mt-1 truncate font-mono text-base font-semibold leading-none tabular-nums text-default">{money(liveGrand)}</span>
                 </button>
                 {hasPrimaryDockAction ? (
                   <button
                     type="button"
                     onClick={handlePrimaryDockAction}
                     disabled={primaryDockActionDisabled}
-                    className="btn-primary h-9 shrink-0 gap-1.5 rounded-[10px] px-3.5 text-[13px] shadow-sm shadow-brand-600/[0.14] transition duration-200 active:scale-[0.98]"
+                    className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-[#0071e3] px-3 text-[13px] font-semibold text-white transition duration-200 hover:bg-[#0077ed] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
                     aria-label={isEditable ? "Finalise quotation" : "Create email draft"}
                   >
                     {isEditable ? <Sparkles className="h-3.5 w-3.5" /> : <Mail className="h-3.5 w-3.5" />}
@@ -2426,7 +2577,7 @@ export default function QuotationDetailPage() {
                       event.stopPropagation();
                       openMoreMenu(event, "summary");
                     }}
-                    className={`flex h-9 shrink-0 items-center gap-1.5 rounded-[10px] px-3.5 text-[13px] font-semibold text-default transition duration-200 active:scale-[0.98] ${quoteControlSurface}`}
+                    className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-black/[0.06] bg-white/[0.42] px-3 text-[13px] font-semibold text-default transition duration-200 hover:bg-white/[0.58] active:scale-[0.97] dark:border-white/[0.10] dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"
                   >
                     <MoreHorizontal className="h-3.5 w-3.5" />
                     More
@@ -2445,7 +2596,7 @@ export default function QuotationDetailPage() {
                   transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
                   className="overflow-hidden"
                 >
-                  <div className="pt-2">
+                  <div className="max-h-[calc(100svh-9.5rem)] overflow-y-auto overscroll-contain px-0.5 pb-1 pt-2 sm:max-h-[calc(100svh-8rem)] xl:max-h-[min(80svh,700px)]">
                     {renderSummaryIdentity()}
                     {renderSummaryTotal(true)}
                     {renderQuotationSummaryDetails("dock")}
@@ -2475,14 +2626,14 @@ export default function QuotationDetailPage() {
             handleEmailDraft();
           }}
         >
-          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/[0.35] bg-white/20 px-5 py-5 backdrop-blur-2xl sm:px-6 dark:border-white/[0.10] dark:bg-white/[0.04]">
-            <div className="flex min-w-0 items-start gap-4">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-500/10 text-brand-600 shadow-sm">
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/[0.35] bg-white/20 px-4 py-4 backdrop-blur-2xl sm:gap-4 sm:px-6 sm:py-5 dark:border-white/[0.10] dark:bg-white/[0.04]">
+            <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-500/10 text-brand-600 shadow-sm sm:h-11 sm:w-11">
                 <Mail className="h-5 w-5" />
               </div>
               <div className="min-w-0">
                 <h3 className="text-base font-semibold text-default">Create Email Draft</h3>
-                <p className="mt-1 text-sm text-muted">{quotation.quotationNumber || "Draft quotation"} for {quotation.clientName}</p>
+                <p className="mt-1 truncate text-sm text-muted">{quotation.quotationNumber || "Draft quotation"} for {quotation.clientName}</p>
               </div>
             </div>
             <button
@@ -2495,13 +2646,13 @@ export default function QuotationDetailPage() {
             </button>
           </div>
 
-          <div className="flex-1 space-y-6 overflow-y-auto bg-[#d8d8dc]/[0.55] px-5 py-5 backdrop-blur-2xl sm:px-6 dark:bg-[#0b0b0d]/[0.92]">
+          <div className="flex-1 space-y-5 overflow-y-auto bg-[#d8d8dc]/[0.55] px-4 py-4 backdrop-blur-2xl sm:space-y-6 sm:px-6 sm:py-5 dark:bg-[#0b0b0d]/[0.92]">
             <section>
               <p className={sectionEyebrow}>Recipients</p>
               {clientEmailOptions.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-3">
                   {clientEmailOptions.map(option => (
-                    <div key={option.id} className="flex h-14 min-w-[220px] max-w-[270px] items-center gap-2 rounded-full border border-white/80 bg-white/[0.92] px-2.5 py-2 shadow-[0_8px_22px_rgba(0,0,0,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-white dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.10] dark:shadow-[0_10px_28px_rgba(0,0,0,0.36)]">
+                    <div key={option.id} className="flex h-14 w-full min-w-0 items-center gap-2 rounded-full border border-white/80 bg-white/[0.92] px-2.5 py-2 shadow-[0_8px_22px_rgba(0,0,0,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-white sm:min-w-[220px] sm:max-w-[270px] dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.10] dark:shadow-[0_10px_28px_rgba(0,0,0,0.36)]">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f1f1f3] text-[11px] font-semibold text-muted shadow-inner dark:bg-white/[0.08]">
                         {option.name.split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase() || "C"}
                       </div>
@@ -2542,7 +2693,7 @@ export default function QuotationDetailPage() {
 
             <section>
               <label className={sectionEyebrow}>Subject</label>
-              <input className="mt-3 h-12 w-full rounded-full border border-white/75 bg-white/[0.88] px-5 text-sm font-medium text-default shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10]" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Quotation subject" />
+              <input className="mt-3 h-11 w-full rounded-full border border-white/75 bg-white/[0.88] px-4 text-sm font-medium text-default shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 sm:h-12 sm:px-5 dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10]" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Quotation subject" />
             </section>
 
             <section>
@@ -2580,7 +2731,7 @@ export default function QuotationDetailPage() {
                 </div>
               </div>
 
-              <div className="mt-3 rounded-[32px] border border-white/75 bg-white/[0.72] p-2.5 shadow-[0_16px_44px_rgba(0,0,0,0.08)] backdrop-blur-2xl dark:border-white/[0.10] dark:bg-[#151517]/[0.92] dark:shadow-[0_18px_56px_rgba(0,0,0,0.46)]">
+              <div className="mt-3 rounded-[24px] border border-white/75 bg-white/[0.72] p-2 shadow-[0_16px_44px_rgba(0,0,0,0.08)] backdrop-blur-2xl sm:rounded-[32px] sm:p-2.5 dark:border-white/[0.10] dark:bg-[#151517]/[0.92] dark:shadow-[0_18px_56px_rgba(0,0,0,0.46)]">
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
                   <div ref={emailTemplateDropdownRef} className="relative z-30">
                     <button
@@ -2657,14 +2808,14 @@ export default function QuotationDetailPage() {
                       Financial Year
                     </button>
                   </div>
-                  <span className="pr-2 text-[11px] font-medium text-faint">Auto-bold stays active</span>
+                  <span className="hidden pr-2 text-[11px] font-medium text-faint sm:inline">Auto-bold stays active</span>
                 </div>
 
                 <div
                   ref={setEmailEditorRef}
                   contentEditable={!emailLoading}
                   suppressContentEditableWarning
-                  className="mt-2 min-h-60 w-full overflow-y-auto rounded-[26px] border border-white/70 bg-white/[0.92] px-5 py-5 text-sm leading-relaxed text-default shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-white/[0.10] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] dark:focus:bg-white/[0.10]"
+                  className="mt-2 min-h-48 w-full overflow-y-auto rounded-[22px] border border-white/70 bg-white/[0.92] px-4 py-4 text-sm leading-relaxed text-default shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 sm:min-h-60 sm:rounded-[26px] sm:px-5 sm:py-5 dark:border-white/[0.10] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] dark:focus:bg-white/[0.10]"
                   onInput={syncEmailEditorState}
                   onBlur={handleEmailEditorBlur}
                   data-placeholder="Add a short message for the client"
@@ -2686,11 +2837,11 @@ export default function QuotationDetailPage() {
             </section>
           </div>
 
-          <div className="flex shrink-0 items-center justify-end gap-3 border-t border-white/[0.35] bg-white/[0.45] px-5 py-4 shadow-[0_-12px_36px_rgba(0,0,0,0.04)] backdrop-blur-2xl sm:px-6 dark:border-white/[0.10] dark:bg-white/[0.05]">
-            <button type="button" className={`${appleButton} border border-white/70 bg-white/70 text-default shadow-sm hover:bg-white dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.11]`} disabled={emailLoading} onClick={() => setEmailModalOpen(false)}>Cancel</button>
-            <button type="submit" className={`${appleButton} bg-brand-600 text-white shadow-sm shadow-brand-600/20 hover:bg-brand-700`} disabled={emailLoading || (selectedToEmails.length === 0 && !emailRecipient.trim())}>
+          <div className="grid shrink-0 grid-cols-2 items-center gap-2 border-t border-white/[0.35] bg-white/[0.45] px-4 py-3 shadow-[0_-12px_36px_rgba(0,0,0,0.04)] backdrop-blur-2xl sm:flex sm:justify-end sm:gap-3 sm:px-6 sm:py-4 dark:border-white/[0.10] dark:bg-white/[0.05]">
+            <button type="button" className={`${appleButton} w-full border border-white/70 bg-white/70 text-default shadow-sm hover:bg-white sm:w-auto dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.11]`} disabled={emailLoading} onClick={() => setEmailModalOpen(false)}>Cancel</button>
+            <button type="submit" className={`${appleButton} w-full bg-brand-600 text-white shadow-sm shadow-brand-600/20 hover:bg-brand-700 sm:w-auto`} disabled={emailLoading || (selectedToEmails.length === 0 && !emailRecipient.trim())}>
               <Send className="mr-2 h-4 w-4" />
-              {emailLoading ? "Creating..." : "Create Gmail Draft"}
+              {emailLoading ? "Creating..." : <><span className="sm:hidden">Create Draft</span><span className="hidden sm:inline">Create Gmail Draft</span></>}
             </button>
           </div>
         </form>

@@ -31,9 +31,9 @@ interface QuotationRow {
 const QUICK_FILTERS = [
   { key: "all", label: "All" },
   { key: "Draft", label: "Drafts", icon: FileText },
-  { key: "awaitingResponse", label: "Awaiting Response", icon: Clock },
+  { key: "awaitingResponse", label: "Awaiting Response", mobileLabel: "Awaiting", icon: Clock },
   { key: "Accepted", label: "Accepted", icon: BadgeCheck },
-  { key: "RevisionRequested", label: "Needs Revision", icon: RefreshCw },
+  { key: "RevisionRequested", label: "Needs Revision", mobileLabel: "Revision", icon: RefreshCw },
 ];
 
 export default function QuotationsPage() {
@@ -209,22 +209,22 @@ export default function QuotationsPage() {
   };
 
   return (
-    <div className="min-h-screen space-y-6">
+    <div className="min-h-screen space-y-4 pb-6 sm:space-y-6 sm:pb-0">
       {/* ─── HEADER ─── */}
       <div>
-        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-default tracking-tight" style={{ letterSpacing: "-0.03em" }}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-default sm:text-3xl">
               Quotations
             </h1>
-            <p className="text-muted text-sm mt-1.5">
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
               {total} quotation{total !== 1 ? "s" : ""}
-              {awaitingResponse > 0 && <span className="ml-2 text-amber-500">- {awaitingResponse} awaiting response</span>}
+              {awaitingResponse > 0 && <span className="text-amber-500">{awaitingResponse} awaiting response</span>}
             </p>
           </div>
           <button
             onClick={openNewQuotationForm}
-            className="btn-primary gap-2 self-start sm:self-auto"
+            className="btn-primary h-10 gap-2 self-start rounded-xl px-4 text-sm sm:h-auto sm:self-auto sm:rounded-[14px]"
           >
             <Plus className="w-4 h-4" />
             New Quotation
@@ -232,19 +232,19 @@ export default function QuotationsPage() {
         </div>
 
         {/* Summary stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mt-6">
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-6 sm:grid-cols-2 sm:gap-3 xl:grid-cols-4">
           {[
             { label: statusFilter !== "all" || fyFilter !== "all" || debouncedSearch ? "Showing" : "Total", value: total, icon: Inbox, color: "text-default" },
             { label: isFiltered ? "Showing Awaiting" : "Awaiting Response", value: awaitingResponse, icon: Clock, color: "text-amber-500" },
             { label: isFiltered ? "Showing Accepted" : "Accepted", value: accepted, icon: CheckCircle, color: "text-emerald-500" },
             { label: isFiltered ? "Showing Accepted Value" : "Accepted Value", value: formatCurrency(totalValue), icon: TrendingUp, color: "text-brand-600" },
           ].map(({ label, value, icon: Icon, color }) => (
-            <div key={label} className="bg-card border border-base rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center gap-2 mb-1">
-                <Icon className={`w-3.5 h-3.5 ${color}`} />
-                <span className="text-xs text-muted">{label}</span>
+            <div key={label} className="rounded-[18px] border border-base bg-card p-3 shadow-sm sm:rounded-2xl sm:p-4">
+              <div className="mb-1 flex min-w-0 items-center gap-2">
+                <Icon className={`h-3.5 w-3.5 shrink-0 ${color}`} />
+                <span className="truncate text-[11px] text-muted sm:text-xs">{label}</span>
               </div>
-              <p className={`text-xl font-bold ${color}`}>{value}</p>
+              <p className={`truncate text-lg font-bold sm:text-xl ${color}`}>{value}</p>
             </div>
           ))}
         </div>
@@ -252,13 +252,13 @@ export default function QuotationsPage() {
 
       {/* ─── NEW QUOTATION FORM ─── */}
       {showNewForm && (
-        <div className="bg-card border border-base rounded-2xl shadow-md p-5 animate-in fade-in slide-in-from-top-2 duration-200">
-          <h3 className="font-semibold text-default mb-4">New Quotation</h3>
-          <div className="flex flex-col sm:flex-row gap-3">
+        <div className="animate-in fade-in slide-in-from-top-2 rounded-[22px] border border-base bg-card p-4 shadow-md duration-200 sm:rounded-2xl sm:p-5">
+          <h3 className="mb-3 font-semibold text-default sm:mb-4">New Quotation</h3>
+          <div className="flex flex-col gap-3 sm:flex-row">
             <div className="relative flex-1">
               <input
                 autoFocus
-                className="input-field w-full"
+                className="input-field h-11 w-full"
                 placeholder="Client name *"
                 value={newClientName}
                 onChange={e => {
@@ -301,11 +301,11 @@ export default function QuotationsPage() {
                 </div>
               )}
             </div>
-            <select className="input-field sm:w-44" value={newFy} onChange={e => setNewFy(e.target.value)}>
+            <select className="input-field h-11 sm:w-44" value={newFy} onChange={e => setNewFy(e.target.value)}>
               {[...FINANCIAL_YEARS].reverse().map(y => <option key={y}>{y}</option>)}
             </select>
-            <div className="flex gap-2">
-              <button onClick={createQuotation} disabled={creating} className="btn-primary px-5">
+            <div className="grid grid-cols-2 gap-2 sm:flex">
+              <button onClick={createQuotation} disabled={creating} className="btn-primary h-11 justify-center px-5">
                 {creating ? "Creating..." : "Create"}
               </button>
               <button 
@@ -319,7 +319,7 @@ export default function QuotationsPage() {
                   setNewFy(effectiveFinancialYear);
                   setShowSuggestions(false); 
                 }} 
-                className="btn-secondary px-4"
+                className="btn-secondary h-11 justify-center px-4"
               >
                 Cancel
               </button>
@@ -329,31 +329,32 @@ export default function QuotationsPage() {
       )}
 
       {/* ─── FILTERS ─── */}
-      <div className="flex flex-col xl:flex-row xl:items-center gap-3">
+      <div className="flex flex-col gap-2.5 xl:flex-row xl:items-center xl:gap-3">
         {/* Quick filter tabs */}
-        <div className="flex w-full xl:w-auto gap-1 bg-surface border border-base rounded-xl p-1 overflow-x-auto">
+        <div className="scrollbar-none flex w-full gap-1 overflow-x-auto rounded-2xl border border-base bg-surface p-1 xl:w-auto xl:rounded-xl">
           {QUICK_FILTERS.map(f => (
             <button
               key={f.key}
               onClick={() => setStatusFilter(f.key)}
-              className={`flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition-all xl:rounded-lg xl:py-1.5 ${
                 statusFilter === f.key
                   ? "bg-card shadow-sm text-default"
                   : "text-muted hover:text-default"
               }`}
             >
               {f.icon && <f.icon className="w-3 h-3" />}
-              {f.label}
+              <span className="sm:hidden">{f.mobileLabel || f.label}</span>
+              <span className="hidden sm:inline">{f.label}</span>
             </button>
           ))}
         </div>
 
-        <div className="grid w-full sm:w-auto grid-cols-1 sm:grid-cols-[320px_140px] gap-2">
+        <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-[320px_140px]">
           {/* Search */}
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-faint" />
             <input
-              className="input-field w-full text-sm h-9"
+              className="input-field h-11 w-full text-sm sm:h-9"
               style={{ paddingLeft: "2.25rem" }}
               placeholder="Search client, quote no., FY, status..."
               value={search}
@@ -365,7 +366,7 @@ export default function QuotationsPage() {
           <div className="relative">
             <Filter className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-faint" />
             <select
-              className="input-field w-full text-sm h-9"
+              className="input-field h-11 w-full text-sm sm:h-9"
               style={{ paddingLeft: "2.25rem", paddingRight: "2rem" }}
               value={fyFilter}
               onChange={e => setFyFilter(e.target.value)}
@@ -377,10 +378,10 @@ export default function QuotationsPage() {
         </div>
       </div>
 
-      {/* ─── TABLE ─── */}
-      <div className="bg-card border border-base rounded-2xl shadow-sm overflow-hidden">
+      {/* ─── QUOTATIONS LIST ─── */}
+      <div className="overflow-hidden rounded-[22px] border border-base bg-card shadow-sm sm:rounded-2xl">
         {loading ? (
-          <div className="p-12 text-center">
+          <div className="p-8 text-center sm:p-12">
             <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
             <p className="text-muted text-sm">Loading quotations...</p>
           </div>
@@ -404,7 +405,70 @@ export default function QuotationsPage() {
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            <div className="space-y-2 p-2 md:hidden">
+              {quotations.map(q => (
+                <article
+                  key={q._id}
+                  onClick={() => router.push(`/dashboard/quotations/${q._id}`)}
+                  className="rounded-[20px] border border-base bg-[#f7f7f9] p-3.5 shadow-sm transition duration-200 active:scale-[0.99] dark:bg-white/[0.035]"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold leading-5 text-default">{q.clientName}</p>
+                      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
+                        <span className="inline-flex min-w-0 items-center gap-1 font-mono font-semibold text-default">
+                          <FileText className="h-3.5 w-3.5 shrink-0 text-faint" />
+                          <span className="truncate">{q.quotationNumber || "Draft"}</span>
+                        </span>
+                        <span>{q.financialYear}</span>
+                        <span>{q.itemCount} item{q.itemCount !== 1 ? "s" : ""}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedQuotation(q);
+                      }}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-base bg-card text-muted transition-colors hover:text-default active:scale-[0.96]"
+                      title="More actions"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <QuotationStatusPill status={q.status} />
+                    <span className="rounded-full border border-base bg-card px-2.5 py-1 text-[11px] font-mono font-medium text-muted">
+                      Rev {q.currentRevisionNumber}
+                    </span>
+                    {formatDaysLeft(q.validTill)}
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3 rounded-2xl border border-base bg-card/80 p-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold uppercase text-muted">Amount</p>
+                      <p className="mt-0.5 truncate text-lg font-bold text-default">{formatCurrency(q.grandTotal)}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-semibold uppercase text-muted">Valid Till</p>
+                      <p className="mt-0.5 text-xs font-medium text-default">
+                        {q.validTill ? new Date(q.validTill).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "-"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between gap-3 border-t border-base pt-3">
+                    <span className="text-xs text-muted">Updated {new Date(q.updatedAt || q.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600">
+                      Open <ChevronRight className="h-3.5 w-3.5" />
+                    </span>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="hidden overflow-x-auto md:block">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-black/[0.05] dark:border-white/[0.05]">
@@ -486,17 +550,18 @@ export default function QuotationsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-1">
+      <div className="scrollbar-none flex items-center gap-3 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:gap-x-4 sm:gap-y-2 sm:overflow-visible sm:pb-0">
         {(Object.entries(QUOTATION_STATUS_CONFIG) as [QuotationStatus, typeof QUOTATION_STATUS_CONFIG[QuotationStatus]][]).map(([key, cfg]) => (
           <button
             key={key}
             onClick={() => setStatusFilter(statusFilter === key ? "all" : key)}
-            className={`flex items-center gap-1.5 text-xs transition-opacity ${statusFilter !== "all" && statusFilter !== key ? "opacity-40" : "opacity-100"}`}
+            className={`flex shrink-0 items-center gap-1.5 text-xs transition-opacity ${statusFilter !== "all" && statusFilter !== key ? "opacity-40" : "opacity-100"}`}
           >
             <span className={`w-2 h-2 rounded-full ${cfg.dot}`} />
             <span className="text-muted">{cfg.label}</span>
@@ -512,15 +577,15 @@ export default function QuotationsPage() {
         subtitle={selectedQuotation?.clientName}
       >
         {selectedQuotation && (
-          <div className="space-y-4">
-            <div className="bg-surface rounded-xl p-4 border border-base flex justify-between items-center mb-2">
-              <div>
+          <div className="space-y-3 sm:space-y-4">
+            <div className="mb-2 grid grid-cols-3 gap-2 rounded-xl border border-base bg-surface p-3 sm:flex sm:items-center sm:justify-between sm:p-4">
+              <div className="min-w-0">
                 <p className="text-xs text-muted">Status</p>
                 <div className="mt-1"><QuotationStatusPill status={selectedQuotation.status} /></div>
               </div>
-              <div className="text-right">
+              <div className="min-w-0 text-right">
                 <p className="text-xs text-muted">Amount</p>
-                <p className="text-sm font-bold text-default mt-1">{formatCurrency(selectedQuotation.grandTotal)}</p>
+                <p className="mt-1 truncate text-sm font-bold text-default">{formatCurrency(selectedQuotation.grandTotal)}</p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-muted">Revision</p>
@@ -628,12 +693,12 @@ export default function QuotationsPage() {
             <p className="text-sm text-muted">
               This will permanently delete the quotation and its revisions. This action cannot be undone.
             </p>
-            <div className="flex justify-end gap-2">
-              <button className="btn-secondary px-4" onClick={() => setQuotationToDelete(null)}>
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+              <button className="btn-secondary justify-center px-4" onClick={() => setQuotationToDelete(null)}>
                 Cancel
               </button>
               <button
-                className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors"
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
                 onClick={async (e) => {
                   await deleteQuotation(quotationToDelete._id, e);
                   setQuotationToDelete(null);

@@ -505,11 +505,13 @@ export default function ClientProfilePage() {
 
     updateContextTitle();
     scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("resize", handleScroll);
 
     return () => {
       if (frameId) cancelAnimationFrame(frameId);
       scrollContainer.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("resize", handleScroll);
       window.dispatchEvent(new CustomEvent("dashboard:context-title", { detail: null }));
     };

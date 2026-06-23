@@ -924,18 +924,20 @@ export default function ClientsPage() {
     if (!scrollArea) return;
 
     let frame = 0;
+    const isNativeMobileScroll = () => window.matchMedia("(max-width: 767px)").matches;
+    const getScrollTop = () => isNativeMobileScroll() ? window.scrollY : scrollArea.scrollTop;
     const getThresholds = () => window.matchMedia("(max-width: 767px)").matches
       ? { compactAt: 118, expandBelow: 34 }
       : { compactAt: 190, expandBelow: 82 };
     let thresholds = getThresholds();
-    let compact = scrollArea.scrollTop >= thresholds.compactAt;
-    let lastScrollTop = scrollArea.scrollTop;
+    let compact = getScrollTop() >= thresholds.compactAt;
+    let lastScrollTop = getScrollTop();
     setToolbarCompact(compact);
 
     const updateCompactState = () => {
       frame = 0;
       thresholds = getThresholds();
-      const nextScrollTop = scrollArea.scrollTop;
+      const nextScrollTop = getScrollTop();
       const scrollingDown = nextScrollTop >= lastScrollTop;
       lastScrollTop = nextScrollTop;
       const nextCompact = compact
@@ -954,9 +956,11 @@ export default function ClientsPage() {
 
     updateCompactState();
     scrollArea.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("resize", handleScroll, { passive: true });
     return () => {
       scrollArea.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("resize", handleScroll);
       if (frame) window.cancelAnimationFrame(frame);
     };
@@ -1052,7 +1056,9 @@ export default function ClientsPage() {
     const sentinel = sentinelRef.current;
     if (!sentinel || loading || loadingMore || !hasMore || loadError) return;
 
-    const root = document.getElementById("dashboard-scroll-area");
+    const root = window.matchMedia("(max-width: 767px)").matches
+      ? null
+      : document.getElementById("dashboard-scroll-area");
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting) && !loadingMore && hasMore) {

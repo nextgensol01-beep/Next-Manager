@@ -417,7 +417,7 @@ export default function BillingList({
                 )}
               </div>
               {/* Action tray — desktop */}
-              <div className="glass-tray hidden sm:inline-flex" style={{ flexWrap: "wrap" }}>
+              <div className="glass-tray !hidden sm:!inline-flex" style={{ flexWrap: "wrap" }}>
                 <button className="glass-pill glass-pill-active" onClick={() => onOpenPaymentModal(billing)}><Plus className="w-3.5 h-3.5" /> Add Payment</button>
                 {advance > 0 && billing.pendingAmount > 0 && (
                   <button className="glass-pill" style={{ color: "var(--color-amber-600, #d97706)" }} onClick={() => onOpenApplyAdvanceModal(billing)} title={`₹${advance.toLocaleString("en-IN")} available`}>
