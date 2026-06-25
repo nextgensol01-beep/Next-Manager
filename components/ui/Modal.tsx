@@ -16,6 +16,9 @@ interface ModalProps {
   className?: string;
   /** Override the modal body background color (e.g. "var(--color-card)") */
   bgColor?: string;
+  /** Optional backdrop tuning for premium expanded sheets */
+  backdropFilter?: string;
+  backdropColor?: string;
 }
 
 export default function Modal({
@@ -28,6 +31,8 @@ export default function Modal({
   hideHeader = false,
   className,
   bgColor,
+  backdropFilter,
+  backdropColor,
 }: ModalProps) {
   const [visible, setVisible] = useState(false);
   const [rendered, setRendered] = useState(false);
@@ -79,8 +84,8 @@ export default function Modal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
       style={{
-        backdropFilter: "blur(6px)",
-        backgroundColor: visible ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0)",
+        backdropFilter: backdropFilter ?? "blur(6px)",
+        backgroundColor: visible ? (backdropColor ?? "rgba(0,0,0,0.55)") : "rgba(0,0,0,0)",
         transition: "background-color 0.22s ease",
       }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
@@ -89,7 +94,7 @@ export default function Modal({
         ref={modalRef}
         className={cn(
           cn("w-full max-h-[90vh] rounded-2xl shadow-2xl border overflow-hidden flex flex-col", hideHeader && "h-full", className),
-          size === "2xl" && "max-w-5xl",
+          size === "2xl" && "max-w-[1100px]",
           size === "xl" && "max-w-3xl",
           size === "lg" && "max-w-2xl",
           size === "sm" && "max-w-sm",

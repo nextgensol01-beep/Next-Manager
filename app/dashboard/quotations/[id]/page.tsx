@@ -2518,10 +2518,10 @@ export default function QuotationDetailPage() {
             transition={{ type: "spring", stiffness: 420, damping: 38, mass: 0.9 }}
             className={`pointer-events-auto mx-auto w-full max-w-[44rem] overflow-hidden border transition-colors duration-300 ${
               isDockExpanded
-                ? "rounded-[34px] border-white/[0.42] bg-white/[0.72] p-4 dark:border-white/[0.12] dark:bg-[#0a0a0b]/[0.78] sm:p-5"
-                : "rounded-[22px] border-black/[0.06] bg-[#f5f5f7]/[0.84] p-1 dark:border-white/[0.10] dark:bg-black/[0.72]"
+                ? "flex flex-col rounded-[34px] border-white/[0.42] bg-white/[0.72] px-4 pb-4 pt-3 dark:border-white/[0.12] dark:bg-[#0a0a0b]/[0.78] sm:px-5 sm:pb-5 sm:pt-4"
+                : "rounded-[22px] border-black/[0.06] bg-[#f5f5f7]/[0.84] px-1.5 py-1 dark:border-white/[0.10] dark:bg-black/[0.72]"
             }`}
-            style={isDockExpanded ? quotationExpandedDockGlassStyle : quotationCompactDockGlassStyle}
+            style={isDockExpanded ? { ...quotationExpandedDockGlassStyle, maxHeight: "calc(100svh - 58px - env(safe-area-inset-bottom))" } : quotationCompactDockGlassStyle}
           >
             {isDockExpanded && (
               <button
@@ -2533,16 +2533,16 @@ export default function QuotationDetailPage() {
                   if (consumeDockClickSuppression()) return;
                   setIsDockExpanded(false);
                 }}
-                className="mb-2 flex h-8 w-full cursor-grab items-center justify-center rounded-[22px] text-muted transition duration-200 active:cursor-grabbing active:scale-[0.99]"
+                className="mb-1 flex h-5 w-full cursor-grab items-center justify-center rounded-[18px] text-muted transition duration-200 active:cursor-grabbing active:scale-[0.99]"
                 aria-label="Collapse quotation summary"
                 style={{ touchAction: "none" }}
               >
-                <span className="h-1.5 w-12 rounded-full bg-black/[0.16] dark:bg-white/[0.18]" />
+                <span className="h-1 w-10 rounded-full bg-black/[0.16] dark:bg-white/[0.18]" />
               </button>
             )}
 
             {!isDockExpanded && (
-              <div className="flex h-11 items-center gap-1.5">
+              <div className="flex h-11 items-center gap-2">
                 <button
                   type="button"
                   onPointerDown={(event) => startDockGesture(event, "compact")}
@@ -2564,7 +2564,7 @@ export default function QuotationDetailPage() {
                     type="button"
                     onClick={handlePrimaryDockAction}
                     disabled={primaryDockActionDisabled}
-                    className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-[#0071e3] px-3 text-[13px] font-semibold text-white transition duration-200 hover:bg-[#0077ed] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-[#0071e3] px-3.5 text-[13px] font-semibold text-white transition duration-200 hover:bg-[#0077ed] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
                     aria-label={isEditable ? "Finalise quotation" : "Create email draft"}
                   >
                     {isEditable ? <Sparkles className="h-3.5 w-3.5" /> : <Mail className="h-3.5 w-3.5" />}
@@ -2577,7 +2577,7 @@ export default function QuotationDetailPage() {
                       event.stopPropagation();
                       openMoreMenu(event, "summary");
                     }}
-                    className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-black/[0.06] bg-white/[0.42] px-3 text-[13px] font-semibold text-default transition duration-200 hover:bg-white/[0.58] active:scale-[0.97] dark:border-white/[0.10] dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"
+                    className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-black/[0.06] bg-white/[0.42] px-3.5 text-[13px] font-semibold text-default transition duration-200 hover:bg-white/[0.58] active:scale-[0.97] dark:border-white/[0.10] dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"
                   >
                     <MoreHorizontal className="h-3.5 w-3.5" />
                     More
@@ -2594,9 +2594,9 @@ export default function QuotationDetailPage() {
                   animate={{ opacity: 1, height: "auto", y: 0 }}
                   exit={{ opacity: 0, height: 0, y: 10 }}
                   transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-                  className="overflow-hidden"
+                  className="min-h-0 flex-1 overflow-hidden"
                 >
-                  <div className="max-h-[calc(100svh-9.5rem)] overflow-y-auto overscroll-contain px-0.5 pb-1 pt-2 sm:max-h-[calc(100svh-8rem)] xl:max-h-[min(80svh,700px)]">
+                  <div className="h-full overflow-y-auto overscroll-contain px-0.5 pb-1 pt-2">
                     {renderSummaryIdentity()}
                     {renderSummaryTotal(true)}
                     {renderQuotationSummaryDetails("dock")}

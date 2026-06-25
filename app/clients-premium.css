@@ -1897,12 +1897,17 @@
     grid-template-columns: minmax(110px, 142px) minmax(220px, 1fr) max-content !important;
   }
 
-  .clients-floating-header[data-compact="true"] .clients-add-button span {
+  .clients-floating-header[data-compact="true"] .clients-add-button .liquid-glass-button-content > span {
     display: none !important;
   }
 
   .clients-floating-header[data-compact="true"] .clients-add-button {
+    flex: 0 0 42px !important;
     width: 42px !important;
+    min-width: 42px !important;
+    max-width: 42px !important;
+    aspect-ratio: 1 / 1 !important;
+    border-radius: 999px !important;
     padding: 0 !important;
   }
 }

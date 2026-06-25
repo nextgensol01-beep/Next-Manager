@@ -13,6 +13,7 @@ import { FINANCIAL_YEARS } from "@/lib/utils";
 import { Plus, Pencil, Trash2, BarChart2, ChevronDown, Search, X, Recycle, Leaf } from "lucide-react";
 import { useCache, invalidate } from "@/lib/useCache";
 import { useFinancialYearPreference, useFinancialYearState } from "@/app/providers";
+import FinancialYearInsightsModal from "./FinancialYearInsightsModal";
 
 import {
   RemainingTooltip,
@@ -35,6 +36,7 @@ export default function FinancialYearPage() {
   const [editRecord, setEditRecord] = useState<FYRecord | null>(null);
   const [saving, setSaving] = useState(false);
   const [breakdownRec, setBreakdownRec] = useState<FYRecord | null>(null);
+  const [insightsOpen, setInsightsOpen] = useState(false);
   const [expandedFY, setExpandedFY] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -69,6 +71,11 @@ export default function FinancialYearPage() {
     setGenerated([emptyTarget()]);
     setTargets([emptyTarget()]);
     setModalOpen(true);
+  };
+
+  const openEditFromInsights = (rec: FYRecord) => {
+    setInsightsOpen(false);
+    openEdit(rec);
   };
 
   const openEdit = (rec: FYRecord) => {
@@ -290,6 +297,9 @@ export default function FinancialYearPage() {
   return (
     <div>
       <PageHeader title="Financial Year" description="Manage category-wise targets and credits per FY">
+        <button className="glass-btn" onClick={() => setInsightsOpen(true)}>
+          <BarChart2 className="w-3.5 h-3.5" /> Targets &amp; Credits
+        </button>
         <button className="glass-btn glass-btn-primary" onClick={openAdd}><Plus className="w-3.5 h-3.5" /> Add Record</button>
       </PageHeader>
 
@@ -578,6 +588,16 @@ export default function FinancialYearPage() {
           </Modal>
         );
       })()}
+
+      <FinancialYearInsightsModal
+        open={insightsOpen}
+        onClose={() => setInsightsOpen(false)}
+        financialYear={fy}
+        loading={recLoading}
+        records={records}
+        clients={clients}
+        onEditRecord={openEditFromInsights}
+      />
 
       {/* -- Add / Edit modal -- */}
       <Modal
