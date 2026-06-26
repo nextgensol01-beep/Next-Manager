@@ -137,6 +137,8 @@ const quotationExpandedDockGlassStyle: React.CSSProperties = {
   WebkitBackdropFilter: "blur(40px) saturate(210%)",
   boxShadow: "0 22px 64px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.18), inset 0 0 0 1px var(--color-border-soft)",
 };
+const quotationExpandedDockMaxHeight = "calc(100svh - 58px - env(safe-area-inset-bottom))";
+const quotationExpandedDockScrollMaxHeight = "calc(100svh - 122px - env(safe-area-inset-bottom))";
 const PREVIEW_DOCUMENT_WIDTH = 860;
 
 function clampPreviewScale(value: number) {
@@ -2521,7 +2523,7 @@ export default function QuotationDetailPage() {
                 ? "flex flex-col rounded-[34px] border-white/[0.42] bg-white/[0.72] px-4 pb-4 pt-3 dark:border-white/[0.12] dark:bg-[#0a0a0b]/[0.78] sm:px-5 sm:pb-5 sm:pt-4"
                 : "rounded-[22px] border-black/[0.06] bg-[#f5f5f7]/[0.84] px-1.5 py-1 dark:border-white/[0.10] dark:bg-black/[0.72]"
             }`}
-            style={isDockExpanded ? { ...quotationExpandedDockGlassStyle, maxHeight: "calc(100svh - 58px - env(safe-area-inset-bottom))" } : quotationCompactDockGlassStyle}
+            style={isDockExpanded ? { ...quotationExpandedDockGlassStyle, maxHeight: quotationExpandedDockMaxHeight, touchAction: "auto" } : quotationCompactDockGlassStyle}
           >
             {isDockExpanded && (
               <button
@@ -2594,13 +2596,16 @@ export default function QuotationDetailPage() {
                   animate={{ opacity: 1, height: "auto", y: 0 }}
                   exit={{ opacity: 0, height: 0, y: 10 }}
                   transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-                  className="min-h-0 flex-1 overflow-hidden"
+                  className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-1 pt-2"
+                  style={{
+                    maxHeight: quotationExpandedDockScrollMaxHeight,
+                    WebkitOverflowScrolling: "touch",
+                    touchAction: "pan-y",
+                  }}
                 >
-                  <div className="h-full overflow-y-auto overscroll-contain px-0.5 pb-1 pt-2">
-                    {renderSummaryIdentity()}
-                    {renderSummaryTotal(true)}
-                    {renderQuotationSummaryDetails("dock")}
-                  </div>
+                  {renderSummaryIdentity()}
+                  {renderSummaryTotal(true)}
+                  {renderQuotationSummaryDetails("dock")}
                 </motion.div>
               )}
             </AnimatePresence>
