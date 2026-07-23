@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
 import Modal from "@/components/ui/Modal";
@@ -17,6 +17,7 @@ import FinancialYearInsightsModal from "./FinancialYearInsightsModal";
 
 import {
   RemainingTooltip,
+  CAT_IDS,
   TargetRow,
   TD,
   TH,
@@ -28,6 +29,102 @@ import {
   type GeneratedEntry,
   type TargetEntry,
 } from "./FinancialYearSupport";
+
+const CREDIT_TYPE_VALUES = ["RECYCLING", "EOL"] as const;
+const ENTRY_COMBO_COUNT = CAT_IDS.length * CREDIT_TYPE_VALUES.length;
+
+function numberValue(value: unknown) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normaliseEntry(entry: TargetEntry): TargetEntry {
+  return {
+    categoryId: String(entry.categoryId),
+    type: entry.type === "EOL" ? "EOL" : "RECYCLING",
+    value: numberValue(entry.value),
+  };
+}
+
+function activeEntries<T extends TargetEntry>(entries: T[]): T[] {
+  return entries
+    .map((entry) => normaliseEntry(entry) as T)
+    .filter((entry) => (CAT_IDS as readonly string[]).includes(entry.categoryId) && entry.value > 0);
+}
+
+function duplicateEntryIndices(entries: TargetEntry[]) {
+  const firstIndex = new Map<string, number>();
+  const duplicates = new Set<number>();
+
+  entries.forEach((rawEntry, index) => {
+    const entry = normaliseEntry(rawEntry);
+    if (entry.value <= 0) return;
+
+    const key = `${entry.categoryId}|${entry.type}`;
+    const first = firstIndex.get(key);
+
+    if (first === undefined) {
+      firstIndex.set(key, index);
+      return;
+    }
+
+    duplicates.add(first);
+    duplicates.add(index);
+  });
+
+  return duplicates;
+}
+
+function entrySummary(entries: TargetEntry[]) {
+  return activeEntries(entries).reduce(
+    (summary, entry) => {
+      summary.total += entry.value;
+      if (entry.type === "EOL") summary.eol += entry.value;
+      else summary.recycling += entry.value;
+      return summary;
+    },
+    { total: 0, recycling: 0, eol: 0 }
+  );
+}
+
+function selectedEntryCombos(entries: TargetEntry[]) {
+  return new Set(entries.map((entry) => `${entry.categoryId}|${entry.type === "EOL" ? "EOL" : "RECYCLING"}`));
+}
+
+function nextAvailableEntry(entries: TargetEntry[]): TargetEntry {
+  const selected = selectedEntryCombos(entries);
+
+  for (const categoryId of CAT_IDS) {
+    for (const type of CREDIT_TYPE_VALUES) {
+      if (!selected.has(`${categoryId}|${type}`)) {
+        return { categoryId, type, value: 0 };
+      }
+    }
+  }
+
+  return emptyTarget();
+}
+
+function ensureEditableRows<T extends TargetEntry>(entries: T[]): T[] {
+  return entries.length > 0 ? entries : [emptyTarget() as T];
+}
+
+function migratedLegacyEntries(rec: FYRecord, mode: "generated" | "targets"): TargetEntry[] {
+  const migrated: TargetEntry[] = [];
+  const record = rec as unknown as Record<string, unknown>;
+
+  for (const categoryId of CAT_IDS) {
+    const value = mode === "generated"
+      ? numberValue(record[`cat${categoryId}Generated`] ?? record[`creditsCat${categoryId}`])
+      : numberValue(record[`cat${categoryId}Target`] ?? record[`targetCat${categoryId}`]);
+
+    if (value > 0) {
+      migrated.push({ categoryId, type: "RECYCLING", value });
+    }
+  }
+
+  return migrated;
+}
 
 export default function FinancialYearPage() {
   const [fy, setFy, financialYearLoaded] = useFinancialYearState();
@@ -50,18 +147,23 @@ export default function FinancialYearPage() {
     useCache<FYRecord[]>(`/api/financial-year?fy=${fy}`, { enabled: financialYearLoaded, initialData: [] });
   const { data: clients } = useCache<Client[]>("/api/clients", { initialData: [] });
 
-  const getCategory = (id: string) => clients.find((c) => c.clientId === id)?.category || "";
-  const getClientName = (id: string) => clients.find((c) => c.clientId === id)?.companyName || id;
+  const clientMap = useMemo(() => new Map(clients.map((client) => [client.clientId, client])), [clients]);
+  const getCategory = (id: string) => clientMap.get(id)?.category || "";
+  const getClientName = (id: string) => clientMap.get(id)?.companyName || id;
 
-  const filteredRecords = records.filter((rec) => {
+  const filteredRecords = useMemo(() => records.filter((rec) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
+    const client = clientMap.get(rec.clientId);
+    const clientName = client?.companyName || rec.clientId;
+    const category = client?.category || "";
+
     return (
-      getClientName(rec.clientId).toLowerCase().includes(q) ||
+      clientName.toLowerCase().includes(q) ||
       rec.clientId.toLowerCase().includes(q) ||
-      getCategory(rec.clientId).toLowerCase().includes(q)
+      category.toLowerCase().includes(q)
     );
-  });
+  }), [clientMap, records, search]);
 
   // -- Modal open helpers --------------------------------------------------
 
@@ -86,27 +188,19 @@ export default function FinancialYearPage() {
     });
 
     // Populate generated[]: use new structure if present, migrate from legacy flat fields
-    if (Array.isArray(rec.generated) && rec.generated.length > 0) {
-      setGenerated(rec.generated.map((t) => ({ ...t })));
+    const recordGenerated = activeEntries(rec.generated ?? []);
+    if (recordGenerated.length > 0) {
+      setGenerated(recordGenerated.map((t) => ({ ...t })));
     } else {
-      const migrated: GeneratedEntry[] = [];
-      for (let i = 1; i <= 4; i++) {
-        const val = Number((rec as unknown as Record<string, unknown>)[`cat${i}Generated`] ?? 0);
-        if (val > 0) migrated.push({ categoryId: String(i), type: "RECYCLING", value: val });
-      }
-      setGenerated(migrated.length > 0 ? migrated : [emptyTarget()]);
+      setGenerated(ensureEditableRows(migratedLegacyEntries(rec, "generated") as GeneratedEntry[]));
     }
 
     // Populate targets[]: use new structure if present, migrate from legacy flat fields
-    if (Array.isArray(rec.targets) && rec.targets.length > 0) {
-      setTargets(rec.targets.map((t) => ({ ...t })));
+    const recordTargets = activeEntries(rec.targets ?? []);
+    if (recordTargets.length > 0) {
+      setTargets(recordTargets.map((t) => ({ ...t })));
     } else {
-      const migrated: TargetEntry[] = [];
-      for (let i = 1; i <= 4; i++) {
-        const val = Number((rec as unknown as Record<string, unknown>)[`cat${i}Target`] ?? 0);
-        if (val > 0) migrated.push({ categoryId: String(i), type: "RECYCLING", value: val });
-      }
-      setTargets(migrated.length > 0 ? migrated : [emptyTarget()]);
+      setTargets(ensureEditableRows(migratedLegacyEntries(rec, "targets")));
     }
 
     setModalOpen(true);
@@ -117,7 +211,9 @@ export default function FinancialYearPage() {
   const handleGeneratedChange = (idx: number, updated: GeneratedEntry) => {
     setGenerated((prev) => prev.map((t, i) => (i === idx ? updated : t)));
   };
-  const addGenerated = () => setGenerated((prev) => [...prev, emptyTarget()]);
+  const addGenerated = () => setGenerated((prev) => (
+    selectedEntryCombos(prev).size >= ENTRY_COMBO_COUNT ? prev : [...prev, nextAvailableEntry(prev)]
+  ));
   const removeGenerated = (idx: number) =>
     setGenerated((prev) => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
 
@@ -125,55 +221,35 @@ export default function FinancialYearPage() {
     setTargets((prev) => prev.map((t, i) => (i === idx ? updated : t)));
   };
 
-  const addTarget = () => setTargets((prev) => [...prev, emptyTarget()]);
+  const addTarget = () => setTargets((prev) => (
+    selectedEntryCombos(prev).size >= ENTRY_COMBO_COUNT ? prev : [...prev, nextAvailableEntry(prev)]
+  ));
 
   const removeTarget = (idx: number) =>
     setTargets((prev) => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
 
-  // Duplicate detection for generated[]
-  const genDupeSet = new Set<string>();
-  const genDupeIndices = new Set<number>();
-  generated.forEach((t, i) => {
-    const key = `${t.categoryId}|${t.type}`;
-    if (genDupeSet.has(key)) genDupeIndices.add(i);
-    else genDupeSet.add(key);
-  });
-  generated.forEach((t, i) => {
-    if (!genDupeIndices.has(i)) {
-      const key = `${t.categoryId}|${t.type}`;
-      if (generated.filter((o, j) => j !== i && `${o.categoryId}|${o.type}` === key).length > 0)
-        genDupeIndices.add(i);
-    }
-  });
-
-  // Duplicate detection for targets[]
-  const dupeSet = new Set<string>();
-  const dupeIndices = new Set<number>();
-  targets.forEach((t, i) => {
-    const key = `${t.categoryId}|${t.type}`;
-    if (dupeSet.has(key)) dupeIndices.add(i);
-    else dupeSet.add(key);
-  });
-  targets.forEach((t, i) => {
-    if (!dupeIndices.has(i)) {
-      const key = `${t.categoryId}|${t.type}`;
-      if (targets.filter((o, j) => j !== i && `${o.categoryId}|${o.type}` === key).length > 0)
-        dupeIndices.add(i);
-    }
-  });
+  const genDupeIndices = useMemo(() => duplicateEntryIndices(generated), [generated]);
+  const dupeIndices = useMemo(() => duplicateEntryIndices(targets), [targets]);
   const hasGenDupes = genDupeIndices.size > 0;
   const hasTgtDupes = dupeIndices.size > 0;
   const hasDupes = hasGenDupes || hasTgtDupes;
+  const canAddGenerated = useMemo(() => selectedEntryCombos(generated).size < ENTRY_COMBO_COUNT, [generated]);
+  const canAddTarget = useMemo(() => selectedEntryCombos(targets).size < ENTRY_COMBO_COUNT, [targets]);
 
   // -- Delete --------------------------------------------------------------
 
   const handleDelete = async (rec: FYRecord) => {
     if (!confirm(`Delete FY record for ${getClientName(rec.clientId)} - ${rec.financialYear}?`)) return;
     setDeletingId(rec._id);
-    const res = await fetch(`/api/financial-year/${rec._id}`, { method: "DELETE" });
-    if (res.ok) { toast.success("Record deleted"); invalidate("/api/financial-year", "/api/dashboard"); refetchRecords(); }
-    else toast.error("Failed to delete");
-    setDeletingId(null);
+    try {
+      const res = await fetch(`/api/financial-year/${rec._id}`, { method: "DELETE" });
+      if (res.ok) { toast.success("Record deleted"); invalidate("/api/financial-year", "/api/dashboard"); refetchRecords(); }
+      else toast.error("Failed to delete");
+    } catch {
+      toast.error("Something went wrong deleting the record");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   // -- Submit --------------------------------------------------------------
@@ -181,11 +257,31 @@ export default function FinancialYearPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (hasDupes) { toast.error("Remove duplicate category+type combinations before saving"); return; }
-    setSaving(true);
 
     try {
       const selectedCat = getCategory(genForm.clientId);
       const isPWP = selectedCat === "PWP";
+      const isSIMP = selectedCat === "SIMP";
+
+      if (!selectedCat) {
+        toast.error("Select a client before saving");
+        return;
+      }
+      if (isSIMP) {
+        toast.error("SIMP clients do not need targets or credits");
+        return;
+      }
+
+      const generatedToSave = activeEntries(generated);
+      const targetsToSave = activeEntries(targets);
+      const entriesToSave = isPWP ? generatedToSave : targetsToSave;
+
+      if (!editRecord && entriesToSave.length === 0) {
+        toast.error(`Enter at least one ${isPWP ? "generated credit" : "target"} value before saving`);
+        return;
+      }
+
+      setSaving(true);
 
       const payload: Record<string, unknown> = {
         clientId: genForm.clientId,
@@ -194,20 +290,28 @@ export default function FinancialYearPage() {
 
       if (isPWP) {
         // Include generated[] - backend derives flat cat1Generated...cat4Generated
-        payload.generated = generated.filter((t) => t.value > 0);
+        payload.generated = generatedToSave;
+        payload.targets = [];
       } else {
         // Include targets[] - backend derives flat cat1Target...cat4Target
-        payload.targets = targets.filter((t) => t.value > 0);
+        payload.generated = [];
+        payload.targets = targetsToSave;
       }
 
       const url = editRecord ? `/api/financial-year/${editRecord._id}` : "/api/financial-year";
       const method = editRecord ? "PUT" : "POST";
       const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      if (!r.ok) { toast.error("Error saving"); return; }
+      if (!r.ok) {
+        const data = await r.json().catch(() => null);
+        toast.error(data?.error || "Error saving");
+        return;
+      }
       toast.success(editRecord ? "Updated!" : "Saved!");
       invalidate("/api/financial-year", "/api/dashboard");
       setModalOpen(false);
       refetchRecords();
+    } catch {
+      toast.error("Something went wrong saving the record");
     } finally { setSaving(false); }
   };
 
@@ -216,14 +320,18 @@ export default function FinancialYearPage() {
   const isSIMP = selectedCat === "SIMP";
 
   // Target totals for the summary bar
-  const targetTotal = targets.reduce((s, t) => s + (t.value || 0), 0);
-  const targetTotalRecycl = targets.filter((t) => t.type === "RECYCLING").reduce((s, t) => s + t.value, 0);
-  const targetTotalEOL = targets.filter((t) => t.type === "EOL").reduce((s, t) => s + t.value, 0);
+  const targetSummary = useMemo(() => entrySummary(targets), [targets]);
+  const targetTotal = targetSummary.total;
+  const targetTotalRecycl = targetSummary.recycling;
+  const targetTotalEOL = targetSummary.eol;
 
   // Generated totals for PWP summary bar
-  const generatedTotal = generated.reduce((s, t) => s + (t.value || 0), 0);
-  const generatedTotalRecycl = generated.filter((t) => t.type === "RECYCLING").reduce((s, t) => s + t.value, 0);
-  const generatedTotalEOL = generated.filter((t) => t.type === "EOL").reduce((s, t) => s + t.value, 0);
+  const generatedSummary = useMemo(() => entrySummary(generated), [generated]);
+  const generatedTotal = generatedSummary.total;
+  const generatedTotalRecycl = generatedSummary.recycling;
+  const generatedTotalEOL = generatedSummary.eol;
+  const hasActiveModalEntries = isPWP ? generatedTotal > 0 : targetTotal > 0;
+  const saveDisabled = saving || !selectedCat || isSIMP || hasDupes || (!editRecord && !hasActiveModalEntries);
 
   /**
    * Build typed entries + achievedMap for the breakdown modal.
@@ -406,7 +514,12 @@ export default function FinancialYearPage() {
                       </TD>
                       <TD>{cat && <CategoryBadge category={cat} />}</TD>
                       {isSIMPRow ? (
-                        <TD><span className="text-xs italic text-[var(--color-text-faint)]">SIMP - no targets/credits tracked</span></TD>
+                        <td
+                          colSpan={7}
+                          className="px-4 py-3 text-sm border-t border-[var(--color-border-soft)] text-[var(--color-text-faint)]"
+                        >
+                          <span className="text-xs italic">SIMP - no targets/credits tracked</span>
+                        </td>
                       ) : (
                         <>
                           <TD right mono>{hasTypedSplit ? typedCatCell("1") : cat1.toLocaleString()}</TD>
@@ -667,6 +780,7 @@ export default function FinancialYearPage() {
                       entry={entry}
                       index={idx}
                       isDupe={genDupeIndices.has(idx)}
+                      canRemove={generated.length > 1}
                       onChange={handleGeneratedChange}
                       onRemove={removeGenerated}
                     />
@@ -677,16 +791,17 @@ export default function FinancialYearPage() {
               <button
                 type="button"
                 onClick={addGenerated}
+                disabled={!canAddGenerated}
                 className="mt-2 flex items-center gap-1.5 text-xs font-medium text-brand-600 dark:text-brand-400
                            hover:text-brand-700 px-2 py-1 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20
-                           transition-colors"
+                           transition-colors disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
               >
                 <Plus className="w-3.5 h-3.5" /> Add Generated Row
               </button>
 
               {hasGenDupes && (
                 <p className="mt-2 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-                  <span>Warning: </span> Remove duplicate Category + Type combinations before saving.
+                  <span>Warning:</span> Remove duplicate Category + Type combinations before saving.
                 </p>
               )}
 
@@ -744,6 +859,7 @@ export default function FinancialYearPage() {
                       entry={entry}
                       index={idx}
                       isDupe={dupeIndices.has(idx)}
+                      canRemove={targets.length > 1}
                       onChange={handleTargetChange}
                       onRemove={removeTarget}
                     />
@@ -755,9 +871,10 @@ export default function FinancialYearPage() {
               <button
                 type="button"
                 onClick={addTarget}
+                disabled={!canAddTarget}
                 className="mt-2 flex items-center gap-1.5 text-xs font-medium text-brand-600 dark:text-brand-400
                            hover:text-brand-700 px-2 py-1 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20
-                           transition-colors"
+                           transition-colors disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
               >
                 <Plus className="w-3.5 h-3.5" /> Add Target Row
               </button>
@@ -765,7 +882,7 @@ export default function FinancialYearPage() {
               {/* Duplicate warning */}
               {hasTgtDupes && (
                 <p className="mt-2 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-                  <span>Warning: </span> Remove duplicate Category + Type combinations before saving.
+                  <span>Warning:</span> Remove duplicate Category + Type combinations before saving.
                 </p>
               )}
 
@@ -809,11 +926,17 @@ export default function FinancialYearPage() {
             </p>
           )}
 
+          {selectedCat && !isSIMP && !editRecord && !hasActiveModalEntries && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Enter at least one positive {isPWP ? "generated credit" : "target"} value to save a new record.
+            </p>
+          )}
+
           <div className="flex gap-2 pt-2">
             <button
               type="submit"
               className="btn-primary flex-1 justify-center"
-              disabled={saving || !selectedCat || isSIMP || hasDupes}
+              disabled={saveDisabled}
             >
               {saving ? "Saving..." : "Save Record"}
             </button>

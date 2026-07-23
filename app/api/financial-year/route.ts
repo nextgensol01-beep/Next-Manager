@@ -15,15 +15,29 @@ const VALID_TYPES = new Set(["RECYCLING", "EOL"]);
 const CAT_KEYS = ["1", "2", "3", "4"] as const;
 
 function normaliseEntries(raw: unknown[]): ITargetEntry[] {
-  return raw
-    .filter((t: unknown) => {
-      const e = t as ITargetEntry;
-      return e.categoryId && VALID_TYPES.has(e.type) && Number(e.value) >= 0;
-    })
-    .map((t: unknown) => {
-      const e = t as ITargetEntry;
-      return { categoryId: String(e.categoryId), type: e.type, value: Number(e.value) };
+  const entries = new Map<string, ITargetEntry>();
+
+  for (const item of raw) {
+    const entry = item as Partial<ITargetEntry>;
+    const categoryId = String(entry.categoryId ?? "");
+    const rawType = String(entry.type ?? "").toUpperCase();
+    const type = VALID_TYPES.has(rawType) ? rawType as ITargetEntry["type"] : null;
+    const value = Number(entry.value);
+
+    if (!(CAT_KEYS as readonly string[]).includes(categoryId) || !type || !Number.isFinite(value) || value <= 0) {
+      continue;
+    }
+
+    const key = `${categoryId}|${type}`;
+    const existing = entries.get(key);
+    entries.set(key, {
+      categoryId,
+      type,
+      value: (existing?.value ?? 0) + value,
     });
+  }
+
+  return Array.from(entries.values());
 }
 
 function normaliseCreditType(type: unknown): "RECYCLING" | "EOL" {
@@ -62,7 +76,10 @@ function deriveFlat(entries: ITargetEntry[], prefix: string): Record<string, num
 /** Migrate legacy flat cat1Generated…cat4Generated to generated[] — defaults RECYCLING */
 function migrateGenerated(r: Record<string, unknown>): IGeneratedEntry[] {
   const existing = r.generated as IGeneratedEntry[] | undefined;
-  if (Array.isArray(existing) && existing.length > 0) return existing;
+  if (Array.isArray(existing) && existing.length > 0) {
+    const normalised = normaliseEntries(existing) as IGeneratedEntry[];
+    if (normalised.length > 0) return normalised;
+  }
   const entries: IGeneratedEntry[] = [];
   for (let i = 1; i <= 4; i++) {
     const val = Number(r[`cat${i}Generated`] ?? r[`creditsCat${i}`] ?? 0);
@@ -74,7 +91,10 @@ function migrateGenerated(r: Record<string, unknown>): IGeneratedEntry[] {
 /** Migrate legacy flat cat1Target…cat4Target to targets[] — defaults RECYCLING */
 function migrateTargets(r: Record<string, unknown>): ITargetEntry[] {
   const existing = r.targets as ITargetEntry[] | undefined;
-  if (Array.isArray(existing) && existing.length > 0) return existing;
+  if (Array.isArray(existing) && existing.length > 0) {
+    const normalised = normaliseEntries(existing);
+    if (normalised.length > 0) return normalised;
+  }
   const entries: ITargetEntry[] = [];
   for (let i = 1; i <= 4; i++) {
     const val = Number(r[`cat${i}Target`] ?? r[`targetCat${i}`] ?? 0);

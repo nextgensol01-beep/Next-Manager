@@ -19,6 +19,7 @@ type ClientProfileBillingPaymentsProps = {
   openFYModal: () => void;
   openPaymentModalForRecord: (payment?: Payment | null) => void;
   deletePayment: (paymentId: string) => void;
+  view?: "all" | "billing" | "payments";
 };
 
 export default function ClientProfileBillingPayments({
@@ -34,15 +35,21 @@ export default function ClientProfileBillingPayments({
   openFYModal,
   openPaymentModalForRecord,
   deletePayment,
+  view = "all",
 }: ClientProfileBillingPaymentsProps) {
   const billingIsPending = billing?._status === "pending";
+  const showBilling = view === "all" || view === "billing";
+  const showPayments = view === "all" || view === "payments";
 
   return (
     <>
-    <div className="bg-card rounded-2xl p-5 shadow-sm border border-base">
+    {showBilling && <div className="client-profile-card">
       <div className="flex items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <h3 className="font-semibold text-default">Billing - FY {selectedFy}</h3>
+          <div>
+            <p className="client-profile-kicker">Billing & Payments</p>
+            <h3 className="text-xl font-semibold text-default">Billing - FY {selectedFy}</h3>
+          </div>
           {billing && <PaymentStatusBadge status={billing.paymentStatus} />}
           {billing && <PendingChip status={billing._status} />}
         </div>
@@ -102,55 +109,104 @@ export default function ClientProfileBillingPayments({
           </div>
         </div>
       )}
-    </div>
+    </div>}
 
-    <div className="bg-card rounded-2xl shadow-sm border border-base overflow-hidden">
+    {showPayments && <div className="client-profile-card overflow-hidden !p-0">
       <div className="p-4 border-b border-base flex items-center justify-between gap-3">
-        <h3 className="font-semibold text-default">Payment History - FY {selectedFy}</h3>
-        <button type="button" className="glass-btn glass-btn-primary" onClick={() => openPaymentModalForRecord()}>
+        <div>
+          <p className="client-profile-kicker">Payment History</p>
+          <h3 className="font-semibold text-default">FY {selectedFy}</h3>
+        </div>
+        <button type="button" className="client-profile-primary-button" onClick={() => openPaymentModalForRecord()}>
           <Plus className="w-3.5 h-3.5" /> Add Payment
         </button>
       </div>
       {payments.length > 0 ? (
-        <table className="w-full min-w-[400px]">
-          <thead>
-            <tr>
-              <th className="table-header">Date</th>
-              <th className="table-header">Amount</th>
-              <th className="table-header">Type</th>
-              <th className="table-header">Mode</th>
-              <th className="table-header">Reference</th>
-              <th className="table-header">Status</th>
-              <th className="table-header">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
+        <>
+          <div className="client-profile-table-scroll client-profile-payment-desktop-table">
+            <table className="w-full">
+              <thead>
+                <tr>
+                  <th className="table-header">Date</th>
+                  <th className="table-header">Amount</th>
+                  <th className="table-header">Type</th>
+                  <th className="table-header">Mode</th>
+                  <th className="table-header">Reference</th>
+                  <th className="table-header">Status</th>
+                  <th className="table-header">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map((p) => (
+                  <tr
+                    key={p._id}
+                    className={`border-t border-soft transition-all duration-200 ${
+                      p._status ? pendingRowClass(p._status) : "hover:bg-surface"
+                    }`}
+                  >
+                    <td className="table-cell">{formatDate(p.paymentDate)}</td>
+                    <td className="table-cell font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrency(p.amountPaid)}</td>
+                    <td className="table-cell">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${p.paymentType === "advance" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}>
+                        {p.paymentType === "advance" ? "Advance" : "Billing"}
+                      </span>
+                    </td>
+                    <td className="table-cell">{p.paymentMode}</td>
+                    <td className="table-cell text-faint">{p.referenceNumber || "-"}</td>
+                    <td className="table-cell">
+                      <PendingChip status={p._status} />
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openPaymentModalForRecord(p)}
+                          disabled={!!p._status}
+                          className="p-1.5 text-faint hover:text-brand-600 hover:bg-brand-50 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                          aria-label="Edit payment"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!!p._status}
+                          onClick={() => deletePayment(p._id)}
+                          className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                          aria-label="Delete payment"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="client-profile-payment-mobile-list">
             {payments.map((p) => (
-              <tr
-                key={p._id}
-                className={`border-t border-soft transition-all duration-200 ${
-                  p._status ? pendingRowClass(p._status) : "hover:bg-surface"
-                }`}
-              >
-                <td className="table-cell">{formatDate(p.paymentDate)}</td>
-                <td className="table-cell font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrency(p.amountPaid)}</td>
-                <td className="table-cell">
+              <div key={p._id} className={`rounded-2xl border border-base bg-surface/70 p-4 ${p._status ? pendingRowClass(p._status) : ""}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrency(p.amountPaid)}</p>
+                    <p className="text-xs text-faint">{formatDate(p.paymentDate)} - {p.paymentMode}</p>
+                  </div>
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${p.paymentType === "advance" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}>
                     {p.paymentType === "advance" ? "Advance" : "Billing"}
                   </span>
-                </td>
-                <td className="table-cell">{p.paymentMode}</td>
-                <td className="table-cell text-faint">{p.referenceNumber || "-"}</td>
-                <td className="table-cell">
-                  <PendingChip status={p._status} />
-                </td>
-                <td className="table-cell">
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs text-muted">Ref: {p.referenceNumber || "-"}</p>
+                    <PendingChip status={p._status} />
+                  </div>
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
                       onClick={() => openPaymentModalForRecord(p)}
                       disabled={!!p._status}
-                      className="p-1.5 text-faint hover:text-brand-600 hover:bg-brand-50 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="client-profile-icon-button"
+                      aria-label="Edit payment"
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
@@ -158,16 +214,17 @@ export default function ClientProfileBillingPayments({
                       type="button"
                       disabled={!!p._status}
                       onClick={() => deletePayment(p._id)}
-                      className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="client-profile-icon-button client-profile-danger-icon"
+                      aria-label="Delete payment"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                </td>
-              </tr>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+        </>
       ) : (
         <div className="p-6 text-center">
           <p className="text-sm font-medium text-default">No payments recorded for FY {selectedFy}</p>
@@ -186,7 +243,7 @@ export default function ClientProfileBillingPayments({
           </div>
         </div>
       )}
-    </div>
+    </div>}
     </>
   );
 }

@@ -1208,6 +1208,11 @@ body {
     --color-input-bg:       #ffffff;
     --color-table-head:     #fafafa;
     --color-hover:          #f5f5f7;
+    --quote-header-border:  rgba(0,0,0,0.10);
+    --quote-header-highlight-alpha-default: 0.16;
+    --quote-mobile-header-bg-rgb: 255,255,255;
+    --quote-mobile-header-border: rgba(0,0,0,0.10);
+    --quote-mobile-header-highlight-alpha: 0.13;
   }
   .dark {
     --color-surface:        #000000;
@@ -1223,6 +1228,11 @@ body {
     --color-input-bg:       #2c2c2e;
     --color-table-head:     #2c2c2e;
     --color-hover:          #2c2c2e;
+    --quote-header-border:  rgba(255,255,255,0.075);
+    --quote-header-highlight-alpha-default: 0.055;
+    --quote-mobile-header-bg-rgb: 14,14,16;
+    --quote-mobile-header-border: rgba(255,255,255,0.065);
+    --quote-mobile-header-highlight-alpha: 0.035;
   }
 }
 

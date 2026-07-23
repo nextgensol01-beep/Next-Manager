@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion, useMotionValue, useReducedMotion, useSpring, useTransform, useVelocity } from "framer-motion";
+import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion, useSpring, useTransform, useVelocity } from "framer-motion";
 import {
   ArrowRight,
   Leaf,
@@ -38,6 +38,8 @@ import {
 } from "./financialYearInsights";
 
 type SortKey = MetricKey | "name";
+type MetricPillRect = { left: number; top: number; width: number; height: number };
+type MetricPillEdges = { left: number; right: number; top: number; bottom: number };
 
 const METRIC_ORDER: MetricKey[] = ["base", "used", "remaining", "excess"];
 const METRIC_LEAD_SPRING = { stiffness: 580, damping: 28, mass: 0.6 };
@@ -45,6 +47,7 @@ const METRIC_TRAIL_SPRING = { stiffness: 260, damping: 26, mass: 1.5 };
 const METRIC_AXIS_SPRING = { stiffness: 580, damping: 30, mass: 0.6 };
 const METRIC_SQUASH_SPRING = { stiffness: 420, damping: 22, mass: 0.5 };
 const METRIC_REDUCED_SPRING = { stiffness: 300, damping: 40, mass: 1 };
+const METRIC_RECT_EPSILON = 0.5;
 
 const GROUP_DESCRIPTIONS: Record<ClientGroup, string> = {
   pibo: "Producer, Importer, and Brand Owner target demand for the selected financial year.",
@@ -52,22 +55,19 @@ const GROUP_DESCRIPTIONS: Record<ClientGroup, string> = {
 };
 
 const GROUP_ACCENT: Record<ClientGroup, {
-  glow: string;
   icon: React.ReactNode;
   text: string;
   progress: string;
 }> = {
   pibo: {
-    glow: "from-amber-400/22 via-orange-300/10 to-transparent",
     icon: <Target className="h-5 w-5" />,
     text: "text-amber-700 dark:text-amber-300",
     progress: "bg-[linear-gradient(90deg,#b45309,#f59e0b,#fbbf24)]",
   },
   pwp: {
-    glow: "from-orange-400/20 via-yellow-300/9 to-transparent",
     icon: <Recycle className="h-5 w-5" />,
-    text: "text-orange-700 dark:text-orange-300",
-    progress: "bg-[linear-gradient(90deg,#9a3412,#ea580c,#f59e0b)]",
+    text: "text-orange-700 dark:text-amber-300",
+    progress: "bg-[linear-gradient(90deg,#ea580c,#f97316,#fbbf24)]",
   },
 };
 
@@ -90,6 +90,46 @@ function supportLabels(group: ClientGroup) {
     { key: "remaining" as const, label: labels.remainingLabel },
     { key: "excess" as const, label: labels.excessLabel },
   ];
+}
+
+function metricPillEdges(rect: MetricPillRect): MetricPillEdges {
+  return {
+    bottom: rect.top + rect.height,
+    left: rect.left,
+    right: rect.left + rect.width,
+    top: rect.top,
+  };
+}
+
+function metricPillRectFromEdges(edges: MetricPillEdges): MetricPillRect {
+  return {
+    height: Math.max(edges.bottom - edges.top, 4),
+    left: edges.left,
+    top: edges.top,
+    width: Math.max(edges.right - edges.left, 4),
+  };
+}
+
+function metricPillCenter(rect: MetricPillRect) {
+  return {
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2,
+  };
+}
+
+function metricRectsAreEqual(a: MetricPillRect | null, b: MetricPillRect) {
+  if (!a) return false;
+  return (
+    Math.abs(a.left - b.left) < METRIC_RECT_EPSILON &&
+    Math.abs(a.top - b.top) < METRIC_RECT_EPSILON &&
+    Math.abs(a.width - b.width) < METRIC_RECT_EPSILON &&
+    Math.abs(a.height - b.height) < METRIC_RECT_EPSILON
+  );
+}
+
+function directionalSpring(delta: number, leadsWhenPositive: boolean) {
+  if (Math.abs(delta) < METRIC_RECT_EPSILON) return METRIC_AXIS_SPRING;
+  return delta > 0 === leadsWhenPositive ? METRIC_LEAD_SPRING : METRIC_TRAIL_SPRING;
 }
 
 function useDrawerRows({
@@ -137,6 +177,25 @@ function HeroCard({
   const labels = GROUP_LABELS[group];
   const accent = GROUP_ACCENT[group];
   const progress = getProgress(summary.stats.used, summary.stats.base);
+  const cardSurface =
+    group === "pwp"
+      ? "bg-[linear-gradient(112deg,rgba(124,45,18,0.16)_0%,rgba(var(--color-card-rgb),0.92)_50%,rgba(67,20,7,0.12)_100%)] dark:bg-[linear-gradient(112deg,#3b210f_0%,#201207_54%,#0c0906_100%)]"
+      : "bg-[linear-gradient(112deg,rgba(var(--color-card-rgb),0.98)_0%,rgba(var(--color-card-rgb),0.90)_54%,rgba(245,158,11,0.08)_100%)] dark:bg-[linear-gradient(112deg,#050505_0%,#080806_58%,#11100b_100%)]";
+  const borderTone = active
+    ? group === "pibo"
+      ? "border-amber-500/80 ring-2 ring-sky-500/30 shadow-[inset_0_0_0_1px_rgba(14,165,233,0.52),0_22px_68px_-48px_rgba(245,158,11,0.82)]"
+      : "border-amber-500/60 ring-2 ring-amber-500/18 shadow-[0_22px_68px_-48px_rgba(245,158,11,0.72)]"
+    : group === "pwp"
+      ? "border-amber-950/10 hover:border-amber-500/45 dark:border-amber-200/[0.12] dark:hover:border-amber-400/38"
+      : "border-[var(--color-border)] hover:border-amber-400/50 dark:border-white/[0.14]";
+  const iconTile =
+    group === "pwp"
+      ? "border-amber-300/12 bg-amber-500/12 text-orange-700 dark:border-amber-200/[0.08] dark:bg-amber-400/12 dark:text-amber-300"
+      : "border-amber-400/14 bg-black/[0.04] text-amber-700 dark:border-amber-200/[0.08] dark:bg-white/[0.08] dark:text-amber-300";
+  const clientTile =
+    group === "pwp"
+      ? "border-amber-900/10 bg-white/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.50)] backdrop-blur-xl dark:border-white/[0.12] dark:bg-white/[0.11]"
+      : "border-base bg-surface shadow-sm dark:border-white/[0.12] dark:bg-white/[0.09]";
 
   return (
     <motion.button
@@ -145,45 +204,56 @@ function HeroCard({
       whileHover={{ y: -4 }}
       whileTap={{ scale: 0.99 }}
       className={cn(
-        "relative overflow-hidden rounded-[28px] border p-5 text-left transition-colors md:p-5",
-        "bg-white/78 shadow-[0_28px_72px_-56px_rgba(28,25,23,0.55)] backdrop-blur-[30px] dark:bg-[#12100d]/72",
-        active ? "border-amber-500/70 ring-2 ring-amber-500/18" : "border-white/80 hover:border-amber-400/50 dark:border-white/[0.14]"
+        "relative overflow-hidden rounded-2xl border p-3 text-left transition-colors sm:rounded-[24px] sm:p-5",
+        cardSurface,
+        borderTone
       )}
     >
-      <div className={cn("absolute inset-0 bg-gradient-to-br", accent.glow)} />
-      <div className="absolute -right-14 -top-16 h-44 w-44 rounded-full bg-white/38 blur-3xl dark:bg-white/5" />
-
+      <span
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute -right-16 -top-20 h-48 w-48 rounded-full blur-3xl",
+          group === "pibo" ? "bg-amber-400/20 dark:bg-amber-500/16" : "bg-orange-400/24 dark:bg-orange-500/20"
+        )}
+      />
+      <span
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute -bottom-24 left-8 h-52 w-64 rounded-full blur-3xl",
+          group === "pibo" ? "bg-orange-500/14 dark:bg-orange-500/18" : "bg-amber-500/18 dark:bg-amber-500/20"
+        )}
+      />
       <div className="relative z-[1]">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className={cn("inline-flex h-11 w-11 items-center justify-center rounded-[18px] bg-white/72 shadow-sm dark:bg-white/[0.08]", accent.text)}>
+            <div className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm sm:h-11 sm:w-11 sm:rounded-[16px]", iconTile, accent.text)}>
               {accent.icon}
             </div>
-            <h3 className="mt-5 text-2xl font-semibold text-default">{labels.title}</h3>
-            <p className="mt-2 max-w-md text-sm leading-6 text-muted">{GROUP_DESCRIPTIONS[group]}</p>
+            <h3 className="mt-3 text-base font-semibold text-default sm:mt-5 sm:text-2xl">{labels.title}</h3>
+            <p className="mt-2 hidden max-w-md text-sm leading-6 text-muted sm:block">{GROUP_DESCRIPTIONS[group]}</p>
           </div>
-          <div className="rounded-2xl border border-white/70 bg-white/72 px-3 py-2 text-right backdrop-blur-2xl dark:border-white/[0.12] dark:bg-white/[0.09]">
+          <div className={cn("rounded-xl border px-2.5 py-1.5 text-right sm:rounded-2xl sm:px-3 sm:py-2", clientTile)}>
             <p className="text-[10px] font-semibold uppercase text-faint">Clients</p>
-            <p className="mt-1 text-xl font-semibold text-default">{formatInsightNumber(summary.clientCount)}</p>
+            <p className="mt-0.5 text-lg font-semibold text-default sm:mt-1 sm:text-xl">{formatInsightNumber(summary.clientCount)}</p>
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-3 gap-3">
+        <div className="mt-3 grid grid-cols-3 gap-2 sm:mt-6 sm:gap-3">
           <div>
-            <p className="text-[10px] font-semibold uppercase text-faint">{labels.baseLabel}</p>
-            <p className="mt-1 font-mono text-lg font-semibold text-default">{formatInsightNumber(summary.stats.base)}</p>
+            <p className="truncate text-[9px] font-semibold uppercase text-faint sm:text-[10px]">{labels.baseLabel}</p>
+            <p className="mt-1 truncate font-mono text-sm font-semibold text-default sm:text-lg">{formatInsightNumber(summary.stats.base)}</p>
           </div>
           <div>
-            <p className="text-[10px] font-semibold uppercase text-faint">{labels.usedLabel}</p>
-            <p className="mt-1 font-mono text-lg font-semibold text-amber-700 dark:text-amber-300">{formatInsightNumber(summary.stats.used)}</p>
+            <p className="truncate text-[9px] font-semibold uppercase text-faint sm:text-[10px]">{labels.usedLabel}</p>
+            <p className="mt-1 truncate font-mono text-sm font-semibold text-amber-700 dark:text-amber-300 sm:text-lg">{formatInsightNumber(summary.stats.used)}</p>
           </div>
           <div>
-            <p className="text-[10px] font-semibold uppercase text-faint">{labels.remainingLabel}</p>
-            <p className="mt-1 font-mono text-lg font-semibold text-emerald-600 dark:text-emerald-300">{formatInsightNumber(summary.stats.remaining)}</p>
+            <p className="truncate text-[9px] font-semibold uppercase text-faint sm:text-[10px]">{labels.remainingLabel}</p>
+            <p className="mt-1 truncate font-mono text-sm font-semibold text-emerald-600 dark:text-emerald-300 sm:text-lg">{formatInsightNumber(summary.stats.remaining)}</p>
           </div>
         </div>
 
-        <div className="mt-5">
+        <div className="mt-3 sm:mt-5">
           <div className="mb-2 flex items-center justify-between text-xs">
             <span className="text-faint">Progress</span>
             <span className="font-semibold text-default">{Math.round(progress)}%</span>
@@ -202,46 +272,117 @@ function MetricSelectionPill({
   targetRect,
 }: {
   reduced: boolean;
-  targetRect: { left: number; top: number; width: number; height: number } | null;
+  targetRect: MetricPillRect | null;
 }) {
-  const leadTarget = useMotionValue((targetRect?.left ?? 0) + (targetRect?.width ?? 0));
-  const trailTarget = useMotionValue(targetRect?.left ?? 0);
-  const topTarget = useMotionValue(targetRect?.top ?? 0);
-  const heightTarget = useMotionValue(targetRect?.height ?? 0);
+  const initialEdges = targetRect ? metricPillEdges(targetRect) : { bottom: 0, left: 0, right: 0, top: 0 };
+  const leftEdge = useMotionValue(initialEdges.left);
+  const rightEdge = useMotionValue(initialEdges.right);
+  const topEdge = useMotionValue(initialEdges.top);
+  const bottomEdge = useMotionValue(initialEdges.bottom);
+  const previousRectRef = useRef<MetricPillRect | null>(targetRect);
+  const controlsRef = useRef<Array<{ stop: () => void }>>([]);
+  const mountedRef = useRef(false);
 
-  const leadEdge = useSpring(leadTarget, reduced ? METRIC_REDUCED_SPRING : METRIC_LEAD_SPRING);
-  const trailEdge = useSpring(trailTarget, reduced ? METRIC_REDUCED_SPRING : METRIC_TRAIL_SPRING);
-  const top = useSpring(topTarget, reduced ? METRIC_REDUCED_SPRING : METRIC_AXIS_SPRING);
-  const height = useSpring(heightTarget, reduced ? METRIC_REDUCED_SPRING : METRIC_AXIS_SPRING);
-  const width = useTransform([leadEdge, trailEdge] as const, ([lead, trail]: number[]) => Math.max(lead - trail, 4));
-  const trailVelocity = useVelocity(trailEdge);
-  const rawSquashY = useTransform(
-    trailVelocity,
-    [-800, -200, 0, 200, 800],
-    reduced ? [1, 1, 1, 1, 1] : [0.94, 0.98, 1, 0.98, 0.94]
+  const width = useTransform([rightEdge, leftEdge] as const, ([right, left]: number[]) => Math.max(right - left, 4));
+  const height = useTransform([bottomEdge, topEdge] as const, ([bottom, top]: number[]) => Math.max(bottom - top, 4));
+  const leftVelocity = useVelocity(leftEdge);
+  const rightVelocity = useVelocity(rightEdge);
+  const topVelocity = useVelocity(topEdge);
+  const bottomVelocity = useVelocity(bottomEdge);
+
+  const rawScaleX = useTransform(
+    [leftVelocity, rightVelocity, topVelocity, bottomVelocity] as const,
+    ([leftV, rightV, topV, bottomV]: number[]) => {
+      if (reduced) return 1;
+      const horizontal = Math.max(Math.abs(leftV), Math.abs(rightV));
+      const vertical = Math.max(Math.abs(topV), Math.abs(bottomV));
+      const horizontalAmount = Math.min(horizontal / 1200, 1);
+      const verticalAmount = Math.min(vertical / 900, 1);
+      const diagonal = horizontalAmount > 0.08 && verticalAmount > 0.08;
+      const squash = diagonal ? 0.026 : 0.044;
+      const counterStretch = diagonal ? horizontalAmount * 0.006 : 0;
+      return Math.max(0.955, Math.min(1.03, 1 - verticalAmount * squash + counterStretch));
+    }
   );
-  const scaleY = useSpring(rawSquashY, reduced ? METRIC_REDUCED_SPRING : METRIC_SQUASH_SPRING);
+  const rawScaleY = useTransform(
+    [leftVelocity, rightVelocity, topVelocity, bottomVelocity] as const,
+    ([leftV, rightV, topV, bottomV]: number[]) => {
+      if (reduced) return 1;
+      const horizontal = Math.max(Math.abs(leftV), Math.abs(rightV));
+      const vertical = Math.max(Math.abs(topV), Math.abs(bottomV));
+      const horizontalAmount = Math.min(horizontal / 1200, 1);
+      const verticalAmount = Math.min(vertical / 900, 1);
+      const diagonal = horizontalAmount > 0.08 && verticalAmount > 0.08;
+      const squash = diagonal ? 0.026 : 0.044;
+      const counterStretch = diagonal ? verticalAmount * 0.006 : 0;
+      return Math.max(0.955, Math.min(1.03, 1 - horizontalAmount * squash + counterStretch));
+    }
+  );
+  const scaleX = useSpring(rawScaleX, reduced ? METRIC_REDUCED_SPRING : METRIC_SQUASH_SPRING);
+  const scaleY = useSpring(rawScaleY, reduced ? METRIC_REDUCED_SPRING : METRIC_SQUASH_SPRING);
 
   useEffect(() => {
     if (!targetRect) return;
-    leadTarget.set(targetRect.left + targetRect.width);
-    trailTarget.set(targetRect.left);
-    topTarget.set(targetRect.top);
-    heightTarget.set(targetRect.height);
-  }, [heightTarget, leadTarget, targetRect, topTarget, trailTarget]);
+    const previousRect = previousRectRef.current;
+
+    if (!reduced && previousRect && metricRectsAreEqual(previousRect, targetRect)) return;
+
+    controlsRef.current.forEach((control) => control.stop());
+    controlsRef.current = [];
+
+    const nextEdges = metricPillEdges(targetRect);
+    const setDirectly = () => {
+      leftEdge.set(nextEdges.left);
+      rightEdge.set(nextEdges.right);
+      topEdge.set(nextEdges.top);
+      bottomEdge.set(nextEdges.bottom);
+    };
+
+    if (!mountedRef.current || reduced || !previousRect) {
+      setDirectly();
+      mountedRef.current = true;
+      previousRectRef.current = targetRect;
+      return;
+    }
+
+    const visualRect = metricPillRectFromEdges({
+      bottom: bottomEdge.get(),
+      left: leftEdge.get(),
+      right: rightEdge.get(),
+      top: topEdge.get(),
+    });
+    const previousCenter = metricPillCenter(visualRect);
+    const nextCenter = metricPillCenter(targetRect);
+    const deltaX = nextCenter.x - previousCenter.x;
+    const deltaY = nextCenter.y - previousCenter.y;
+
+    controlsRef.current = [
+      animate(leftEdge, nextEdges.left, { type: "spring", ...directionalSpring(deltaX, false) }),
+      animate(rightEdge, nextEdges.right, { type: "spring", ...directionalSpring(deltaX, true) }),
+      animate(topEdge, nextEdges.top, { type: "spring", ...directionalSpring(deltaY, false) }),
+      animate(bottomEdge, nextEdges.bottom, { type: "spring", ...directionalSpring(deltaY, true) }),
+    ];
+    previousRectRef.current = targetRect;
+
+    return () => {
+      controlsRef.current.forEach((control) => control.stop());
+      controlsRef.current = [];
+    };
+  }, [bottomEdge, leftEdge, reduced, rightEdge, targetRect, topEdge]);
 
   if (!targetRect) return null;
 
   return (
     <motion.span
       aria-hidden
-      className="absolute rounded-full bg-gradient-to-r from-stone-950 via-amber-900 to-orange-700 shadow-[0_10px_24px_-14px_rgba(146,64,14,0.78)] dark:from-amber-500 dark:via-orange-500 dark:to-amber-300"
+      className="absolute rounded-full bg-gradient-to-r from-[#1c0d05] via-[#9a3412] to-[#d9480f] shadow-[0_10px_24px_-16px_rgba(154,52,18,0.82)] dark:from-amber-500 dark:via-orange-500 dark:to-amber-300"
       style={{
         height,
-        left: trailEdge,
+        left: leftEdge,
         pointerEvents: "none",
+        scaleX,
         scaleY,
-        top,
+        top: topEdge,
         transformOrigin: "center center",
         width,
         willChange: "left, top, width, height, transform",
@@ -262,7 +403,7 @@ function MetricSegments({
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const reducedMotion = useReducedMotion();
-  const [pillRect, setPillRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [pillRect, setPillRect] = useState<MetricPillRect | null>(null);
 
   const measurePill = useCallback(() => {
     const track = trackRef.current;
@@ -271,12 +412,13 @@ function MetricSegments({
     if (!button) return;
     const trackRect = track.getBoundingClientRect();
     const buttonRect = button.getBoundingClientRect();
-    setPillRect({
+    const nextRect = {
       height: buttonRect.height,
       left: buttonRect.left - trackRect.left,
       top: buttonRect.top - trackRect.top,
       width: buttonRect.width,
-    });
+    };
+    setPillRect((previousRect) => metricRectsAreEqual(previousRect, nextRect) ? previousRect : nextRect);
   }, [activeGroup, activeMetric]);
 
   useEffect(() => {
@@ -300,8 +442,8 @@ function MetricSegments({
   }, [measurePill]);
 
   return (
-    <div className="rounded-full border border-white/80 bg-white/74 p-1 shadow-sm backdrop-blur-[28px] dark:border-white/[0.12] dark:bg-white/[0.08]">
-      <div ref={trackRef} className="relative grid grid-cols-4 gap-1">
+    <div className="rounded-2xl border border-[rgba(0,0,0,0.08)] bg-card p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_2px_8px_rgba(15,23,42,0.10)] dark:border-white/[0.12] dark:bg-white/[0.08] sm:rounded-full">
+      <div ref={trackRef} className="relative grid grid-cols-2 gap-1 sm:grid-cols-4">
         <MetricSelectionPill reduced={reducedMotion ?? false} targetRect={pillRect} />
         {METRIC_ORDER.map((metric) => {
           const active = activeMetric === metric;
@@ -312,11 +454,11 @@ function MetricSegments({
               data-metric={`${activeGroup}-${metric}`}
               onClick={() => onMetricChange(metric)}
               className={cn(
-                "relative z-[1] rounded-full px-3 py-2 text-xs font-semibold transition-colors",
+                "relative z-[1] min-w-0 rounded-full px-2 py-1.5 text-[11px] font-semibold transition-colors sm:px-3 sm:py-2 sm:text-xs",
                 active ? "text-white" : "text-muted hover:text-default"
               )}
             >
-              <span className="relative z-[1]">{METRIC_LABELS[activeGroup][metric]}</span>
+              <span className="relative z-[1] block truncate">{METRIC_LABELS[activeGroup][metric]}</span>
             </button>
           );
         })}
@@ -335,13 +477,13 @@ function SupportMetric({
   stats: MetricSet;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
       {supportLabels(group).map((item) => {
         const active = activeMetric === item.key;
         return (
-          <div key={item.key} className={cn("rounded-2xl px-3 py-2", active ? "bg-amber-500/12" : "bg-surface/58")}>
-            <p className="text-[10px] font-semibold uppercase text-faint">{item.label}</p>
-            <p className={cn("mt-1 font-mono font-semibold", active ? "text-sm text-amber-700 dark:text-amber-300" : "text-xs text-muted")}>
+          <div key={item.key} className={cn("rounded-lg border border-soft px-2 py-1.5 sm:rounded-2xl sm:px-3 sm:py-2", active ? "bg-amber-500/12" : "bg-surface")}>
+            <p className="truncate text-[9px] font-semibold uppercase text-faint sm:text-[10px]">{item.label}</p>
+            <p className={cn("mt-1 truncate font-mono font-semibold", active ? "text-xs text-amber-700 dark:text-amber-300 sm:text-sm" : "text-xs text-muted")}>
               {formatInsightNumber(stats[item.key])}
             </p>
           </div>
@@ -361,27 +503,27 @@ function TypeCategoryMatrix({
   stats: InsightStats;
 }) {
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-3 xl:grid-cols-2">
       {CREDIT_TYPES.map((type) => {
         const typeStats = stats.byType[type];
         return (
-          <div key={type} className="rounded-[24px] border border-white/72 bg-white/70 p-3.5 backdrop-blur-[28px] dark:border-white/[0.12] dark:bg-white/[0.07]">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
+          <div key={type} className="rounded-2xl border border-base bg-card p-2.5 shadow-sm sm:rounded-[22px] sm:p-3.5 dark:border-white/[0.12] dark:bg-white/[0.07]">
+            <div className="mb-2.5 flex items-start justify-between gap-2 sm:mb-3 sm:gap-3">
+              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 <span className={cn(
-                  "flex h-10 w-10 items-center justify-center rounded-[18px]",
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg sm:h-10 sm:w-10 sm:rounded-xl",
                   type === "RECYCLING" ? "bg-amber-500/14 text-amber-700 dark:text-amber-300" : "bg-orange-500/14 text-orange-700 dark:text-orange-300"
                 )}>
                   {type === "RECYCLING" ? <Recycle className="h-4 w-4" /> : <Leaf className="h-4 w-4" />}
                 </span>
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm font-semibold text-default">{type === "RECYCLING" ? "Recycling" : "End of Life"}</p>
-                  <p className="text-xs text-faint">{METRIC_LABELS[activeGroup][activeMetric]} by category</p>
+                  <p className="truncate text-[11px] text-faint sm:text-xs">{METRIC_LABELS[activeGroup][activeMetric]} by category</p>
                 </div>
               </div>
-              <div className="text-right">
-                <p className={cn("font-mono text-xl font-semibold", metricTone(activeMetric))}>{formatInsightNumber(typeStats[activeMetric])}</p>
-                <p className="text-[10px] uppercase text-faint">{METRIC_LABELS[activeGroup][activeMetric]}</p>
+              <div className="shrink-0 text-right">
+                <p className={cn("font-mono text-lg font-semibold sm:text-xl", metricTone(activeMetric))}>{formatInsightNumber(typeStats[activeMetric])}</p>
+                <p className="text-[9px] uppercase text-faint sm:text-[10px]">{METRIC_LABELS[activeGroup][activeMetric]}</p>
               </div>
             </div>
 
@@ -389,7 +531,7 @@ function TypeCategoryMatrix({
               {CAT_IDS.map((catId) => {
                 const catStats = stats.byTypeCategory[type][catId];
                 return (
-                  <div key={catId} className="rounded-[18px] border border-soft bg-surface/74 p-2.5">
+                  <div key={catId} className="rounded-xl border border-soft bg-surface p-2 sm:rounded-[16px] sm:p-2.5">
                     <div className="mb-2 flex items-center justify-between">
                       <span className="text-xs font-semibold text-muted">{CAT_DISPLAY[catId]}</span>
                       <span className={cn("font-mono text-base font-semibold", metricTone(activeMetric))}>
@@ -425,24 +567,33 @@ function ClientRow({
 
   if (compact) {
     return (
-      <div className="rounded-[18px] border border-white/72 bg-white/72 px-3 py-2.5 backdrop-blur-[24px] dark:border-white/[0.12] dark:bg-white/[0.07]">
-        <div className="flex items-center justify-between gap-3">
+      <div className="rounded-xl border border-base bg-card px-3 py-3 shadow-sm transition-colors dark:border-white/[0.12] dark:bg-white/[0.07] sm:rounded-2xl">
+        <div className="grid grid-cols-[minmax(0,1fr)_82px_32px] items-start gap-2 sm:grid-cols-[minmax(0,1fr)_132px_36px] sm:items-center sm:gap-3">
           <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-2">
-              <p className="truncate text-sm font-semibold text-default">{row.clientName}</p>
-              {row.category && <CategoryBadge category={row.category} />}
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
+              <p className="min-w-0 truncate text-sm font-semibold text-default">{row.clientName}</p>
+              {row.category && <span className="shrink-0"><CategoryBadge category={row.category} /></span>}
             </div>
             <p className="mt-0.5 font-mono text-[11px] text-faint">{row.clientId}</p>
           </div>
-          <div className="shrink-0 text-right">
-            <p className={cn("font-mono text-base font-semibold", metricTone(activeMetric))}>{formatInsightNumber(row.stats[activeMetric])}</p>
-            <p className="text-[9px] uppercase text-faint">{METRIC_LABELS[activeGroup][activeMetric]}</p>
+          <div className="min-w-0 rounded-lg border border-soft bg-surface px-2 py-1.5 text-right sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
+            <p className={cn("truncate font-mono text-sm font-semibold sm:text-base", metricTone(activeMetric))}>{formatInsightNumber(row.stats[activeMetric])}</p>
+            <p className="truncate text-[8px] uppercase text-faint sm:text-[9px]">{METRIC_LABELS[activeGroup][activeMetric]}</p>
           </div>
+          <button
+            type="button"
+            onClick={() => onEditRecord(row.record)}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-base bg-surface text-muted transition-colors hover:text-default"
+            aria-label={`Edit FY record for ${row.clientName}`}
+            title="Edit FY record"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
         </div>
 
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-faint">
+        <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px] text-faint sm:flex sm:flex-wrap sm:gap-x-3 sm:gap-y-1">
           {labels.map((item) => (
-            <span key={item.key} className={cn("font-mono", item.key === activeMetric ? metricTone(activeMetric) : "text-muted")}>
+            <span key={item.key} className={cn("rounded-md bg-surface px-2 py-1 font-mono sm:bg-transparent sm:px-0 sm:py-0", item.key === activeMetric ? metricTone(activeMetric) : "text-muted")}>
               <span className="font-sans">{item.label}: </span>{formatInsightNumber(row.stats[item.key])}
             </span>
           ))}
@@ -453,27 +604,27 @@ function ClientRow({
 
   return (
     <div className={cn(
-      "rounded-[20px] border border-white/72 bg-white/72 p-3 backdrop-blur-[24px] dark:border-white/[0.12] dark:bg-white/[0.07]"
+      "min-w-0 overflow-hidden rounded-2xl border border-base bg-[rgba(var(--color-card-rgb),0.50)] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.46),0_18px_44px_-32px_rgba(15,23,42,0.78)] backdrop-blur-[30px] dark:border-white/[0.12] dark:bg-white/[0.08]"
     )}>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="truncate text-sm font-semibold text-default">{row.clientName}</p>
-            {row.category && <CategoryBadge category={row.category} />}
+          <div className="flex min-w-0 items-center gap-2">
+            <p className="min-w-0 truncate text-sm font-semibold text-default">{row.clientName}</p>
+            {row.category && <span className="shrink-0"><CategoryBadge category={row.category} /></span>}
           </div>
           <p className="mt-1 font-mono text-xs text-faint">{row.clientId}</p>
         </div>
-        <div className="text-left sm:text-right">
+        <div className="min-w-[78px] shrink-0 text-right">
           <p className={cn("font-mono text-lg font-semibold", metricTone(activeMetric))}>{formatInsightNumber(row.stats[activeMetric])}</p>
-          <p className="text-[10px] uppercase text-faint">{METRIC_LABELS[activeGroup][activeMetric]}</p>
+          <p className="truncate text-[9px] uppercase text-faint">{METRIC_LABELS[activeGroup][activeMetric]}</p>
         </div>
       </div>
 
-      <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+      <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4">
         {labels.map((item) => (
-          <div key={item.key} className="rounded-xl bg-surface/78 px-2.5 py-1.5">
-            <p className="text-[10px] uppercase text-faint">{item.label}</p>
-            <p className={cn("mt-1 font-mono text-xs font-semibold", item.key === activeMetric ? metricTone(activeMetric) : "text-muted")}>
+          <div key={item.key} className="min-w-0">
+            <p className="truncate text-[9px] uppercase tracking-wide text-faint">{item.label}</p>
+            <p className={cn("mt-1 truncate font-mono text-xs font-semibold", item.key === activeMetric ? metricTone(activeMetric) : "text-muted")}>
               {formatInsightNumber(row.stats[item.key])}
             </p>
           </div>
@@ -484,7 +635,7 @@ function ClientRow({
         <button
           type="button"
           onClick={() => onEditRecord(row.record)}
-          className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-base bg-surface px-3 py-1.5 text-[11px] font-semibold text-muted transition-colors hover:text-default"
+          className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-base bg-black px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm transition-colors hover:bg-stone-800 dark:border-white/[0.10]"
         >
           <Pencil className="h-3.5 w-3.5" />
           Edit FY Record
@@ -518,21 +669,21 @@ function DetailPanel({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] }}
-      className="rounded-[30px] border border-white/80 bg-white/76 p-4 shadow-[0_28px_80px_-62px_rgba(28,25,23,0.62)] backdrop-blur-[40px] dark:border-amber-200/[0.12] dark:bg-[#12100d]/76 md:p-4"
+      className="rounded-2xl border border-base bg-card p-2.5 shadow-lg shadow-black/5 dark:border-amber-200/[0.12] dark:bg-[#12100d]/90 sm:rounded-[24px] sm:p-4"
     >
-      <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
+      <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between sm:mb-4">
+        <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase text-amber-700 dark:text-amber-300">Selected Detail</p>
-          <h3 className="mt-2 text-2xl font-semibold text-default">
+          <h3 className="mt-1.5 text-base font-semibold text-default sm:mt-2 sm:text-2xl">
             {labels.title} - {METRIC_LABELS[activeGroup][activeMetric]}
           </h3>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
+          <p className="mt-2 hidden max-w-3xl text-sm leading-6 text-muted sm:block">
             Focused view for {METRIC_LABELS[activeGroup][activeMetric].toLowerCase()} with Recycling, End of Life, and CAT-I to CAT-IV context.
           </p>
         </div>
-        <div className="rounded-[22px] border border-white/72 bg-white/74 px-4 py-3 text-left backdrop-blur-[28px] dark:border-white/[0.12] dark:bg-white/[0.08] md:text-right">
+        <div className="rounded-xl border border-base bg-surface px-3 py-2 text-left shadow-sm dark:border-white/[0.12] dark:bg-white/[0.08] sm:rounded-2xl sm:px-4 sm:py-3 md:text-right">
           <p className="text-[10px] font-semibold uppercase text-faint">{METRIC_LABELS[activeGroup][activeMetric]}</p>
-          <p className={cn("mt-1 font-mono text-3xl font-semibold", metricTone(activeMetric))}>
+          <p className={cn("mt-1 font-mono text-2xl font-semibold sm:text-3xl", metricTone(activeMetric))}>
             {formatInsightNumber(group.stats[activeMetric])}
           </p>
           <p className="mt-1 text-xs text-muted">{rows.length} related client{rows.length === 1 ? "" : "s"}</p>
@@ -541,7 +692,7 @@ function DetailPanel({
 
       <TypeCategoryMatrix activeGroup={activeGroup} activeMetric={activeMetric} stats={group.stats} />
 
-      <div className="mt-4 rounded-[24px] border border-white/68 bg-white/64 p-3.5 backdrop-blur-[28px] dark:border-white/[0.10] dark:bg-white/[0.055]">
+      <div className="mt-3 rounded-2xl border border-base bg-surface p-2.5 shadow-sm dark:border-white/[0.10] dark:bg-white/[0.055] sm:mt-4 sm:p-3.5">
         <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h4 className="text-sm font-semibold text-default">Top related clients</h4>
@@ -550,7 +701,7 @@ function DetailPanel({
           <button
             type="button"
             onClick={onOpenDrawer}
-            className="inline-flex items-center justify-center gap-1.5 rounded-full bg-stone-950 px-3.5 py-2 text-xs font-semibold text-amber-50 shadow-[0_14px_30px_-20px_rgba(28,25,23,0.95)] transition-colors hover:bg-stone-800 dark:bg-amber-500 dark:text-stone-950 dark:hover:bg-amber-400"
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-stone-950 px-3.5 py-2 text-xs font-semibold text-amber-50 shadow-[0_14px_30px_-20px_rgba(28,25,23,0.95)] transition-colors hover:bg-stone-800 dark:bg-amber-500 dark:text-stone-950 dark:hover:bg-amber-400 sm:w-auto sm:rounded-full"
           >
             View all related clients
             <ArrowRight className="h-3.5 w-3.5" />
@@ -558,7 +709,7 @@ function DetailPanel({
         </div>
 
         {topRows.length === 0 ? (
-          <div className="rounded-[22px] border border-dashed border-base bg-surface/72 p-8 text-center">
+          <div className="rounded-2xl border border-dashed border-base bg-card p-8 text-center">
             <Sparkles className="mx-auto h-7 w-7 text-faint" />
             <p className="mt-3 text-sm font-semibold text-default">No clients for this selected metric.</p>
             <p className="mt-1 text-xs text-muted">Try another segment or switch the hero card.</p>
@@ -607,7 +758,7 @@ function ClientDrawer({
     setQuery("");
     setCategory("all");
     setSortKey(activeMetric);
-  }, [activeMetric, open]);
+  }, [activeGroup, activeMetric, open]);
 
   const categoryOptions = activeGroup === "pibo" ? PIBO_CATEGORIES : ["PWP"];
 
@@ -615,7 +766,7 @@ function ClientDrawer({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="absolute inset-0 z-30 flex justify-end bg-black/16"
+          className="absolute inset-0 z-30 flex justify-end overflow-hidden bg-black/18"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -628,13 +779,18 @@ function ClientDrawer({
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 340, damping: 34 }}
-            className="flex h-full w-full max-w-[440px] flex-col border-l border-white/78 bg-card/96 shadow-[-30px_0_80px_-58px_rgba(15,23,42,0.82)] backdrop-blur-[36px] dark:border-white/[0.12] dark:bg-[#090a0d]/96"
+            className="relative flex h-full w-full max-w-[440px] min-w-0 flex-col overflow-hidden border-l border-base bg-[rgba(var(--color-card-rgb),0.76)] shadow-[-30px_0_80px_-58px_rgba(15,23,42,0.82)] backdrop-blur-[34px] dark:border-white/[0.12] dark:bg-[rgba(9,10,13,0.78)]"
           >
-            <div className="shrink-0 border-b border-soft px-4 py-3.5">
+            <div aria-hidden className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+              <span className="absolute -left-24 top-8 h-56 w-56 rounded-full bg-amber-400/18 blur-3xl dark:bg-amber-500/14" />
+              <span className="absolute -right-28 top-36 h-64 w-64 rounded-full bg-stone-500/14 blur-3xl dark:bg-white/[0.07]" />
+              <span className="absolute bottom-[-5rem] left-10 h-60 w-80 rounded-full bg-orange-500/18 blur-3xl dark:bg-amber-600/18" />
+            </div>
+            <div className="relative z-[1] min-w-0 shrink-0 border-b border-soft px-4 py-3.5">
               <div className="flex items-start justify-between gap-3">
-                <div>
+                <div className="min-w-0">
                   <p className="text-[11px] font-semibold uppercase text-amber-700 dark:text-amber-300">Related Clients</p>
-                  <h3 className="mt-1 text-lg font-semibold text-default">{METRIC_LABELS[activeGroup][activeMetric]}</h3>
+                  <h3 className="mt-1 truncate text-lg font-semibold text-default">{METRIC_LABELS[activeGroup][activeMetric]}</h3>
                   <p className="mt-1 text-xs text-muted">{drawerRows.length} matching client{drawerRows.length === 1 ? "" : "s"}</p>
                 </div>
                 <button
@@ -647,7 +803,7 @@ function ClientDrawer({
                 </button>
               </div>
 
-              <div className="mt-3 rounded-2xl border border-base bg-surface/86 px-3">
+              <div className="mt-3 min-w-0 rounded-2xl border border-base bg-[rgba(var(--color-card-rgb),0.58)] px-3 backdrop-blur-[18px] dark:bg-black/22">
                 <div className="flex items-center gap-2">
                   <Search className="h-4 w-4 shrink-0 text-faint" />
                   <input
@@ -659,11 +815,11 @@ function ClientDrawer({
                 </div>
               </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2">
                 <select
                   value={category}
                   onChange={(event) => setCategory(event.target.value)}
-                  className="input-field !py-2 !text-xs"
+                  className="input-field min-w-0 !py-2 !text-xs"
                 >
                   <option value="all">All categories</option>
                   {categoryOptions.map((option) => (
@@ -673,7 +829,7 @@ function ClientDrawer({
                 <select
                   value={sortKey}
                   onChange={(event) => setSortKey(event.target.value as SortKey)}
-                  className="input-field !py-2 !text-xs"
+                  className="input-field min-w-0 !py-2 !text-xs"
                 >
                   {METRIC_ORDER.map((metric) => (
                     <option key={metric} value={metric}>Sort: {METRIC_LABELS[activeGroup][metric]}</option>
@@ -683,26 +839,32 @@ function ClientDrawer({
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">
-              {drawerRows.length === 0 ? (
-                <div className="rounded-[24px] border border-dashed border-base bg-surface/58 p-8 text-center">
-                  <Users className="mx-auto h-7 w-7 text-faint" />
-                  <p className="mt-3 text-sm font-semibold text-default">No matching clients</p>
-                  <p className="mt-1 text-xs text-muted">Adjust search or category filters.</p>
-                </div>
-              ) : (
-                <div className="grid gap-2">
-                  {drawerRows.map((row) => (
-                    <ClientRow
-                      key={row.record._id}
-                      activeGroup={activeGroup}
-                      activeMetric={activeMetric}
-                      onEditRecord={onEditRecord}
-                      row={row}
-                    />
-                  ))}
-                </div>
-              )}
+            <div className="relative z-[1] min-h-0 min-w-0 flex-1 overflow-hidden">
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-2 rounded-[22px] border border-base bg-[rgba(var(--color-card-rgb),0.26)] shadow-[inset_0_1px_0_rgba(255,255,255,0.42),0_18px_54px_-38px_rgba(15,23,42,0.72)] backdrop-blur-[30px] dark:border-white/[0.08] dark:bg-black/18"
+              />
+              <div className="relative z-[1] h-full min-w-0 overflow-y-auto overflow-x-hidden p-3">
+                {drawerRows.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-base bg-[rgba(var(--color-card-rgb),0.50)] p-8 text-center backdrop-blur-[24px] dark:bg-white/[0.07]">
+                    <Users className="mx-auto h-7 w-7 text-faint" />
+                    <p className="mt-3 text-sm font-semibold text-default">No matching clients</p>
+                    <p className="mt-1 text-xs text-muted">Adjust search or category filters.</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-2">
+                    {drawerRows.map((row) => (
+                      <ClientRow
+                        key={row.record._id}
+                        activeGroup={activeGroup}
+                        activeMetric={activeMetric}
+                        onEditRecord={onEditRecord}
+                        row={row}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </motion.aside>
         </motion.div>
@@ -758,47 +920,48 @@ export default function FinancialYearInsightsModal({
       bgColor="transparent"
       backdropFilter="none"
       backdropColor="rgba(0,0,0,0.52)"
-      className="rounded-[30px]"
+      className="h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] rounded-[20px] sm:h-full sm:max-h-[90vh] sm:rounded-[30px]"
     >
       <motion.div
         initial={reducedMotion ? false : { opacity: 0, y: 18, scale: 0.985 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-        className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[30px] border border-stone-950/10 bg-stone-50/82 text-default shadow-[0_32px_90px_-64px_rgba(28,25,23,0.78)] backdrop-blur-[64px] dark:border-amber-200/[0.12] dark:bg-[#090806]/90"
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[20px] border border-base bg-card text-default shadow-[0_32px_90px_-64px_rgba(28,25,23,0.78)] dark:border-amber-200/[0.12] dark:bg-[#090806] sm:rounded-[30px]"
       >
-        <div className="pointer-events-none absolute -left-28 -top-28 h-72 w-72 rounded-full bg-amber-400/22 blur-3xl" />
-        <div className="pointer-events-none absolute -right-24 top-10 h-72 w-72 rounded-full bg-orange-500/16 blur-3xl" />
-        <div className="pointer-events-none absolute bottom-[-140px] left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-stone-950/8 blur-3xl dark:bg-amber-200/[0.05]" />
-
-        <div className="relative z-[1] flex shrink-0 flex-col gap-4 border-b border-stone-950/10 bg-stone-50/76 px-5 py-4 backdrop-blur-[56px] dark:border-amber-200/[0.10] dark:bg-stone-950/28 md:flex-row md:items-center md:justify-between">
-          <div>
+        <div aria-hidden className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+          <span className="absolute -left-28 -top-28 h-80 w-80 rounded-full bg-amber-400/16 blur-3xl dark:bg-amber-500/16" />
+          <span className="absolute -right-32 top-36 h-80 w-80 rounded-full bg-teal-400/12 blur-3xl dark:bg-teal-400/12" />
+          <span className="absolute bottom-[-7rem] left-1/4 h-72 w-[30rem] rounded-full bg-orange-500/16 blur-3xl dark:bg-orange-500/18" />
+        </div>
+        <div className="relative z-[1] grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 border-b border-soft bg-[rgba(var(--color-card-rgb),0.88)] px-3.5 py-3 backdrop-blur-xl dark:border-amber-200/[0.10] dark:bg-stone-950/50 sm:px-5 sm:py-4 md:items-center">
+          <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/20 bg-amber-500/12 px-3 py-1 text-[11px] font-semibold text-amber-800 dark:text-amber-300">
               <Sparkles className="h-3.5 w-3.5" />
               FY {financialYear}
             </div>
-            <h2 className="mt-3 text-2xl font-semibold text-default">Targets & Credits Dashboard</h2>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">
+            <h2 className="mt-2 text-lg font-semibold leading-tight text-default sm:mt-3 sm:text-2xl">Targets & Credits Dashboard</h2>
+            <p className="mt-1 hidden max-w-3xl text-sm leading-6 text-muted sm:block">
               A focused explanation of target demand, credit supply, achievement, sales, remaining quantity, and excess.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-9 w-9 shrink-0 items-center justify-center self-end rounded-full border border-white/78 bg-white/72 text-faint transition-colors hover:text-default dark:border-white/[0.12] dark:bg-white/[0.10] md:self-auto"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-base bg-surface text-faint transition-colors hover:text-default dark:border-white/[0.12] dark:bg-white/[0.10]"
             aria-label="Close targets and credits dashboard"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="relative z-[1] min-h-0 flex-1 overflow-y-auto p-3.5 md:p-4">
+        <div className="relative z-[1] min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[rgba(var(--color-card-rgb),0.54)] p-2 backdrop-blur-xl dark:bg-black/20 sm:p-3.5 md:p-4">
           {loading ? (
-            <div className="flex min-h-[360px] items-center justify-center rounded-[28px] border border-white/72 bg-white/72 text-sm font-semibold text-muted backdrop-blur-[28px] dark:border-white/[0.12] dark:bg-white/[0.07]">
+            <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-base bg-card text-sm font-semibold text-muted dark:border-white/[0.12] dark:bg-white/[0.07] sm:min-h-[360px]">
               Loading selected financial year dashboard...
             </div>
           ) : (
-            <div className="space-y-4">
-              <div className="grid gap-3.5 lg:grid-cols-2">
+            <div className="space-y-3 sm:space-y-4">
+              <div className="grid gap-2 sm:gap-3.5 lg:grid-cols-2">
                 <HeroCard
                   active={activeGroup === "pibo"}
                   group="pibo"
@@ -817,6 +980,7 @@ export default function FinancialYearInsightsModal({
 
               <AnimatePresence mode="wait">
                 <DetailPanel
+                  key={`${activeGroup}-${activeMetric}`}
                   activeGroup={activeGroup}
                   activeMetric={activeMetric}
                   group={currentGroup}

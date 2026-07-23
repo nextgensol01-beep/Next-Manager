@@ -93,10 +93,13 @@ export interface InvoiceTrackingRecord {
   clientId: string;
   financialYear: string;
   invoiceType?: "sale" | "purchase";
-  receivedVia?: "hardcopy" | "mail" | "whatsapp";
+  status?: "Pending" | "Received" | "Partial / Issue" | "Nil / No Invoice";
+  receivedVia?: "hardcopy" | "mail" | "whatsapp" | "excel" | "other";
+  remarks?: string;
   fromDate: string;
   toDate: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface UploadRecord {
@@ -353,9 +356,9 @@ export const activityIcon = (type: string) => {
 
 export const activityColors: Record<string, string> = {
   teal: "bg-teal-100 text-teal-700 dark:bg-teal-900/35 dark:text-teal-300",
-  blue: "bg-blue-100 text-blue-700 dark:bg-blue-900/35 dark:text-blue-300",
+  blue: "bg-blue-100 text-blue-700 dark:bg-neutral-800 dark:text-neutral-200",
   amber: "bg-amber-100 text-amber-700 dark:bg-amber-900/35 dark:text-amber-300",
-  brand: "bg-brand-100 text-brand-700 dark:bg-brand-900/35 dark:text-brand-300",
+  brand: "bg-brand-100 text-brand-700 dark:bg-neutral-800 dark:text-neutral-200",
   emerald: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/35 dark:text-emerald-300",
   violet: "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400",
   rose: "bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-300",
@@ -896,9 +899,9 @@ export function PersonEntryCard({
       className="rounded-2xl"
       style={{
         backgroundColor: "var(--color-card)",
-        border: `1px solid ${entry.isPrimaryContact ? "rgba(0,113,227,0.25)" : "var(--color-border)"}`,
+        border: `1px solid ${entry.isPrimaryContact ? "rgba(120,120,128,0.32)" : "var(--color-border)"}`,
         boxShadow: entry.isPrimaryContact
-          ? "0 0 0 2px rgba(0,113,227,0.08), 0 1px 4px rgba(0,0,0,0.06)"
+          ? "0 0 0 2px rgba(120,120,128,0.10), 0 1px 4px rgba(0,0,0,0.06)"
           : "0 1px 3px rgba(0,0,0,0.04)",
         transition: "box-shadow 0.2s ease, border-color 0.2s ease",
         overflow: "visible",
@@ -914,8 +917,8 @@ export function PersonEntryCard({
           <div
             className="w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-semibold flex-shrink-0"
             style={{
-              backgroundColor: entry.isPrimaryContact ? "rgba(0,113,227,0.12)" : "var(--color-surface)",
-              color: entry.isPrimaryContact ? "#0071e3" : "var(--color-text-faint)",
+              backgroundColor: entry.isPrimaryContact ? "rgba(120,120,128,0.14)" : "var(--color-surface)",
+              color: entry.isPrimaryContact ? "var(--color-text)" : "var(--color-text-faint)",
             }}
           >
             {entry.name ? entry.name.trim()[0].toUpperCase() : (index + 1)}
@@ -934,8 +937,8 @@ export function PersonEntryCard({
             <span
               className="text-[11px] font-medium px-2 py-0.5 rounded-full"
               style={{
-                backgroundColor: "rgba(0,113,227,0.10)",
-                color: "#0071e3",
+                backgroundColor: "rgba(120,120,128,0.14)",
+                color: "var(--color-text)",
               }}
             >
               Primary
@@ -961,8 +964,8 @@ export function PersonEntryCard({
               type="button"
               onClick={onSetPrimary}
               className="text-[12px] font-medium px-2.5 py-1 rounded-lg transition-all active:scale-95"
-              style={{ color: "#0071e3", backgroundColor: "transparent" }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = "rgba(0,113,227,0.07)")}
+              style={{ color: "var(--color-text)", backgroundColor: "transparent" }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = "rgba(120,120,128,0.10)")}
               onMouseLeave={e => (e.currentTarget.style.backgroundColor = "transparent")}
             >
               Set primary
@@ -974,8 +977,8 @@ export function PersonEntryCard({
               type="button"
               onClick={() => setIsExpanded(false)}
               className="text-[12px] font-medium px-2.5 py-1 rounded-lg transition-all active:scale-95 flex items-center gap-1"
-              style={{ color: "#0071e3", backgroundColor: "transparent" }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = "rgba(0,113,227,0.07)")}
+              style={{ color: "var(--color-text)", backgroundColor: "transparent" }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = "rgba(120,120,128,0.10)")}
               onMouseLeave={e => (e.currentTarget.style.backgroundColor = "transparent")}
             >
               Done
@@ -985,8 +988,8 @@ export function PersonEntryCard({
               type="button"
               onClick={() => setIsExpanded(true)}
               className="text-[12px] font-medium px-2.5 py-1 rounded-lg transition-all active:scale-95 flex items-center gap-1"
-              style={{ color: "#0071e3", backgroundColor: "transparent" }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = "rgba(0,113,227,0.07)")}
+              style={{ color: "var(--color-text)", backgroundColor: "transparent" }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = "rgba(120,120,128,0.10)")}
               onMouseLeave={e => (e.currentTarget.style.backgroundColor = "transparent")}
             >
               <Pencil className="w-3 h-3" />
@@ -1076,7 +1079,7 @@ export function PersonEntryCard({
               type="button"
               onClick={() => onChange({ ...entry, phoneNumbers: [...entry.phoneNumbers, ""] })}
               className="text-[12px] font-medium flex items-center gap-0.5 transition-colors"
-              style={{ color: "#0071e3" }}
+              style={{ color: "var(--color-text)" }}
             >
               <Plus className="w-3 h-3" /> Add
             </button>
@@ -1134,7 +1137,7 @@ export function PersonEntryCard({
               type="button"
               onClick={() => onChange({ ...entry, emails: [...entry.emails, ""] })}
               className="text-[12px] font-medium flex items-center gap-0.5 transition-colors"
-              style={{ color: "#0071e3" }}
+              style={{ color: "var(--color-text)" }}
             >
               <Plus className="w-3 h-3" /> Add
             </button>

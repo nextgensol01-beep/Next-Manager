@@ -1,8 +1,10 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { formatCurrency, formatDate, PAYMENT_MODES } from "@/lib/utils";
-import { CategoryBadge } from "@/components/ui/CategoryBadge";
+import { useMotionValue, useScroll, useSpring } from "framer-motion";
+import { FINANCIAL_YEARS, formatCurrency, formatDate, PAYMENT_MODES } from "@/lib/utils";
+import { buildInvoiceCoverageSummary } from "@/lib/invoiceCoverage";
+import { findCpcbRegistrationDate, isDateInFinancialYear } from "@/lib/currentFyRegistration";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
@@ -15,37 +17,74 @@ import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearState } from "@/app/providers";
 import ClientProfileActivityTimeline from "./ClientProfileActivityTimeline";
 import ClientProfileBillingPayments from "./ClientProfileBillingPayments";
-import ClientProfileCpcbRecords from "./ClientProfileCpcbRecords";
 import ClientProfileFinancialSummary from "./ClientProfileFinancialSummary";
 import ClientProfileModals from "./ClientProfileModals";
 import {
-  ArrowLeft, Building2, Phone, Mail, MapPin, Plus, ExternalLink,
-  Trash2, User, Shield, FileText, Hash, Lock, Smartphone,
-  Target, Wallet, Zap,
-  Receipt, MailCheck, Activity, Pencil, Calendar
+  ClientProfileHeader,
+  CompanyOverview,
+  DocumentsSection,
+  EmptyProfileState,
+  FloatingActionBar,
+  HealthDashboard,
+  NotesSection,
+  QuickActions,
+  type ClientProfileCustomField,
+  type ClientProfileMetric,
+  type ClientProfileQuickAction,
+} from "./ClientProfilePremiumSections";
+import {
+  AnnualReturnTracker,
+  AnnualReturnProgressPanel,
+  BillingWorkflowPanel,
+  ClientAlerts,
+  ClientProfileSecondaryWorkspace,
+  ClientPrimaryTabs,
+  ComplianceStatusPanel,
+  ComplianceWorkspace,
+  CpcbUploadSummary,
+  DOCUMENTS_NAV,
+  FINANCIAL_NAV,
+  INVOICE_RECEIVED_VIA_OPTIONS,
+  INVOICE_STATUS_OPTIONS,
+  InvoiceMonthSelector,
+  InvoiceTrackingWorkspace,
+  NOTES_TASKS_NAV,
+  RegistrationDetails,
+  TIMELINE_NAV,
+  selectedMonthsToInvoiceRanges,
+  type AnnualReturnRecord,
+  type AnnualReturnProgressStep,
+  type ClientProfileAlert,
+  type ClientProfileTabId,
+  type ComplianceSectionId,
+  type DocumentsSectionId,
+  type FinancialSectionId,
+  type InvoiceMonthStatus,
+  type InvoiceReceivedVia,
+  type NotesTasksSectionId,
+  type QuotationSummary,
+  type RegistrationSignal,
+  type TimelineSectionId,
+} from "./ClientProfileWorkspaceSections";
+import {
+  AlertCircle, BarChart2, Building2, Calendar, CheckCircle2, ClipboardCheck, FileText, FileUp,
+  Hash, Mail, MapPin, Phone, Receipt, Send,
+  Shield, Target, Upload, User, Wallet, Zap
 } from "lucide-react";
 import {
-  ACTIVITY_FILTERS,
   ACTIVITY_PAGE_SIZE,
   ACTIVITY_RANGES,
   ACTIVITY_SCROLL_THRESHOLD,
-  activityColors,
-  activityIcon,
   buildEntryValueMap,
   buildFyEntries,
   buildLinkedContactEmailOptions,
   CAT_IDS,
   CATS,
-  CollapsibleSectionHeader,
-  CopyButton,
   createEmptyFyEntries,
   CREDIT_TYPES,
-  FilterRail,
-  formatDateTime,
   getContactEmails,
   getContactPhones,
   getLatestTimestamp,
-  InfoRow,
   normalizeEmailList,
   normalizePhoneList,
   restoreSuggestion,
@@ -72,14 +111,11 @@ const INVOICE_TYPE_OPTIONS = [
   { id: "purchase", label: "Purchase Invoice" },
 ] as const;
 
-const RECEIVED_VIA_OPTIONS = [
-  { id: "hardcopy", label: "Hardcopy" },
-  { id: "mail", label: "Mail" },
-  { id: "whatsapp", label: "WhatsApp" },
-] as const;
+const RECEIVED_VIA_OPTIONS = INVOICE_RECEIVED_VIA_OPTIONS;
 
 type InvoiceType = (typeof INVOICE_TYPE_OPTIONS)[number]["id"];
-type ReceivedVia = (typeof RECEIVED_VIA_OPTIONS)[number]["id"];
+type ReceivedVia = InvoiceReceivedVia;
+type InvoiceStatus = InvoiceMonthStatus;
 
 const CUSTOM_FIELD_ICON_COMPONENTS = {
   fileText: FileText,
@@ -96,7 +132,18 @@ const CUSTOM_FIELD_ICON_COMPONENTS = {
 export default function ClientProfilePage() {
   const { clientId } = useParams<{ clientId: string }>();
   const router = useRouter();
-  const pageHeaderRef = useRef<HTMLDivElement | null>(null);
+  const profileScrollY = useMotionValue(0);
+  const { scrollY: viewportScrollY } = useScroll();
+  const headerProgressTarget = useMotionValue(0);
+  const headerProgress = useSpring(headerProgressTarget, {
+    stiffness: 360,
+    damping: 42,
+    mass: 0.8,
+    restDelta: 0.001,
+    restSpeed: 0.001,
+  });
+  const dashboardScrollRef = useRef<HTMLElement | null>(null);
+  const headerCollapsedRef = useRef(false);
 
   const [client, setClient] = useState<Client | null>(null);
   const [fyRecords, setFyRecords] = useState<FYRecord[]>([]);
@@ -105,6 +152,8 @@ export default function ClientProfilePage() {
   const { items: allInvoices, setAll: setAllInvoices, addItem: addInvoiceItem } = usePendingList<InvoiceTrackingRecord>();
   const { items: allUploadRecords, setAll: setAllUploadRecords, addItem: addUploadItem } = usePendingList<UploadRecord>();
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [annualReturns, setAnnualReturns] = useState<AnnualReturnRecord[]>([]);
+  const [linkedQuotations, setLinkedQuotations] = useState<QuotationSummary[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [activitiesTotal, setActivitiesTotal] = useState(0);
   const [activityHasMore, setActivityHasMore] = useState(false);
@@ -121,12 +170,17 @@ export default function ClientProfilePage() {
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const clientRef = useRef<Client | null>(null);
   const activityRequestIdRef = useRef(0);
-  const activityTabListRef = useRef<HTMLDivElement | null>(null);
   const activityTimelineListRef = useRef<HTMLDivElement | null>(null);
 
   // UI state
+  const [activePrimaryTab, setActivePrimaryTab] = useState<ClientProfileTabId>("overview");
+  const [activeComplianceSection, setActiveComplianceSection] = useState<ComplianceSectionId>("annualReturn");
+  const [activeFinancialSection, setActiveFinancialSection] = useState<FinancialSectionId>("quotations");
+  const [activeDocumentsSection, setActiveDocumentsSection] = useState<DocumentsSectionId>("all");
+  const [activeTimelineSection, setActiveTimelineSection] = useState<TimelineSectionId>("all");
+  const [activeNotesSection, setActiveNotesSection] = useState<NotesTasksSectionId>("notes");
+  const [secondaryNavCollapsed, setSecondaryNavCollapsed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [activeTab, setActiveTab] = useState<"info" | "portal" | "activity">("info");
   const [docModal, setDocModal] = useState(false);
   const [docForm, setDocForm] = useState({ documentName: "", driveLink: "" });
   const [docModalMode, setDocModalMode] = useState<"create" | "edit">("create");
@@ -135,15 +189,17 @@ export default function ClientProfilePage() {
   const [invoiceForm, setInvoiceForm] = useState<{
     financialYear: string;
     invoiceType: InvoiceType | "";
+    status: InvoiceStatus;
     receivedVia: ReceivedVia | "";
-    fromDate: string;
-    toDate: string;
+    selectedMonths: string[];
+    remarks: string;
   }>({
     financialYear: selectedFy,
     invoiceType: "",
+    status: "Received",
     receivedVia: "",
-    fromDate: "",
-    toDate: "",
+    selectedMonths: [],
+    remarks: "",
   });
   const [uploadModal, setUploadModal] = useState(false);
   const [uploadForm, setUploadForm] = useState({
@@ -193,7 +249,6 @@ export default function ClientProfilePage() {
   const [reminderSending, setReminderSending] = useState(false);
   const [inlineSaving, setInlineSaving] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [headerTitleProgress, setHeaderTitleProgress] = useState(0);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showAllCustomProfileInfo, setShowAllCustomProfileInfo] = useState(false);
   const { data: customFieldDefinitions } = useCache<ClientCustomFieldDefinition[]>("/api/client-custom-fields", { initialData: [] });
@@ -287,9 +342,10 @@ export default function ClientProfilePage() {
       fetchJson<Payment[]>(`/api/payments?clientId=${clientId}`, "payments"),
       fetchJson<InvoiceTrackingRecord[]>(`/api/invoices?clientId=${clientId}`, "invoice tracking"),
       fetchJson<UploadRecord[]>(`/api/upload-records?clientId=${clientId}`, "uploaded records"),
+      fetchJson<AnnualReturnRecord[]>(`/api/annual-return?clientId=${clientId}`, "annual returns"),
     ]);
 
-    const [clientResult, fyResult, docsResult, billingResult, paymentsResult, invoicesResult, uploadsResult] = results;
+    const [clientResult, fyResult, docsResult, billingResult, paymentsResult, invoicesResult, uploadsResult, annualReturnResult] = results;
     const failedSections: string[] = [];
 
     if (clientResult.status === "fulfilled") {
@@ -334,6 +390,12 @@ export default function ClientProfilePage() {
       failedSections.push("uploaded records");
     }
 
+    if (annualReturnResult.status === "fulfilled") {
+      setAnnualReturns(Array.isArray(annualReturnResult.value) ? annualReturnResult.value : []);
+    } else {
+      failedSections.push("annual returns");
+    }
+
     if (clientResult.status === "rejected") {
       if (!clientRef.current) {
         setLoadError("Couldn't load this client profile right now. Please try again.");
@@ -348,6 +410,34 @@ export default function ClientProfilePage() {
   }, [clientId, fetchJson, readErrorMessage, setAllBillings, setAllInvoices, setAllPayments, setAllUploadRecords]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    if (!client) return;
+
+    let cancelled = false;
+    const params = new URLSearchParams({
+      financialYear: selectedFy,
+      clientId: client.clientId,
+    });
+
+    void fetch(`/api/quotations?${params.toString()}`)
+      .then((response) => response.ok ? response.json() : [])
+      .then((payload: QuotationSummary[]) => {
+        if (cancelled) return;
+        const records = Array.isArray(payload) ? payload : [];
+        setLinkedQuotations(records.filter((quotation) => (
+          quotation.clientId === client.clientId &&
+          quotation.financialYear === selectedFy
+        )));
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedQuotations([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [client, selectedFy]);
 
   const fetchActivitiesPage = useCallback(async ({
     offset,
@@ -440,12 +530,12 @@ export default function ClientProfilePage() {
   const payments = allPayments.filter((p) => p.financialYear === selectedFy);
   const invoices = allInvoices.filter((invoice) => invoice.financialYear === selectedFy);
   const uploadRecords = allUploadRecords.filter((record) => record.financialYear === selectedFy);
+  const acceptedQuotations = linkedQuotations.filter((quotation) => quotation.status === "Accepted" && quotation.financialYear === selectedFy);
+  const hasSentLinkedQuotation = linkedQuotations.some((quotation) => (
+    quotation.financialYear === selectedFy &&
+    (quotation.status === "Sent" || quotation.status === "Accepted")
+  ));
   const filteredActivities = activities;
-  const recentPayments = React.useMemo(() => {
-    const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
-    return payments.filter((payment) => new Date(payment.paymentDate).getTime() >= cutoff);
-  }, [payments]);
-  const recentPaymentsTotal = recentPayments.reduce((sum, payment) => sum + (Number(payment.amountPaid) || 0), 0);
   const lastEmailActivity = latestEmailActivity;
   const billingFormTotal =
     Number(billingForm.govtCharges || 0) +
@@ -458,7 +548,7 @@ export default function ClientProfilePage() {
   useEffect(() => {
     if (activityLoading || activityLoadingMore || !activityHasMore || filteredActivities.length === 0) return;
 
-    const lists = [activityTabListRef.current, activityTimelineListRef.current].filter(Boolean) as HTMLDivElement[];
+    const lists = [activityTimelineListRef.current].filter(Boolean) as HTMLDivElement[];
     const shouldPrefetch = lists.some((element) => element.scrollHeight <= element.clientHeight + 8);
 
     if (shouldPrefetch) {
@@ -467,20 +557,131 @@ export default function ClientProfilePage() {
   }, [activityHasMore, activityLoading, activityLoadingMore, filteredActivities.length, loadMoreActivities]);
 
   useEffect(() => {
-    if (!client) return;
-
     const scrollContainer = document.getElementById("dashboard-scroll-area");
-    const headerElement = pageHeaderRef.current;
-    if (!scrollContainer || !headerElement) return;
-
+    dashboardScrollRef.current = scrollContainer;
     let frameId = 0;
+
+    const readScroll = () => {
+      const useDashboardScroller = window.matchMedia("(min-width: 768px)").matches && scrollContainer;
+      profileScrollY.set(useDashboardScroller ? scrollContainer.scrollTop : window.scrollY);
+    };
+
+    const scheduleRead = () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(readScroll);
+    };
+
+    readScroll();
+    scrollContainer?.addEventListener("scroll", scheduleRead, { passive: true });
+    window.addEventListener("scroll", scheduleRead, { passive: true });
+    window.addEventListener("resize", scheduleRead);
+
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      scrollContainer?.removeEventListener("scroll", scheduleRead);
+      window.removeEventListener("scroll", scheduleRead);
+      window.removeEventListener("resize", scheduleRead);
+    };
+  }, [profileScrollY]);
+
+  useEffect(() => {
+    return viewportScrollY.on("change", (latest) => {
+      const useDashboardScroller = window.matchMedia("(min-width: 768px)").matches && dashboardScrollRef.current;
+      if (!useDashboardScroller) profileScrollY.set(latest);
+    });
+  }, [profileScrollY, viewportScrollY]);
+
+  useEffect(() => {
+    const scrollContainer = dashboardScrollRef.current;
+    let previousScrollTop = profileScrollY.get();
+    let compensationFrame = 0;
+    let isCompensating = false;
+    let collapseGestureLocked = false;
+    let collapseGestureTimer = 0;
+
+    const setCollapsed = (collapsed: boolean) => {
+      if (collapsed === headerCollapsedRef.current) return;
+      headerCollapsedRef.current = collapsed;
+      headerProgressTarget.set(collapsed ? 1 : 0);
+    };
+
+    const compensateFirstGesture = () => {
+      isCompensating = true;
+      cancelAnimationFrame(compensationFrame);
+      compensationFrame = requestAnimationFrame(() => {
+        if (window.matchMedia("(min-width: 768px)").matches && scrollContainer) {
+          scrollContainer.scrollTop = 0;
+        } else {
+          window.scrollTo({ top: 0, behavior: "auto" });
+        }
+        previousScrollTop = 0;
+        requestAnimationFrame(() => {
+          isCompensating = false;
+        });
+      });
+    };
+
+    const currentScrollTop = profileScrollY.get();
+    if (currentScrollTop >= 88) {
+      headerCollapsedRef.current = true;
+      headerProgressTarget.set(1);
+    }
+
+    const unsubscribe = profileScrollY.on("change", (scrollTop) => {
+      const delta = scrollTop - previousScrollTop;
+      previousScrollTop = scrollTop;
+
+      if (isCompensating) return;
+
+      if (!headerCollapsedRef.current && delta > 0 && scrollTop >= 24) {
+        setCollapsed(true);
+        compensateFirstGesture();
+      } else if (headerCollapsedRef.current && delta < 0 && scrollTop <= 36) {
+        setCollapsed(false);
+      }
+    });
+
+    const wheelTarget: HTMLElement | Window = window.matchMedia("(min-width: 768px)").matches && scrollContainer
+      ? scrollContainer
+      : window;
+    const handleWheel = (nativeEvent: Event) => {
+      const event = nativeEvent as WheelEvent;
+      if (collapseGestureLocked && event.deltaY > 0) {
+        event.preventDefault();
+        return;
+      }
+
+      if (event.deltaY > 0 && !headerCollapsedRef.current && profileScrollY.get() <= 36) {
+        event.preventDefault();
+        setCollapsed(true);
+        collapseGestureLocked = true;
+        window.clearTimeout(collapseGestureTimer);
+        collapseGestureTimer = window.setTimeout(() => {
+          collapseGestureLocked = false;
+        }, 460);
+        return;
+      }
+
+      if (event.deltaY < 0 && headerCollapsedRef.current && profileScrollY.get() <= 36 && !isCompensating) {
+        setCollapsed(false);
+      }
+    };
+
+    wheelTarget.addEventListener("wheel", handleWheel, { passive: false });
+
+    return () => {
+      unsubscribe();
+      cancelAnimationFrame(compensationFrame);
+      window.clearTimeout(collapseGestureTimer);
+      wheelTarget.removeEventListener("wheel", handleWheel);
+    };
+  }, [headerProgressTarget, profileScrollY]);
+
+  useEffect(() => {
+    if (!client) return;
 
     const publishContextTitle = (progress: number) => {
       const normalizedProgress = Math.max(0, Math.min(1, progress));
-      setHeaderTitleProgress((current) => (
-        Math.abs(current - normalizedProgress) < 0.01 ? current : normalizedProgress
-      ));
-
       window.dispatchEvent(new CustomEvent("dashboard:context-title", {
         detail: {
           title: client.companyName,
@@ -490,32 +691,14 @@ export default function ClientProfilePage() {
       }));
     };
 
-    const updateContextTitle = () => {
-      const headerRect = headerElement.getBoundingClientRect();
-      const revealStart = 124;
-      const revealEnd = 68;
-      const nextProgress = (revealStart - headerRect.bottom) / (revealStart - revealEnd);
-      publishContextTitle(nextProgress);
-    };
-
-    const handleScroll = () => {
-      if (frameId) cancelAnimationFrame(frameId);
-      frameId = requestAnimationFrame(updateContextTitle);
-    };
-
-    updateContextTitle();
-    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("resize", handleScroll);
+    publishContextTitle(headerProgress.get());
+    const unsubscribe = headerProgress.on("change", publishContextTitle);
 
     return () => {
-      if (frameId) cancelAnimationFrame(frameId);
-      scrollContainer.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("resize", handleScroll);
+      unsubscribe();
       window.dispatchEvent(new CustomEvent("dashboard:context-title", { detail: null }));
     };
-  }, [client]);
+  }, [client, headerProgress]);
 
   const closeDocumentModal = () => {
     setDocModal(false);
@@ -600,9 +783,10 @@ export default function ClientProfilePage() {
     setInvoiceForm({
       financialYear: selectedFy,
       invoiceType: "",
+      status: "Received",
       receivedVia: "",
-      fromDate: "",
-      toDate: "",
+      selectedMonths: [],
+      remarks: "",
     });
   };
 
@@ -610,54 +794,77 @@ export default function ClientProfilePage() {
     setInvoiceForm({
       financialYear: selectedFy,
       invoiceType: "",
+      status: "Received",
       receivedVia: "",
-      fromDate: "",
-      toDate: "",
+      selectedMonths: [],
+      remarks: "",
     });
     setInvoiceModal(true);
   };
 
   const saveInvoiceTracking = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!invoiceForm.invoiceType || !invoiceForm.receivedVia) {
-      toast.error("Please select invoice type and source.");
+    if (!invoiceForm.invoiceType) {
+      toast.error("Please select invoice type.");
+      return;
+    }
+    if (invoiceForm.selectedMonths.length === 0) {
+      toast.error("Select at least one month.");
+      return;
+    }
+    const sourceRequired = invoiceForm.status === "Received" || invoiceForm.status === "Partial / Issue";
+    if (sourceRequired && !invoiceForm.receivedVia) {
+      toast.error("Please select how the invoice data was received.");
       return;
     }
 
+    const monthRanges = selectedMonthsToInvoiceRanges(invoiceForm.financialYear, invoiceForm.selectedMonths);
+    if (monthRanges.length === 0) {
+      toast.error("Selected months are not valid for this FY.");
+      return;
+    }
+
+    const invoiceType: "sale" | "purchase" = invoiceForm.invoiceType;
     setInlineSaving(true);
-    const payload: Omit<InvoiceTrackingRecord, "_id" | "createdAt"> = {
+    const payloads: Array<Omit<InvoiceTrackingRecord, "_id" | "createdAt">> = monthRanges.map((range) => ({
       clientId,
       financialYear: invoiceForm.financialYear,
-      invoiceType: invoiceForm.invoiceType,
-      receivedVia: invoiceForm.receivedVia,
-      fromDate: invoiceForm.fromDate,
-      toDate: invoiceForm.toDate,
-    };
+      invoiceType,
+      status: invoiceForm.status,
+      receivedVia: invoiceForm.receivedVia || undefined,
+      remarks: invoiceForm.remarks.trim(),
+      fromDate: range.fromDate,
+      toDate: range.toDate,
+    }));
 
-    const { commit, rollback } = addInvoiceItem({ ...payload, _id: "", createdAt: new Date().toISOString() });
+    const optimisticOps = payloads.map((payload) =>
+      addInvoiceItem({ ...payload, _id: "", createdAt: new Date().toISOString() })
+    );
     closeInvoiceModal();
-    setSelectedFy(payload.financialYear);
+    setSelectedFy(invoiceForm.financialYear);
 
     try {
-      const response = await fetch("/api/invoices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const responses = await Promise.all(payloads.map((payload) => (
+        fetch("/api/invoices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+      )));
 
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        rollback();
-        toast.error(data?.error || "Failed to add invoice tracking.");
+      const failed = responses.find((response) => !response.ok);
+      if (failed) {
+        optimisticOps.forEach((ops) => ops.rollback());
+        toast.error(await readErrorMessage(failed, "Failed to save invoice month status."));
         return;
       }
 
-      const saved = await response.json();
-      commit(saved);
+      const savedRecords = await Promise.all(responses.map((response) => response.json() as Promise<InvoiceTrackingRecord>));
+      savedRecords.forEach((saved, index) => optimisticOps[index]?.commit(saved));
       invalidate("/api/invoices");
-      toast.success("Invoice tracking added!");
+      toast.success(`${savedRecords.length} month${savedRecords.length === 1 ? "" : "s"} updated.`);
     } catch {
-      rollback();
+      optimisticOps.forEach((ops) => ops.rollback());
       toast.error("Something went wrong saving invoice.");
     } finally {
       setInlineSaving(false);
@@ -748,6 +955,20 @@ export default function ClientProfilePage() {
   };
 
   const openBillingModalForRecord = (record?: Billing | null) => {
+    if (!record && client && (client.category === "Importer" || client.category === "Brand Owner")) {
+      setActivePrimaryTab("financial");
+      if (acceptedQuotations.length === 0) {
+        toast.error("Accept a quotation before generating a bill for this client type.");
+        return;
+      }
+      if (acceptedQuotations.length === 1) {
+        void openBillingFromQuotation(acceptedQuotations[0]);
+        return;
+      }
+      toast("Use an accepted quotation to generate this bill.");
+      return;
+    }
+
     if (record) {
       setEditingBillingId(record._id);
       setBillingForm({
@@ -770,6 +991,66 @@ export default function ClientProfilePage() {
       });
     }
     setBillingModal(true);
+  };
+
+  const openBillingFromQuotation = async (quotation: QuotationSummary) => {
+    if (client?.category === "PWP") {
+      toast.error("PWP clients use direct annual return billing only.");
+      return;
+    }
+    if (!client || quotation.clientId !== client.clientId || quotation.status !== "Accepted") {
+      toast.error("Only accepted quotations linked to this client profile can generate a bill.");
+      return;
+    }
+
+    setInlineSaving(true);
+    try {
+      const response = await fetch(`/api/quotations/${quotation._id}`);
+      if (!response.ok) {
+        toast.error(await readErrorMessage(response, "Unable to load quotation details."));
+        return;
+      }
+
+      const details = await response.json() as {
+        quotationNumber?: string;
+        clientId?: string;
+        financialYear?: string;
+        status?: string;
+        revisions?: Array<{
+          revisionNumber?: number;
+          itemsSubtotal?: number;
+          itemsGst?: number;
+          consultationCharges?: number;
+          consultationGstAmount?: number;
+          governmentFees?: number;
+          grandTotal?: number;
+        }>;
+      };
+      if (details.clientId !== client.clientId || details.status !== "Accepted") {
+        toast.error("This quotation is not an accepted linked quotation for this client.");
+        return;
+      }
+      const latestRevision = [...(details.revisions || [])]
+        .sort((a, b) => Number(b.revisionNumber || 0) - Number(a.revisionNumber || 0))[0];
+
+      if (!latestRevision) {
+        toast.error("This quotation has no revision totals to copy.");
+        return;
+      }
+
+      setEditingBillingId(null);
+      setBillingForm({
+        financialYear: details.financialYear || quotation.financialYear || selectedFy,
+        govtCharges: String(Number(latestRevision.governmentFees || 0)),
+        consultancyCharges: String(Number(latestRevision.consultationCharges || 0) + Number(latestRevision.consultationGstAmount || 0)),
+        targetCharges: String(Number(latestRevision.itemsSubtotal || 0) + Number(latestRevision.itemsGst || 0)),
+        otherCharges: "0",
+        notes: `Generated from accepted quotation ${details.quotationNumber || quotation.quotationNumber || quotation._id}. Final quotation amount: ${formatCurrency(Number(latestRevision.grandTotal || quotation.grandTotal || 0))}.`,
+      });
+      setBillingModal(true);
+    } finally {
+      setInlineSaving(false);
+    }
   };
 
   const saveBilling = async (e: React.FormEvent) => {
@@ -1055,6 +1336,46 @@ export default function ClientProfilePage() {
     }
   };
 
+  const saveAnnualReturnStatus = async (
+    status: AnnualReturnRecord["status"],
+    patch: Partial<AnnualReturnRecord> = {},
+  ) => {
+    setInlineSaving(true);
+    try {
+      const payload = {
+        clientId,
+        financialYear: selectedFy,
+        status,
+        remarks: patch.remarks || "",
+        filingDate: patch.filingDate || null,
+        acknowledgeNumber: patch.acknowledgeNumber || "",
+      };
+
+      const response = await fetch("/api/annual-return", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        toast.error(await readErrorMessage(response, "Failed to save annual return status."));
+        return;
+      }
+
+      const saved = await response.json() as AnnualReturnRecord;
+      setAnnualReturns((current) => {
+        const exists = current.some((record) => record.financialYear === saved.financialYear);
+        return exists
+          ? current.map((record) => record.financialYear === saved.financialYear ? saved : record)
+          : [...current, saved];
+      });
+      invalidate("/api/annual-return", "/api/dashboard", "/api/activities");
+      toast.success(`Annual return marked as ${status === "Pending" ? "Not Started" : status}.`);
+    } finally {
+      setInlineSaving(false);
+    }
+  };
+
   const closeReminderModal = () => {
     setReminderModal(false);
     setActiveReminderBillingId(null);
@@ -1288,9 +1609,19 @@ export default function ClientProfilePage() {
     }
   };
 
-
-
-  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><LoadingSpinner /></div>;
+  if (loading) return (
+    <div className="client-profile-page">
+      <div className="client-profile-shell">
+        <div className="client-profile-loading-state" role="status" aria-live="polite">
+          <LoadingSpinner />
+          <div>
+            <p>Loading client workspace</p>
+            <span>Preparing profile, compliance, financial, and activity records.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
   if (loadError && !client) return (
     <div className="text-center py-20 max-w-md mx-auto">
       <p className="text-default font-semibold mb-2">Unable to load client profile</p>
@@ -1326,98 +1657,6 @@ export default function ClientProfilePage() {
 
   const latestPayment = payments[0] || null;
   const hasLinkedContacts = (client.contacts?.length ?? 0) > 0;
-  const emptyStateActions = [
-    !isSIMP && !fyData
-      ? {
-          label: isPWP ? "Add Credit Data" : "Add FY Data",
-          onClick: () => openFYModal(),
-          tone: "secondary" as const,
-        }
-      : null,
-    !billing
-      ? {
-          label: "Create Billing",
-          onClick: () => openBillingModalForRecord(),
-          tone: "primary" as const,
-        }
-      : null,
-    billing && billing.pendingAmount > 0
-      ? {
-          label: "Send Reminder",
-          onClick: () => openReminderModal(),
-          tone: "secondary" as const,
-        }
-      : null,
-    {
-      label: "Add Document",
-      onClick: openCreateDocument,
-      tone: "secondary" as const,
-    },
-    {
-      label: "Add Invoice Tracking",
-      onClick: openInvoiceModal,
-      tone: "secondary" as const,
-    },
-    {
-      label: "Add Upload Record",
-      onClick: openUploadModal,
-      tone: "secondary" as const,
-    },
-    !hasLinkedContacts
-      ? {
-          label: "Link Contact",
-          onClick: openBasicEdit,
-          tone: "secondary" as const,
-        }
-      : null,
-  ].filter(Boolean) as Array<{ label: string; onClick: () => void; tone: "primary" | "secondary" }>;
-  const topStats = [
-    {
-      label: "Current FY Billing",
-      value: formatCurrency(billing?.totalAmount || 0),
-      sub: billing ? `FY ${selectedFy}` : `No billing for FY ${selectedFy}`,
-      accent: "text-default",
-      actionLabel: billing ? "Edit billing" : "Create billing",
-      onClick: () => openBillingModalForRecord(billing),
-      icon: <Receipt className="w-4 h-4" />,
-    },
-    {
-      label: "Paid",
-      value: formatCurrency(billing?.totalPaid || 0),
-      sub: payments.length > 0 ? `${payments.length} payment${payments.length === 1 ? "" : "s"} in FY ${selectedFy}` : `No payments in FY ${selectedFy}`,
-      accent: "text-emerald-600 dark:text-emerald-400",
-      actionLabel: latestPayment ? "Open latest payment" : "Record payment",
-      onClick: () => latestPayment ? openPaymentModalForRecord(latestPayment) : openPaymentModalForRecord(),
-      icon: <Wallet className="w-4 h-4" />,
-    },
-    {
-      label: "Pending",
-      value: formatCurrency(billing?.pendingAmount || 0),
-      sub: billing ? `${billing.paymentStatus} status` : "Waiting for first billing",
-      accent: billing && billing.pendingAmount > 0 ? "text-red-500" : "text-default",
-      actionLabel: billing ? "Open billing" : "Create billing",
-      onClick: () => openBillingModalForRecord(billing),
-      icon: <Target className="w-4 h-4" />,
-    },
-    {
-      label: "Recent Payments",
-      value: recentPayments.length.toLocaleString("en-IN"),
-      sub: recentPayments.length > 0 ? `${formatCurrency(recentPaymentsTotal)} in last 30 days` : "No recent payments in selected FY",
-      accent: "text-default",
-      actionLabel: latestPayment ? "Open latest payment" : "Add payment",
-      onClick: () => latestPayment ? openPaymentModalForRecord(latestPayment) : openPaymentModalForRecord(),
-      icon: <Activity className="w-4 h-4" />,
-    },
-    {
-      label: "Last Email Activity",
-      value: lastEmailActivity ? formatDate(lastEmailActivity.date) : "No emails yet",
-      sub: lastEmailActivity ? lastEmailActivity.label : "Open email history to review drafts and reminders",
-      accent: "text-default",
-      actionLabel: "Open email history",
-      onClick: () => router.push(`/dashboard/email-history?clientId=${encodeURIComponent(clientId)}`),
-      icon: <MailCheck className="w-4 h-4" />,
-    },
-  ];
   const getActivityActionLabel = (activity: ActivityItem) => {
     if (activity.entityType === "billing") return "Open Billing";
     if (activity.entityType === "payment") return "Open Payment";
@@ -1437,7 +1676,7 @@ export default function ClientProfilePage() {
     if (activity.financialYear === selectedFy) {
       return {
         label: `FY ${selectedFy}`,
-        className: "bg-brand-100 text-brand-700 dark:bg-brand-900/35 dark:text-brand-300",
+        className: "bg-brand-100 text-brand-700 dark:bg-neutral-800 dark:text-neutral-200",
       };
     }
 
@@ -1446,39 +1685,6 @@ export default function ClientProfilePage() {
       className: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
     };
   };
-
-  const TabBtn = ({ id, label, icon }: { id: "info" | "portal" | "activity"; label: string; icon: React.ReactNode }) => (
-    <button onClick={() => setActiveTab(id)}
-      className={`flex-1 py-3 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 ${activeTab === id ? "bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400 border-b-2 border-brand-600" : "text-faint hover:text-muted"}`}>
-      {icon}{label}
-    </button>
-  );
-
-  const ActivityFilterChips = ({ compact = false }: { compact?: boolean }) => (
-    <div className={compact ? "mb-3" : "mb-4"}>
-      <FilterRail
-        label="Type"
-        value={activityFilter}
-        options={ACTIVITY_FILTERS}
-        onChange={setActivityFilter}
-        tone="brand"
-        dense={compact}
-      />
-    </div>
-  );
-
-  const ActivityRangeChips = ({ compact = false }: { compact?: boolean }) => (
-    <div className={compact ? "mb-3" : "mb-4"}>
-      <FilterRail
-        label="Window"
-        value={activityRange}
-        options={ACTIVITY_RANGES}
-        onChange={setActivityRange}
-        tone="neutral"
-        dense={compact}
-      />
-    </div>
-  );
 
   // Build breakdown rows from fyData
   const makeBreakdownRows = (rec: FYRecord) => {
@@ -1552,7 +1758,6 @@ export default function ClientProfilePage() {
     })
     .sort((left, right) => (left.order || 0) - (right.order || 0) || left.label.localeCompare(right.label));
   const displayedCustomFields = showAllCustomProfileInfo ? visibleCustomFields : visibleCustomFields.slice(0, 3);
-  const hasHiddenCustomProfileInfo = visibleCustomFields.length > displayedCustomFields.length;
   const displayCustomFieldValue = (field: ClientCustomFieldDefinition) => {
     const value = client.customFields?.[field.key];
     if (field.type === "checkbox") return value ? "Yes" : "No";
@@ -1562,537 +1767,897 @@ export default function ClientProfilePage() {
     const Icon = CUSTOM_FIELD_ICON_COMPONENTS[field.icon || "fileText"] || FileText;
     return <Icon className="w-4 h-4" />;
   };
-  const renderCustomProfileFields = (position: ClientCustomFieldDefinition["profilePosition"] = "beforeContact") => (
-    displayedCustomFields
-      .filter((field) => (field.profilePosition || "beforeContact") === position)
-      .map((field) => (
-        <InfoRow
-          key={field.key}
-          icon={renderCustomFieldIcon(field)}
-          label={field.label}
-          value={displayCustomFieldValue(field)}
-          mono={field.type === "number"}
-        />
-      ))
+  const rawLegalName = client.legalName || String(client.customFields?.legalName || "");
+  const legalName = isPWP ? "" : rawLegalName;
+  const registrationDateMatch = findCpcbRegistrationDate(client, customFieldDefinitions);
+  const registrationSignal: RegistrationSignal = registrationDateMatch
+    ? {
+        key: registrationDateMatch.key,
+        label: customFieldDefinitions.find((field) => field.key === registrationDateMatch.key)?.label || "CPCB Registration Date",
+        value: registrationDateMatch.value,
+        date: registrationDateMatch.date,
+      }
+    : null;
+  const registeredThisFy = registrationSignal ? isDateInFinancialYear(registrationSignal.date, selectedFy) : false;
+  const annualReturn = annualReturns.find((record) => record.financialYear === selectedFy) || null;
+  const annualReturnStatus = annualReturn?.status === "Pending" || !annualReturn?.status
+    ? "Not Started"
+    : annualReturn.status;
+  const invoiceCoverage = buildInvoiceCoverageSummary(invoices, selectedFy);
+  const invoiceReceivedMonths = invoiceCoverage.sale.doneCount + invoiceCoverage.purchase.doneCount;
+  const invoicePendingMonths = (12 - invoiceCoverage.sale.doneCount) + (12 - invoiceCoverage.purchase.doneCount);
+  const cpcbUploadedTotal = uploadRecords.reduce((sum, record) => (
+    sum +
+    (Number(record.cat1) || 0) +
+    (Number(record.cat2) || 0) +
+    (Number(record.cat3) || 0) +
+    (Number(record.cat4) || 0)
+  ), 0);
+  const cpcbUploadedCategoryTotals = [
+    { label: "CAT-I", value: uploadRecords.reduce((sum, record) => sum + (Number(record.cat1) || 0), 0) },
+    { label: "CAT-II", value: uploadRecords.reduce((sum, record) => sum + (Number(record.cat2) || 0), 0) },
+    { label: "CAT-III", value: uploadRecords.reduce((sum, record) => sum + (Number(record.cat3) || 0), 0) },
+    { label: "CAT-IV", value: uploadRecords.reduce((sum, record) => sum + (Number(record.cat4) || 0), 0) },
+  ];
+  const cpcbUploadedInvoiceCount = uploadRecords.reduce((sum, record) => sum + (Number(record.invoiceCount) || 0), 0);
+  const requiresAcceptedQuotation = client.category === "Importer" || client.category === "Brand Owner";
+  const quotationAccepted = acceptedQuotations.length > 0;
+  const invoiceCoverageProgress = Math.min(1, invoiceReceivedMonths / 24);
+  const hasCpcbUploadRecords = uploadRecords.length > 0;
+  const cpcbUploadProgress = !hasCpcbUploadRecords
+    ? 0
+    : invoicePendingMonths === 0
+      ? 1
+      : uploadRecords.length > 1
+        ? 0.6
+        : 0.3;
+  const cpcbUploadStatus = cpcbUploadProgress >= 1
+    ? "Completed"
+    : cpcbUploadProgress >= 0.6
+      ? "In Progress"
+      : cpcbUploadProgress > 0
+        ? "Started"
+        : "Not Started";
+  const annualReturnComplete = annualReturnStatus === "Filed" || annualReturnStatus === "Verified" || annualReturnStatus === "Not Required This FY";
+  const annualReturnProgressSteps: AnnualReturnProgressStep[] = [
+    requiresAcceptedQuotation ? {
+      id: "quotation",
+      label: "Quotation",
+      detail: quotationAccepted
+        ? `${acceptedQuotations.length} accepted linked quotation${acceptedQuotations.length === 1 ? "" : "s"}`
+        : hasSentLinkedQuotation
+          ? "Linked quotation sent, awaiting acceptance"
+          : "No accepted linked quotation for this FY",
+      progress: quotationAccepted ? 1 : hasSentLinkedQuotation ? 0.5 : 0,
+    } : (!isPWP && linkedQuotations.length > 0 ? {
+      id: "quotation",
+      label: "Quotation",
+      detail: quotationAccepted ? "Accepted linked quotation available" : "Quotation is optional for this client type",
+      progress: quotationAccepted ? 1 : hasSentLinkedQuotation ? 0.5 : 0.25,
+    } : null),
+    {
+      id: "invoice-coverage",
+      label: "Invoice Coverage",
+      detail: `${invoiceReceivedMonths}/24 sale/purchase months complete`,
+      progress: invoiceCoverageProgress,
+    },
+    {
+      id: "cpcb-upload",
+      label: "CPCB Upload",
+      detail: `${cpcbUploadStatus} - ${cpcbUploadedTotal.toLocaleString("en-IN")} MT uploaded`,
+      progress: cpcbUploadProgress,
+    },
+    {
+      id: "billing",
+      label: "Bill Created",
+      detail: billing ? `${billing.paymentStatus} - ${formatCurrency(billing.totalAmount)}` : `No bill for FY ${selectedFy}`,
+      progress: billing ? 1 : 0,
+    },
+    {
+      id: "annual-return",
+      label: "Annual Return Filed",
+      detail: annualReturnComplete ? annualReturnStatus : `Current status: ${annualReturnStatus}`,
+      progress: annualReturnComplete ? 1 : annualReturnStatus === "In Progress" ? 0.5 : 0,
+    },
+  ].filter(Boolean) as AnnualReturnProgressStep[];
+  const annualReturnProgress = annualReturnProgressSteps.length > 0
+    ? annualReturnProgressSteps.reduce((sum, step) => sum + Math.max(0, Math.min(1, step.progress)), 0) / annualReturnProgressSteps.length
+    : 0;
+
+  const customProfileFields: ClientProfileCustomField[] = displayedCustomFields.map((field) => ({
+    id: field.key,
+    label: field.label,
+    value: displayCustomFieldValue(field),
+    icon: renderCustomFieldIcon(field),
+    mono: field.type === "number",
+    position: (field.profilePosition || "beforeContact") as ClientProfileCustomField["position"],
+  }));
+
+  const validityField = visibleCustomFields.find((field) =>
+    /valid|validity|expiry|expire/i.test(`${field.key} ${field.label}`)
   );
-  const legalName = client.legalName || String(client.customFields?.legalName || "");
+  const registrationStatus = isPWP ? "PWP" : client.registrationNumber ? "Registered" : "Registration not recorded";
+  const validityLabel = validityField ? displayCustomFieldValue(validityField) : "not recorded";
+  const billingStatus = billing?.paymentStatus || "No billing";
 
-  const pageTitleStyle = {
-    transform: `translateY(${-6 * headerTitleProgress}px) scale(${1 - (0.08 * headerTitleProgress)})`,
-    opacity: 1 - (0.45 * headerTitleProgress),
-    filter: `blur(${headerTitleProgress * 2}px)`,
-  } as const;
+  const contactClient = () => {
+    if (contactEmail !== "-") {
+      window.location.href = `mailto:${contactEmail}`;
+      return;
+    }
+    if (contactMobile !== "-") {
+      window.location.href = `tel:${contactMobile}`;
+      return;
+    }
+    openBasicEdit();
+  };
 
-  return (
-    <div>
-      {loadWarning && (
-        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
-          {loadWarning}
+  const quickActions: ClientProfileQuickAction[] = [
+    {
+      label: billing
+        ? "Edit Billing"
+        : isPWP
+          ? "Annual Return Bill"
+          : (client.category === "Importer" || client.category === "Brand Owner")
+            ? "Quotation Bill"
+            : "Add Billing",
+      description: `FY ${selectedFy}`,
+      icon: <Receipt className="w-4 h-4" />,
+      onClick: () => openBillingModalForRecord(billing),
+      tone: billing ? "neutral" : "primary",
+    },
+    {
+      label: "Record Payment",
+      description: latestPayment ? "Update latest or add new" : "Billing or advance",
+      icon: <Wallet className="w-4 h-4" />,
+      onClick: () => latestPayment ? openPaymentModalForRecord(latestPayment) : openPaymentModalForRecord(),
+      tone: "success",
+    },
+    !isSIMP ? {
+      label: isPWP ? "Credit Data" : "FY Data",
+      description: fyData ? "Review quantities" : "Add current year",
+      icon: <Target className="w-4 h-4" />,
+      onClick: () => openFYModal(fyData || null),
+      tone: fyData ? "neutral" : "warning",
+    } : null,
+    {
+      label: "Upload Document",
+      description: `${documents.length} saved`,
+      icon: <FileUp className="w-4 h-4" />,
+      onClick: openCreateDocument,
+      tone: "neutral",
+    },
+    {
+      label: "Invoice Tracking",
+      description: `${invoices.length} entr${invoices.length === 1 ? "y" : "ies"}`,
+      icon: <FileText className="w-4 h-4" />,
+      onClick: openInvoiceModal,
+      tone: "neutral",
+    },
+    {
+      label: "Upload Record",
+      description: `${uploadRecords.length} portal upload${uploadRecords.length === 1 ? "" : "s"}`,
+      icon: <Upload className="w-4 h-4" />,
+      onClick: openUploadModal,
+      tone: "neutral",
+    },
+    billing && billing.pendingAmount > 0 ? {
+      label: "Send Reminder",
+      description: formatCurrency(billing.pendingAmount),
+      icon: <Send className="w-4 h-4" />,
+      onClick: () => openReminderModal(),
+      tone: "danger",
+    } : null,
+    {
+      label: "Contact Client",
+      description: contactEmail !== "-" ? contactEmail : contactMobile !== "-" ? contactMobile : "Link a contact",
+      icon: <Phone className="w-4 h-4" />,
+      onClick: contactClient,
+      tone: hasLinkedContacts ? "neutral" : "warning",
+    },
+    {
+      label: "Generate Report",
+      description: "Open reports",
+      icon: <BarChart2 className="w-4 h-4" />,
+      onClick: () => router.push("/dashboard/reports"),
+      tone: "neutral",
+    },
+  ].filter(Boolean) as ClientProfileQuickAction[];
+
+  const emptyStateActions = quickActions.filter((action) => (
+    action.label === "Add Billing" ||
+    action.label === "Annual Return Bill" ||
+    action.label === "Quotation Bill" ||
+    action.label === "Credit Data" ||
+    action.label === "FY Data" ||
+    action.label === "Upload Document"
+  ));
+
+  const healthMetrics: ClientProfileMetric[] = [
+    {
+      label: "Annual Return",
+      value: annualReturnStatus,
+      sub: annualReturn?.remarks || (registeredThisFy ? "Registered in current FY" : `FY ${selectedFy}`),
+      icon: <ClipboardCheck className="w-4 h-4" />,
+      tone: annualReturnStatus === "Filed" || annualReturnStatus === "Verified" || annualReturnStatus === "Not Required This FY" ? "success" : "warning",
+      actionLabel: "Open",
+      detailRows: [
+        { label: "Financial Year", value: selectedFy },
+        { label: "Filing State", value: annualReturnStatus },
+        { label: "Registration", value: registeredThisFy ? "Registered this FY" : registrationStatus },
+      ],
+      onClick: () => {
+        setActivePrimaryTab("compliance");
+        setActiveComplianceSection("annualReturn");
+      },
+    },
+    {
+      label: "AR Progress",
+      value: `${Math.round(annualReturnProgress * 100)}%`,
+      sub: `${annualReturnProgressSteps.filter((step) => step.progress >= 1).length}/${annualReturnProgressSteps.length} workflow milestones complete`,
+      icon: <Target className="w-4 h-4" />,
+      tone: annualReturnProgress >= 1 ? "success" : annualReturnProgress > 0.45 ? "warning" : "neutral",
+      actionLabel: "Review",
+      progress: annualReturnProgress,
+      detailRows: [
+        { label: "Completed", value: `${annualReturnProgressSteps.filter((step) => step.progress >= 1).length}/${annualReturnProgressSteps.length}` },
+        { label: "Pending", value: `${annualReturnProgressSteps.filter((step) => step.progress < 1).length}` },
+      ],
+      milestones: annualReturnProgressSteps.map((step) => ({
+        label: step.label,
+        value: step.progress >= 1 ? "Complete" : step.progress > 0 ? "In progress" : "Pending",
+        state: step.progress >= 1 ? "done" : step.progress > 0 ? "partial" : "pending",
+      })),
+      onClick: () => {
+        setActivePrimaryTab("compliance");
+        setActiveComplianceSection("annualReturn");
+      },
+    },
+    {
+      label: "Invoice Coverage",
+      value: `${invoiceReceivedMonths}/24`,
+      sub: `${invoicePendingMonths} month${invoicePendingMonths === 1 ? "" : "s"} pending across sale/purchase`,
+      icon: <FileText className="w-4 h-4" />,
+      tone: invoicePendingMonths === 0 ? "success" : invoiceReceivedMonths > 0 ? "warning" : "neutral",
+      actionLabel: "Update",
+      progress: invoiceCoverageProgress,
+      detailRows: [
+        { label: "Received", value: `${invoiceReceivedMonths}/24` },
+        { label: "Pending", value: `${invoicePendingMonths}` },
+        { label: "Sale Months", value: `${invoiceCoverage.sale.doneCount}/12` },
+        { label: "Purchase Months", value: `${invoiceCoverage.purchase.doneCount}/12` },
+      ],
+      onClick: () => {
+        setActivePrimaryTab("compliance");
+        setActiveComplianceSection("invoiceTracking");
+      },
+    },
+    {
+      label: "CPCB Uploaded",
+      value: `${cpcbUploadedTotal.toLocaleString("en-IN")} MT`,
+      sub: `${uploadRecords.length} upload record${uploadRecords.length === 1 ? "" : "s"}`,
+      icon: <Upload className="w-4 h-4" />,
+      tone: hasCpcbUploadRecords ? "success" : "neutral",
+      actionLabel: "Open",
+      progress: cpcbUploadProgress,
+      detailRows: [
+        ...cpcbUploadedCategoryTotals.map((item) => ({ label: item.label, value: `${item.value.toLocaleString("en-IN")} MT` })),
+        { label: "Invoices Uploaded", value: cpcbUploadedInvoiceCount.toLocaleString("en-IN") },
+      ],
+      onClick: () => {
+        setActivePrimaryTab("compliance");
+        setActiveComplianceSection("cpcbUpload");
+      },
+    },
+    {
+      label: "Outstanding",
+      value: formatCurrency(billing?.pendingAmount || 0),
+      sub: billing ? billing.paymentStatus : `No billing for FY ${selectedFy}`,
+      icon: <Target className="w-4 h-4" />,
+      tone: billing && billing.pendingAmount > 0 ? "danger" : "success",
+      actionLabel: billing ? "Open" : "Create",
+      detailRows: [
+        { label: "Billing Status", value: billing?.paymentStatus || "No billing" },
+        { label: "Total Billed", value: formatCurrency(billing?.totalAmount || 0) },
+        { label: "Paid", value: formatCurrency(billing?.totalPaid || 0) },
+      ],
+      onClick: () => openBillingModalForRecord(billing),
+    },
+    {
+      label: "Payment Status",
+      value: billing?.paymentStatus || "No billing",
+      sub: payments.length > 0 ? `${formatCurrency(billing?.totalPaid || 0)} paid in FY ${selectedFy}` : "No payments recorded",
+      icon: <Wallet className="w-4 h-4" />,
+      tone: billing && billing.pendingAmount <= 0 ? "success" : billing && billing.totalPaid > 0 ? "warning" : "neutral",
+      actionLabel: latestPayment ? "Latest" : "Add",
+      detailRows: [
+        { label: "Payment State", value: billing?.paymentStatus || "No billing" },
+        { label: "Paid", value: formatCurrency(billing?.totalPaid || 0) },
+        { label: "Last Payment", value: latestPayment ? `${formatCurrency(latestPayment.amountPaid)} on ${formatDate(latestPayment.paymentDate)}` : "Not recorded" },
+      ],
+      onClick: () => latestPayment ? openPaymentModalForRecord(latestPayment) : openPaymentModalForRecord(),
+    },
+    {
+      label: "Documents",
+      value: documents.length.toLocaleString("en-IN"),
+      sub: documents.length > 0 ? "Linked files and drive URLs" : "No files linked",
+      icon: <FileText className="w-4 h-4" />,
+      tone: documents.length > 0 ? "brand" : "neutral",
+      actionLabel: "Add",
+      detailRows: [
+        { label: "Linked Documents", value: documents.length.toLocaleString("en-IN") },
+        { label: "Recent", value: documents[0]?.documentName || "No document linked" },
+      ],
+      onClick: openCreateDocument,
+    },
+    {
+      label: "Last Activity",
+      value: lastEmailActivity ? formatDate(lastEmailActivity.date) : activitiesTotal.toLocaleString("en-IN"),
+      sub: lastEmailActivity ? lastEmailActivity.label : "No email activity yet",
+      icon: <Zap className="w-4 h-4" />,
+      tone: activitiesTotal > 0 ? "brand" : "neutral",
+      actionLabel: "Review",
+      detailRows: [
+        { label: "Latest", value: lastEmailActivity ? lastEmailActivity.label : "No email activity yet" },
+        { label: "Date", value: lastEmailActivity ? formatDate(lastEmailActivity.date) : "-" },
+        { label: "Total Activity", value: activitiesTotal.toLocaleString("en-IN") },
+      ],
+      onClick: () => setActivePrimaryTab("timeline"),
+    },
+  ];
+
+  const profileAlerts: ClientProfileAlert[] = [
+    annualReturnStatus !== "Filed" && annualReturnStatus !== "Verified" && annualReturnStatus !== "Not Required This FY" ? {
+      id: "annual-return",
+      title: annualReturnStatus === "In Progress" ? "Annual Return In Progress" : "Annual Return Pending",
+      detail: `FY ${selectedFy} filing status is ${annualReturnStatus}.`,
+      tone: "warning",
+      icon: <AlertCircle className="h-4 w-4" />,
+      actionLabel: "Open",
+      onAction: () => {
+        setActivePrimaryTab("compliance");
+        setActiveComplianceSection("annualReturn");
+      },
+    } : null,
+    invoicePendingMonths > 0 ? {
+      id: "invoice-data",
+      title: "Invoice Data Missing",
+      detail: `${invoicePendingMonths} sale/purchase month${invoicePendingMonths === 1 ? "" : "s"} still pending for FY ${selectedFy}.`,
+      tone: "warning",
+      icon: <FileText className="h-4 w-4" />,
+      actionLabel: "Update",
+      onAction: () => {
+        setActivePrimaryTab("compliance");
+        setActiveComplianceSection("invoiceTracking");
+      },
+    } : null,
+    requiresAcceptedQuotation && !quotationAccepted ? {
+      id: "quotation-not-accepted",
+      title: "Quotation Not Accepted",
+      detail: hasSentLinkedQuotation
+        ? "A linked quotation exists, but billing stays locked until it is accepted."
+        : `Create and accept a linked quotation for ${client.category} billing.`,
+      tone: "warning",
+      icon: <Receipt className="h-4 w-4" />,
+      actionLabel: "Open",
+      onAction: () => {
+        setActivePrimaryTab("financial");
+        setActiveFinancialSection("quotations");
+      },
+    } : null,
+    billing && billing.pendingAmount > 0 ? {
+      id: "payment-pending",
+      title: "Payment Pending",
+      detail: `${formatCurrency(billing.pendingAmount)} outstanding.`,
+      tone: "danger",
+      icon: <Wallet className="h-4 w-4" />,
+      actionLabel: "Reminder",
+      onAction: () => openReminderModal(billing),
+    } : null,
+    !billing ? {
+      id: "bill-not-generated",
+      title: "Bill Not Generated",
+      detail: client.category === "PWP" ? "Create Annual Return Bill for this FY." : `No billing entry for FY ${selectedFy}.`,
+      tone: "neutral",
+      icon: <Receipt className="h-4 w-4" />,
+      actionLabel: "Open",
+      onAction: () => {
+        setActivePrimaryTab("financial");
+        setActiveFinancialSection(client.category === "PWP" ? "bills" : "quotations");
+      },
+    } : null,
+    registeredThisFy && annualReturnStatus === "Not Required This FY" ? {
+      id: "registered-current-fy",
+      title: "Registered This FY - Return Not Required",
+      detail: `Reminder due next FY for ${client.companyName}.`,
+      tone: "success",
+      icon: <CheckCircle2 className="h-4 w-4" />,
+      actionLabel: "Review",
+      onAction: () => {
+        setActivePrimaryTab("compliance");
+        setActiveComplianceSection("annualReturn");
+      },
+    } : null,
+  ].filter(Boolean) as ClientProfileAlert[];
+
+  const renderFySummary = () => (
+    fyData && !isSIMP ? (
+      <ClientProfileFinancialSummary
+        fyData={fyData}
+        selectedFy={selectedFy}
+        isPWP={isPWP}
+        fyLastUpdated={fyLastUpdated}
+        fyCategoryRows={fyCategoryRows}
+        fyHasTypedSplit={fyHasTypedSplit}
+        fyTypeTotals={fyTypeTotals}
+        openFYModal={openFYModal}
+        setBreakdownRec={setBreakdownRec}
+      />
+    ) : (
+      <EmptyProfileState
+        selectedFy={selectedFy}
+        isPWP={isPWP}
+        actions={emptyStateActions}
+      />
+    )
+  );
+
+  const complianceSections: Record<ComplianceSectionId, React.ReactNode> = {
+    annualReturn: (
+      <AnnualReturnTracker
+        annualReturn={annualReturn}
+        isRegisteredThisFy={registeredThisFy}
+        onSaveStatus={saveAnnualReturnStatus}
+        registrationSignal={registrationSignal}
+        selectedFy={selectedFy}
+      />
+    ),
+    invoiceTracking: (
+      <InvoiceTrackingWorkspace
+        selectedFy={selectedFy}
+        invoices={invoices}
+        onAddInvoice={openInvoiceModal}
+      />
+    ),
+    cpcbUpload: (
+      <CpcbUploadSummary
+        selectedFy={selectedFy}
+        uploadRecords={uploadRecords}
+        onAddUpload={openUploadModal}
+      />
+    ),
+    targetsCredits: renderFySummary(),
+    registration: (
+      <RegistrationDetails
+        client={client}
+        customFieldDefinitions={customFieldDefinitions}
+        isPWP={isPWP}
+        legalName={legalName}
+        registrationSignal={registrationSignal}
+      />
+    ),
+    status: (
+      <ComplianceStatusPanel
+        annualReturn={annualReturn}
+        billing={billing}
+        fyData={fyData}
+        invoices={invoices}
+        isPWP={isPWP}
+        selectedFy={selectedFy}
+        uploadRecords={uploadRecords}
+      />
+    ),
+  };
+
+  const renderBillingPayments = (view: "all" | "billing" | "payments" = "all") => (
+    <ClientProfileBillingPayments
+      selectedFy={selectedFy}
+      billing={billing}
+      payments={payments}
+      billingLastUpdated={billingLastUpdated}
+      hasFyData={Boolean(fyData)}
+      isPWP={isPWP}
+      openReminderModal={openReminderModal}
+      openBillingModalForRecord={openBillingModalForRecord}
+      deleteBilling={deleteBilling}
+      openFYModal={openFYModal}
+      openPaymentModalForRecord={openPaymentModalForRecord}
+      deletePayment={deletePayment}
+      view={view}
+    />
+  );
+
+  const quotationStatusPanel = (
+    <section className="client-profile-card">
+      <div className="client-profile-card-header">
+        <div>
+          <p className="client-profile-kicker">Linked Quotations</p>
+          <h2>Linked quotations only</h2>
         </div>
-      )}
-
-      {/* Header */}
-      <div ref={pageHeaderRef} className="flex items-center gap-3 mb-6">
-        <button onClick={() => router.back()} className="glass-btn" style={{padding:"7px"}}><ArrowLeft className="w-4 h-4" /></button>
-        <div
-          className="flex-1 min-w-0 transition-[opacity,transform,filter] duration-300 ease-out will-change-transform"
-          style={pageTitleStyle}
-        >
-          <h1 className="text-2xl font-bold text-default truncate">{client.companyName}</h1>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="inline-flex items-center gap-1.5 font-mono text-xs bg-surface px-2 py-0.5 rounded">
-              {client.clientId}
-              <CopyButton
-                copied={copiedKey === "client-id"}
-                label="client ID"
-                onClick={() => handleCopy(client.clientId, "client-id", "Client ID")}
-                className="h-5 w-5 border-0 bg-transparent"
-              />
-            </span>
-            <CategoryBadge category={client.category} />
-          </div>
-        </div>
-        {/* Edit button in header */}
-        <button onClick={openBasicEdit} className="glass-btn">
-          <Pencil className="w-4 h-4" /> Edit Client
+        <button type="button" className="client-profile-secondary-button" onClick={() => router.push(`/dashboard/quotations?clientId=${encodeURIComponent(client.clientId)}&financialYear=${encodeURIComponent(selectedFy)}`)}>
+          <Receipt className="h-4 w-4" />
+          <span>Open Quotations</span>
         </button>
       </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-6">
-        {topStats.map((stat) => (
-          <div key={stat.label} className="bg-card rounded-2xl border border-base p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div className="w-9 h-9 rounded-xl bg-surface flex items-center justify-center text-brand-600">
-                {stat.icon}
-              </div>
-              <button type="button" onClick={stat.onClick} className="text-[11px] font-medium text-brand-600 hover:text-brand-700">
-                {stat.actionLabel}
-              </button>
+      <div className="client-profile-status-checks">
+        {linkedQuotations.length === 0 ? (
+          <div data-done="false">
+            <span><AlertCircle className="h-4 w-4" /></span>
+            <div>
+              <p>No linked quotation</p>
+              <small>Standalone quotations stay separate until they are explicitly linked to this client ID.</small>
             </div>
-            <p className="text-xs text-muted mt-3">{stat.label}</p>
-            <p className={`text-lg font-bold mt-1 ${stat.accent}`}>{stat.value}</p>
-            <p className="text-xs text-faint mt-1 line-clamp-2">{stat.sub}</p>
+          </div>
+        ) : linkedQuotations.slice(0, 6).map((quotation) => (
+          <div key={quotation._id} data-done={quotation.status === "Accepted" ? "true" : "false"}>
+            <span>{quotation.status === "Accepted" ? <CheckCircle2 className="h-4 w-4" /> : <Receipt className="h-4 w-4" />}</span>
+            <div>
+              <p>{quotation.quotationNumber || quotation.clientName}</p>
+              <small>{quotation.status} - {formatCurrency(quotation.grandTotal || 0)}</small>
+            </div>
           </div>
         ))}
       </div>
+    </section>
+  );
 
-      {emptyStateActions.length > 0 && (
-        <div className="mb-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-faint mb-1">Quick Actions</p>
-              <p className="text-sm text-muted">
-                {isPWP
-                  ? "Set up credits, billing, CPCB records, documents, and contacts for this client from here."
-                  : "Set up FY data, billing, CPCB records, reminders, documents, and contacts for this client from here."}
-              </p>
-            </div>
-            <div className="glass-tray flex-wrap" style={{ flexWrap: "wrap", gap: "4px" }}>
-              {emptyStateActions.map((action) => (
-                <button
-                  key={action.label}
-                  type="button"
-                  onClick={action.onClick}
-                  className={`glass-pill${action.tone === "primary" ? " glass-pill-active" : ""}`}
-                >
-                  {action.label}
-                </button>
-              ))}
+  const outstandingPanel = (
+    <section className="client-profile-card">
+      <div className="client-profile-card-header">
+        <div>
+          <p className="client-profile-kicker">Outstanding</p>
+          <h2>Payment readiness for FY {selectedFy}</h2>
+        </div>
+        {billing && billing.pendingAmount > 0 && (
+          <button type="button" className="client-profile-primary-button" onClick={() => openReminderModal(billing)}>
+            <Send className="h-4 w-4" />
+            <span>Send Reminder</span>
+          </button>
+        )}
+      </div>
+      <div className="client-profile-invoice-summary-row">
+        <div>
+          <span>{formatCurrency(billing?.totalAmount || 0)}</span>
+          <p>Total billed</p>
+          <small>{billing ? billing.paymentStatus : "No billing created"}</small>
+        </div>
+        <div>
+          <span>{formatCurrency(billing?.totalPaid || 0)}</span>
+          <p>Paid</p>
+          <small>{payments.length} payment record{payments.length === 1 ? "" : "s"}</small>
+        </div>
+        <div>
+          <span>{formatCurrency(billing?.pendingAmount || 0)}</span>
+          <p>Outstanding</p>
+          <small>{billing?.pendingAmount ? "Action required" : "No pending amount"}</small>
+        </div>
+      </div>
+    </section>
+  );
+
+  const financialSections: Record<FinancialSectionId, React.ReactNode> = {
+    quotations: (
+      <>
+        <BillingWorkflowPanel
+          acceptedQuotations={acceptedQuotations}
+          billing={billing}
+          clientCategory={client.category}
+          onCreateDirectBill={() => openBillingModalForRecord()}
+          onCreateFromQuotation={(quotation) => void openBillingFromQuotation(quotation)}
+          onOpenQuotations={() => router.push(`/dashboard/quotations?clientId=${encodeURIComponent(client.clientId)}&financialYear=${encodeURIComponent(selectedFy)}`)}
+          selectedFy={selectedFy}
+        />
+        {quotationStatusPanel}
+      </>
+    ),
+    bills: (
+      <>
+        {renderFySummary()}
+        {renderBillingPayments("billing")}
+      </>
+    ),
+    payments: renderBillingPayments("payments"),
+    outstanding: outstandingPanel,
+    paymentHistory: renderBillingPayments("payments"),
+  };
+
+  const matchesDocument = (document: Document, pattern: RegExp) => pattern.test(document.documentName);
+  const complianceDocumentPattern = /(annual|return|cpcb|compliance|registration|approval|certificate|epr|portal)/i;
+  const financialDocumentPattern = /(bill|billing|payment|receipt|quotation|quote|financial|ledger)/i;
+  const invoiceDocumentPattern = /(invoice|sale|purchase)/i;
+  const certificateDocumentPattern = /(certificate|certification|approval|registration)/i;
+  const documentGroups: Record<DocumentsSectionId, Document[]> = {
+    all: documents,
+    compliance: documents.filter((document) => matchesDocument(document, complianceDocumentPattern)),
+    financial: documents.filter((document) => matchesDocument(document, financialDocumentPattern)),
+    invoices: documents.filter((document) => matchesDocument(document, invoiceDocumentPattern)),
+    certificates: documents.filter((document) => matchesDocument(document, certificateDocumentPattern)),
+    other: documents.filter((document) => ![
+      complianceDocumentPattern,
+      financialDocumentPattern,
+      invoiceDocumentPattern,
+      certificateDocumentPattern,
+    ].some((pattern) => matchesDocument(document, pattern))),
+  };
+  const renderDocumentsPanel = (documentsForSection: Document[]) => (
+    <DocumentsSection
+      documents={documentsForSection}
+      open={sectionOpen.documents}
+      busyAction={busyAction}
+      hasLinkedContacts={hasLinkedContacts}
+      onToggle={() => toggleSection("documents")}
+      onAdd={openCreateDocument}
+      onEdit={openEditDocument}
+      onDelete={deleteDocument}
+      onLinkContact={openBasicEdit}
+    />
+  );
+  const documentsSections: Record<DocumentsSectionId, React.ReactNode> = {
+    all: renderDocumentsPanel(documentGroups.all),
+    compliance: renderDocumentsPanel(documentGroups.compliance),
+    financial: renderDocumentsPanel(documentGroups.financial),
+    invoices: renderDocumentsPanel(documentGroups.invoices),
+    certificates: renderDocumentsPanel(documentGroups.certificates),
+    other: renderDocumentsPanel(documentGroups.other),
+  };
+
+  const renderTimelinePanel = () => (
+    <ClientProfileActivityTimeline
+      selectedFy={selectedFy}
+      open={sectionOpen.recentActivity}
+      onToggle={() => toggleSection("recentActivity")}
+      activityWindowHelpText={activityWindowHelpText}
+      activityEmptyText={activityEmptyText}
+      activitiesTotal={activitiesTotal}
+      activityRange={activityRange}
+      setActivityRange={setActivityRange}
+      activityFilter={activityFilter}
+      setActivityFilter={setActivityFilter}
+      activityError={activityError}
+      activityLoading={activityLoading}
+      activityLoadingMore={activityLoadingMore}
+      activityHasMore={activityHasMore}
+      filteredActivities={filteredActivities}
+      listRef={activityTimelineListRef}
+      handleActivityScroll={handleActivityScroll}
+      getActivityFyChip={getActivityFyChip}
+      getActivityActionLabel={getActivityActionLabel}
+      handleActivityAction={handleActivityAction}
+    />
+  );
+  const timelineSections: Record<TimelineSectionId, React.ReactNode> = {
+    all: renderTimelinePanel(),
+    compliance: renderTimelinePanel(),
+    financial: renderTimelinePanel(),
+    documents: renderTimelinePanel(),
+    notes: renderTimelinePanel(),
+  };
+  const timelineFilterMap: Partial<Record<TimelineSectionId, ActivityFilter>> = {
+    all: "all",
+    compliance: "financial-year",
+    financial: "billing",
+  };
+  const handleTimelineSectionChange = (section: TimelineSectionId) => {
+    setActiveTimelineSection(section);
+    const nextFilter = timelineFilterMap[section];
+    if (nextFilter) setActivityFilter(nextFilter);
+  };
+
+  const renderActionPanel = (kicker: string, title: string, alerts: ClientProfileAlert[], emptyText: string) => (
+    <section className="client-profile-card">
+      <div className="client-profile-card-header">
+        <div>
+          <p className="client-profile-kicker">{kicker}</p>
+          <h2>{title}</h2>
+        </div>
+      </div>
+      <div className="client-profile-status-checks">
+        {alerts.length === 0 ? (
+          <div data-done="true">
+            <span><CheckCircle2 className="h-4 w-4" /></span>
+            <div>
+              <p>No immediate action</p>
+              <small>{emptyText}</small>
             </div>
           </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* LEFT */}
-        <div className="space-y-4 lg:sticky lg:top-0 lg:self-start">
-
-          {/* Tabbed info card */}
-          <div className="bg-card rounded-2xl shadow-sm border border-base overflow-hidden">
-            <div className="flex border-b border-base">
-              <TabBtn id="info"     label="Info"     icon={<User className="w-3.5 h-3.5" />} />
-              <TabBtn id="portal"   label="Portal"   icon={<Shield className="w-3.5 h-3.5" />} />
-              <TabBtn id="activity" label="Activity" icon={<Zap className="w-3.5 h-3.5" />} />
+        ) : alerts.map((alert) => (
+          <button key={`${kicker}-${alert.id}`} type="button" onClick={alert.onAction} data-done="false">
+            <span>{alert.icon || <AlertCircle className="h-4 w-4" />}</span>
+            <div>
+              <p>{alert.title}</p>
+              <small>{alert.detail || "Review this item"}</small>
             </div>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
 
-            {activeTab === "info" && (
-              <div className="p-5 space-y-3">
-                {legalName && (
-                  <InfoRow icon={<Building2 className="w-4 h-4" />} label="Legal Name" value={legalName} />
-                )}
-                {renderCustomProfileFields("beforeContact")}
-                {(hasHiddenCustomProfileInfo || showAllCustomProfileInfo) && visibleCustomFields.length > 3 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllCustomProfileInfo((current) => !current)}
-                    className="text-xs font-medium text-brand-600 hover:text-brand-700"
-                  >
-                    {showAllCustomProfileInfo ? "Show less info" : `Show ${visibleCustomFields.length - 3} more info`}
-                  </button>
-                )}
-                <InfoRow icon={<User className="w-4 h-4" />}    label="Contact Person" value={contactName} sub={contactDesig} />
-                <div className="flex items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <InfoRow icon={<Phone className="w-4 h-4" />} label="Mobile" value={contactMobile} mono />
-                  </div>
-                  {contactMobile !== "-" && (
-                    <CopyButton
-                      copied={copiedKey === "primary-phone"}
-                      label="primary contact mobile"
-                      onClick={() => handleCopy(contactMobile, "primary-phone", "Primary contact mobile")}
-                    />
-                  )}
-                </div>
-                <div className="flex items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <InfoRow icon={<Mail className="w-4 h-4" />} label="Email" value={contactEmail} mono />
-                  </div>
-                  {contactEmail !== "-" && (
-                    <CopyButton
-                      copied={copiedKey === "primary-email"}
-                      label="primary contact email"
-                      onClick={() => handleCopy(contactEmail, "primary-email", "Primary contact email")}
-                    />
-                  )}
-                </div>
-                {renderCustomProfileFields("afterContact")}
-                {(client.contacts?.length ?? 0) > 0 && (
-                  <div className="pt-1 border-t border-soft">
-                    <CollapsibleSectionHeader
-                      title={`Contacts (${client.contacts!.length})`}
-                      subtitle="Collapse linked contacts when you only need the company summary."
-                      open={sectionOpen.contacts}
-                      onToggle={() => toggleSection("contacts")}
-                    />
-                    {sectionOpen.contacts && (
-                      <div className="space-y-2 mt-3">
-                        {client.contacts!.map((c, contactIndex) => (
-                          <div key={c._id} className="bg-surface rounded-xl px-3 py-2.5 border border-base/60">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="text-xs font-semibold text-default">{c.name}</p>
-                                {c.designation && <p className="text-xs text-faint">{c.designation}</p>}
-                              </div>
-                              {contactIndex === 0 && (
-                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/35 dark:text-brand-300">
-                                  Primary
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-2 space-y-1.5">
-                              {getContactPhones(c).map((phone, idx) => (
-                                <div key={`phone-${idx}`} className="flex items-center gap-2 text-xs text-muted">
-                                  <span className="font-mono flex-1 min-w-0 truncate">{phone}</span>
-                                  <CopyButton
-                                    copied={copiedKey === `contact-phone-${c._id}-${idx}`}
-                                    label={`${c.name} phone`}
-                                    onClick={() => handleCopy(phone, `contact-phone-${c._id}-${idx}`, `${c.name} phone`)}
-                                  />
-                                </div>
-                              ))}
-                              {getContactEmails(c).map((email, idx) => (
-                                <div key={`email-${idx}`} className="flex items-center gap-2 text-xs text-muted">
-                                  <span className="flex-1 min-w-0 truncate">{email}</span>
-                                  <CopyButton
-                                    copied={copiedKey === `contact-email-${c._id}-${idx}`}
-                                    label={`${c.name} email`}
-                                    onClick={() => handleCopy(email, `contact-email-${c._id}-${idx}`, `${c.name} email`)}
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-                <InfoRow icon={<MapPin className="w-4 h-4" />}    label="State"           value={client.state} />
-                {client.address        && <InfoRow icon={<Building2 className="w-4 h-4" />} label="Address"         value={client.address} />}
-                {client.gstNumber && (
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1 min-w-0">
-                      <InfoRow icon={<Hash className="w-4 h-4" />} label="GST Number" value={client.gstNumber} mono />
-                    </div>
-                    <CopyButton
-                      copied={copiedKey === "gst"}
-                      label="GST number"
-                      onClick={() => handleCopy(client.gstNumber || "", "gst", "GST number")}
-                    />
-                  </div>
-                )}
-                {client.registrationNumber && (
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1 min-w-0">
-                      <InfoRow icon={<FileText className="w-4 h-4" />} label="Registration No." value={client.registrationNumber} mono />
-                    </div>
-                    <CopyButton
-                      copied={copiedKey === "registration-number"}
-                      label="registration number"
-                      onClick={() => handleCopy(client.registrationNumber || "", "registration-number", "Registration number")}
-                    />
-                  </div>
-                )}
-                {renderCustomProfileFields("afterCompany")}
-                <div className="pt-3 border-t border-soft flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-faint">Added {formatDate(client.createdAt)}</p>
-                    <p className="text-[11px] text-faint mt-0.5">Last updated {formatDateTime(getLatestTimestamp(client.updatedAt, client.createdAt))}</p>
-                  </div>
-                  <button onClick={openBasicEdit} className="text-xs text-brand-600 hover:underline flex items-center gap-1">
-                    <Pencil className="w-3 h-3" /> Edit
-                  </button>
-                </div>
-              </div>
-            )}
+  const notesSections: Record<NotesTasksSectionId, React.ReactNode> = {
+    notes: (
+      <NotesSection
+        notes={billing?.notes}
+        updatedAt={getLatestTimestamp(client.updatedAt, client.createdAt)}
+        onEditBilling={() => openBillingModalForRecord(billing)}
+      />
+    ),
+    tasks: renderActionPanel("Tasks", "Next team actions", profileAlerts, "The current FY profile looks clear."),
+    reminders: renderActionPanel(
+      "Reminders",
+      "Due reminders",
+      profileAlerts.filter((alert) => alert.id === "payment-pending" || alert.id === "registered-current-fy"),
+      "No payment or next-FY reminder is due."
+    ),
+    followUps: renderActionPanel(
+      "Follow-ups",
+      "Client follow-ups",
+      profileAlerts.filter((alert) => alert.id === "invoice-data" || alert.id === "annual-return" || alert.id === "quotation-not-accepted"),
+      "No compliance or quotation follow-up is pending."
+    ),
+    callsMeetings: renderActionPanel(
+      "Calls / Meetings",
+      "Contact actions",
+      hasLinkedContacts ? [] : [{
+        id: "link-contact",
+        title: "No linked contact",
+        detail: "Add a primary contact before logging calls or meetings.",
+        tone: "warning",
+        icon: <Phone className="h-4 w-4" />,
+        onAction: openBasicEdit,
+      }],
+      "No call or meeting action is pending."
+    ),
+  };
 
-            {activeTab === "portal" && (
-              <div className="p-5 space-y-3">
-                <CollapsibleSectionHeader
-                  title="Portal Credentials"
-                  subtitle={portalLastUpdated ? `Last profile update ${formatDateTime(portalLastUpdated)}` : "Portal details are stored on the client profile."}
-                  open={sectionOpen.portal}
-                  onToggle={() => toggleSection("portal")}
+  return (
+    <div className="client-profile-page">
+      <div className="client-profile-shell">
+        {loadWarning && (
+          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
+            {loadWarning}
+          </div>
+        )}
+
+        <ClientProfileHeader
+          client={client}
+          legalName={legalName}
+          selectedFy={selectedFy}
+          financialYears={FINANCIAL_YEARS}
+          onFinancialYearChange={setSelectedFy}
+          registrationStatus={registrationStatus}
+          validityLabel={validityLabel}
+          billingStatus={billingStatus}
+          progress={headerProgress}
+          copiedKey={copiedKey}
+          onCopyClientId={() => handleCopy(client.clientId, "client-id", "Client ID")}
+          onBack={() => router.back()}
+          onEdit={openBasicEdit}
+          primaryActions={quickActions}
+        />
+
+        <HealthDashboard metrics={healthMetrics} />
+        <ClientAlerts alerts={profileAlerts} />
+        <QuickActions actions={quickActions} />
+        <ClientPrimaryTabs activeTab={activePrimaryTab} onChange={setActivePrimaryTab} />
+
+        <div className="client-profile-content-stack">
+          {activePrimaryTab === "overview" && (
+            <>
+              <AnnualReturnProgressPanel
+                progress={annualReturnProgress}
+                selectedFy={selectedFy}
+                steps={annualReturnProgressSteps}
+                subtitle={isPWP ? "PWP annual return workflow" : `${client.category} annual return workflow`}
+              />
+              <CompanyOverview
+                client={client}
+                isPWP={isPWP}
+                legalName={legalName}
+                customFields={customProfileFields}
+                hiddenCustomCount={visibleCustomFields.length - displayedCustomFields.length}
+                showAllCustomFields={showAllCustomProfileInfo}
+                onToggleCustomFields={() => setShowAllCustomProfileInfo((current) => !current)}
+                primaryContact={primaryContact}
+                contactName={contactName}
+                contactDesig={contactDesig}
+                contactMobile={contactMobile}
+                contactEmail={contactEmail}
+                copiedKey={copiedKey}
+                onCopy={handleCopy}
+                onEdit={openBasicEdit}
+                onEditPortal={() => openEdit("portal")}
+                contactsOpen={sectionOpen.contacts}
+                portalOpen={sectionOpen.portal}
+                onToggleContacts={() => toggleSection("contacts")}
+                onTogglePortal={() => toggleSection("portal")}
+                showPassword={showPassword}
+                onTogglePassword={() => setShowPassword((current) => !current)}
+                portalLastUpdated={portalLastUpdated}
+                passwordMask={passwordMask}
+              />
+              {!fyData && !billing && (
+                <EmptyProfileState
+                  selectedFy={selectedFy}
+                  isPWP={isPWP}
+                  actions={emptyStateActions}
                 />
-                {sectionOpen.portal && (
-                  <>
-                {!client.cpcbLoginId && !client.cpcbPassword && !client.otpMobileNumber ? (
-                  <div className="text-center py-4">
-                    <p className="text-sm text-faint mb-3">No portal credentials saved.</p>
-                    <button onClick={() => openEdit("portal")}
-                      className="glass-btn">
-                      <Plus className="w-3 h-3" /> Add Credentials
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    {client.cpcbLoginId && (
-                      <div className="flex items-start gap-2">
-                        <div className="flex-1 min-w-0">
-                          <InfoRow icon={<User className="w-4 h-4" />} label="CPCB Login ID" value={client.cpcbLoginId} mono />
-                        </div>
-                        <CopyButton
-                          copied={copiedKey === "portal-login"}
-                          label="CPCB login ID"
-                          onClick={() => handleCopy(client.cpcbLoginId || "", "portal-login", "CPCB login ID")}
-                        />
-                      </div>
-                    )}
-                    {client.cpcbPassword  && (
-                      <div className="flex items-start gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start gap-3 text-sm">
-                            <Lock className="w-4 h-4 text-faint mt-0.5 flex-shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-muted text-xs">CPCB Password</p>
-                              <div className="flex items-center gap-2">
-                                <p className="font-mono font-medium min-w-0 truncate">{showPassword ? client.cpcbPassword : passwordMask}</p>
-                                <button onClick={() => setShowPassword(!showPassword)} className="text-xs text-brand-600 hover:underline">{showPassword ? "Hide" : "Show"}</button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <CopyButton
-                          copied={copiedKey === "portal-password"}
-                          label="portal password"
-                          onClick={() => handleCopy(client.cpcbPassword || "", "portal-password", "Portal password")}
-                        />
-                      </div>
-                    )}
-                    {client.otpMobileNumber && (
-                      <div className="flex items-start gap-2">
-                        <div className="flex-1 min-w-0">
-                          <InfoRow icon={<Smartphone className="w-4 h-4" />} label="OTP Mobile" value={client.otpMobileNumber} mono />
-                        </div>
-                        <CopyButton
-                          copied={copiedKey === "portal-otp-mobile"}
-                          label="OTP mobile"
-                          onClick={() => handleCopy(client.otpMobileNumber || "", "portal-otp-mobile", "OTP mobile")}
-                        />
-                      </div>
-                    )}
-                  </>
-                )}
-                <div className="pt-3 border-t border-soft">
-                  <button onClick={() => openEdit("portal")}
-                    className="text-xs text-brand-600 hover:underline flex items-center gap-1">
-                    <Pencil className="w-3 h-3" /> Edit credentials
-                  </button>
-                </div>
-                  </>
-                )}
-              </div>
-            )}
+              )}
+            </>
+          )}
 
-            {activeTab === "activity" && (
-              <div className="p-4">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <p className="text-xs text-faint">
-                    Showing {filteredActivities.length} of {activitiesTotal.toLocaleString("en-IN")} events
-                  </p>
-                </div>
-                <ActivityRangeChips compact />
-                <ActivityFilterChips compact />
-                <p className="text-xs text-faint mb-3">{activityWindowHelpText} FY-tagged events are highlighted and all-year events are marked All FY.</p>
-                {activityError ? (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
-                    {activityError}
-                  </div>
-                ) : activityLoading ? (
-                  <div className="py-8 flex items-center justify-center">
-                    <LoadingSpinner />
-                  </div>
-                ) : filteredActivities.length === 0 ? (
-                  <p className="text-sm text-faint text-center py-6">{activityEmptyText}</p>
-                ) : (
-                  <div ref={activityTabListRef} onScroll={handleActivityScroll} className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-                    {filteredActivities.map((act) => (
-                      <div
-                        key={act.id}
-                        className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 ${
-                          act.financialYear === selectedFy
-                            ? "border-brand-200 bg-brand-50/50 dark:border-brand-900/50 dark:bg-brand-900/10"
-                            : "border-dashed border-base bg-surface/70"
-                        }`}
-                      >
-                        <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${activityColors[act.color] || "bg-surface text-muted"}`}>
-                          {activityIcon(act.type)}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-xs font-semibold text-default">{act.label}</p>
-                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0 ${getActivityFyChip(act).className}`}>{getActivityFyChip(act).label}</span>
-                              {act.badge && <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0 ${act.badgeColor || "bg-surface text-muted"}`}>{act.badge}</span>}
-                            </div>
-                          </div>
-                          <p className="text-xs text-muted truncate">{act.detail}</p>
-                          <p className="text-xs text-faint">{act.date ? formatDate(act.date) : ""}</p>
-                          {getActivityActionLabel(act) && (
-                            <button type="button" onClick={() => handleActivityAction(act)} className="mt-1.5 text-[11px] font-medium text-brand-600 hover:text-brand-700">
-                              {getActivityActionLabel(act)}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {activityLoadingMore && (
-                      <div className="py-3 flex items-center justify-center">
-                        <LoadingSpinner />
-                      </div>
-                    )}
-                    {!activityLoadingMore && !activityHasMore && filteredActivities.length > 0 && (
-                      <p className="py-2 text-center text-[11px] text-faint">You&apos;ve reached the end of this activity list.</p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          {activePrimaryTab === "compliance" && (
+            <>
+              <FYTabBar value={selectedFy} onChange={setSelectedFy} />
+              <AnnualReturnProgressPanel
+                progress={annualReturnProgress}
+                selectedFy={selectedFy}
+                steps={annualReturnProgressSteps}
+                subtitle="Milestones are based on linked profile records only"
+              />
+              <ComplianceWorkspace
+                activeSection={activeComplianceSection}
+                collapsed={secondaryNavCollapsed}
+                onCollapsedChange={setSecondaryNavCollapsed}
+                onSectionChange={setActiveComplianceSection}
+                sections={complianceSections}
+              />
+            </>
+          )}
 
-          {/* Documents */}
-          <div className="bg-card rounded-2xl p-5 shadow-sm border border-base">
-            <CollapsibleSectionHeader
+          {activePrimaryTab === "financial" && (
+            <>
+              <FYTabBar value={selectedFy} onChange={setSelectedFy} />
+              <ClientProfileSecondaryWorkspace
+                activeSection={activeFinancialSection}
+                collapsed={secondaryNavCollapsed}
+                navItems={FINANCIAL_NAV}
+                onCollapsedChange={setSecondaryNavCollapsed}
+                onSectionChange={setActiveFinancialSection}
+                sections={financialSections}
+                title="Financial"
+              />
+            </>
+          )}
+
+          {activePrimaryTab === "documents" && (
+            <ClientProfileSecondaryWorkspace
+              activeSection={activeDocumentsSection}
+              collapsed={secondaryNavCollapsed}
+              navItems={DOCUMENTS_NAV}
+              onCollapsedChange={setSecondaryNavCollapsed}
+              onSectionChange={setActiveDocumentsSection}
+              sections={documentsSections}
               title="Documents"
-              subtitle={documents.length > 0 ? `${documents.length} linked document${documents.length === 1 ? "" : "s"}` : "Add important certificates, registrations, and shared links here."}
-              open={sectionOpen.documents}
-              onToggle={() => toggleSection("documents")}
-              trailing={<button className="glass-btn glass-btn-primary" style={{padding:"5px 10px",fontSize:"11px"}} onClick={openCreateDocument}><Plus className="w-3 h-3" /> Add</button>}
-            />
-            {sectionOpen.documents && (
-              <div className="mt-4">
-                {documents.length === 0 ? (
-                  <div className="text-center py-6">
-                    <p className="text-sm font-medium text-default">No documents yet</p>
-                    <p className="text-sm text-faint mt-1">Add important certificates, registrations, and shared drive links here.</p>
-                    <div className="mt-4 flex flex-wrap justify-center gap-1.5">
-                      <div className="glass-tray">
-                        <button type="button" className="glass-pill glass-pill-active" onClick={openCreateDocument}>Add Document</button>
-                        {!hasLinkedContacts && (
-                          <button type="button" className="glass-pill" onClick={openBasicEdit}>Link Contact</button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {documents.map((doc) => (
-                      <div key={doc._id} className="flex items-center justify-between p-2.5 rounded-xl bg-surface hover:bg-hover transition-colors">
-                        <div>
-                          <p className="text-sm font-medium text-default">{doc.documentName}</p>
-                          <p className="text-xs text-faint">{formatDate(doc.uploadedDate)}</p>
-                        </div>
-                        <div className="flex gap-1">
-                          <a href={doc.driveLink} target="_blank" rel="noopener noreferrer" className="p-1.5 text-brand-600 hover:bg-brand-50 rounded-lg"><ExternalLink className="w-3.5 h-3.5" /></a>
-                          <button type="button" onClick={() => openEditDocument(doc)} className="p-1.5 text-faint hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button type="button" disabled={busyAction === `document-${doc._id}`} onClick={() => deleteDocument(doc._id)} className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg disabled:opacity-60"><Trash2 className="w-3.5 h-3.5" /></button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* RIGHT */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* FY Selector */}
-          <FYTabBar value={selectedFy} onChange={setSelectedFy} />
-
-          {/* Credits / Targets */}
-          {fyData && !isSIMP && (
-            <ClientProfileFinancialSummary
-              fyData={fyData}
-              selectedFy={selectedFy}
-              isPWP={isPWP}
-              fyLastUpdated={fyLastUpdated}
-              fyCategoryRows={fyCategoryRows}
-              fyHasTypedSplit={fyHasTypedSplit}
-              fyTypeTotals={fyTypeTotals}
-              openFYModal={openFYModal}
-              setBreakdownRec={setBreakdownRec}
             />
           )}
 
-          <ClientProfileCpcbRecords
-            selectedFy={selectedFy}
-            invoices={invoices}
-            uploadRecords={uploadRecords}
-            onAddInvoice={openInvoiceModal}
-            onAddUpload={openUploadModal}
-          />
+          {activePrimaryTab === "timeline" && (
+            <ClientProfileSecondaryWorkspace
+              activeSection={activeTimelineSection}
+              collapsed={secondaryNavCollapsed}
+              navItems={TIMELINE_NAV}
+              onCollapsedChange={setSecondaryNavCollapsed}
+              onSectionChange={handleTimelineSectionChange}
+              sections={timelineSections}
+              title="Timeline"
+            />
+          )}
 
-          <ClientProfileBillingPayments
-            selectedFy={selectedFy}
-            billing={billing}
-            payments={payments}
-            billingLastUpdated={billingLastUpdated}
-            hasFyData={Boolean(fyData)}
-            isPWP={isPWP}
-            openReminderModal={openReminderModal}
-            openBillingModalForRecord={openBillingModalForRecord}
-            deleteBilling={deleteBilling}
-            openFYModal={openFYModal}
-            openPaymentModalForRecord={openPaymentModalForRecord}
-            deletePayment={deletePayment}
-          />
-
-          {/* Timeline */}
-          <ClientProfileActivityTimeline
-            selectedFy={selectedFy}
-            open={sectionOpen.recentActivity}
-            onToggle={() => toggleSection("recentActivity")}
-            activityWindowHelpText={activityWindowHelpText}
-            activityEmptyText={activityEmptyText}
-            activitiesTotal={activitiesTotal}
-            activityRange={activityRange}
-            setActivityRange={setActivityRange}
-            activityFilter={activityFilter}
-            setActivityFilter={setActivityFilter}
-            activityError={activityError}
-            activityLoading={activityLoading}
-            activityLoadingMore={activityLoadingMore}
-            activityHasMore={activityHasMore}
-            filteredActivities={filteredActivities}
-            listRef={activityTimelineListRef}
-            handleActivityScroll={handleActivityScroll}
-            getActivityFyChip={getActivityFyChip}
-            getActivityActionLabel={getActivityActionLabel}
-            handleActivityAction={handleActivityAction}
-          />
-
-          {!fyData && !billing && (
-            <div className="bg-card border border-base rounded-2xl p-8 shadow-sm text-center">
-              <div className="w-12 h-12 bg-surface rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <svg className="w-6 h-6 text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-              </div>
-              <p className="font-semibold text-default mb-1">No data for FY {selectedFy}</p>
-              <p className="text-sm text-muted mb-4">
-                {isPWP
-                  ? "Start by adding credits or billing for this client, then link contacts and documents as needed."
-                  : "Start by adding FY data or billing for this client, then link contacts, reminders, and documents as needed."}
-              </p>
-              <div className="flex flex-wrap justify-center gap-1.5 mt-2">
-                <div className="glass-tray" style={{ flexWrap: "wrap", justifyContent: "center" }}>
-                  {emptyStateActions.map((action) => (
-                    <button
-                      key={`empty-${action.label}`}
-                      type="button"
-                      onClick={action.onClick}
-                      className={`glass-pill${action.tone === "primary" ? " glass-pill-active" : ""}`}
-                    >
-                      {action.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+          {activePrimaryTab === "notes" && (
+            <ClientProfileSecondaryWorkspace
+              activeSection={activeNotesSection}
+              collapsed={secondaryNavCollapsed}
+              navItems={NOTES_TASKS_NAV}
+              onCollapsedChange={setSecondaryNavCollapsed}
+              onSectionChange={setActiveNotesSection}
+              sections={notesSections}
+              title="Notes & Tasks"
+            />
           )}
         </div>
       </div>
 
+      <FloatingActionBar actions={quickActions} />
       <Modal open={invoiceModal} onClose={closeInvoiceModal} title="Add Invoice Tracking">
         <form onSubmit={saveInvoiceTracking} className="space-y-4">
           <div>
@@ -2115,12 +2680,25 @@ export default function ClientProfilePage() {
               </select>
             </div>
             <div>
-              <label className="label">Received Via *</label>
+              <label className="label">Month Status *</label>
+              <select
+                className="input-field"
+                value={invoiceForm.status}
+                onChange={(e) => setInvoiceForm((current) => ({ ...current, status: e.target.value as InvoiceStatus }))}
+                required
+              >
+                {INVOICE_STATUS_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Received Via {invoiceForm.status === "Pending" || invoiceForm.status === "Nil / No Invoice" ? "" : "*"}</label>
               <select
                 className="input-field"
                 value={invoiceForm.receivedVia}
                 onChange={(e) => setInvoiceForm((current) => ({ ...current, receivedVia: e.target.value as ReceivedVia | "" }))}
-                required
+                required={invoiceForm.status === "Received" || invoiceForm.status === "Partial / Issue"}
               >
                 <option value="">Select source</option>
                 {RECEIVED_VIA_OPTIONS.map((option) => (
@@ -2129,31 +2707,40 @@ export default function ClientProfilePage() {
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="label">From Date *</label>
-              <input
-                type="date"
-                className="input-field"
-                value={invoiceForm.fromDate}
-                onChange={(e) => setInvoiceForm((current) => ({ ...current, fromDate: e.target.value }))}
-                required
-              />
+
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <label className="label !mb-0">Select FY Months *</label>
+              <span className="text-xs text-faint">
+                {invoiceForm.selectedMonths.length} selected
+              </span>
             </div>
-            <div>
-              <label className="label">To Date *</label>
-              <input
-                type="date"
-                className="input-field"
-                value={invoiceForm.toDate}
-                onChange={(e) => setInvoiceForm((current) => ({ ...current, toDate: e.target.value }))}
-                required
-              />
-            </div>
+            <InvoiceMonthSelector
+              financialYear={invoiceForm.financialYear}
+              invoiceType={invoiceForm.invoiceType}
+              selectedMonths={invoiceForm.selectedMonths}
+              onSelectedMonthsChange={(months) => setInvoiceForm((current) => ({ ...current, selectedMonths: months }))}
+              existingInvoices={invoices}
+            />
+          </div>
+
+          <div>
+            <label className="label">Remarks</label>
+            <textarea
+              className="input-field"
+              rows={3}
+              value={invoiceForm.remarks}
+              onChange={(e) => setInvoiceForm((current) => ({ ...current, remarks: e.target.value }))}
+              placeholder="Optional note about partial data, nil month, or source details"
+            />
+          </div>
+
+          <div className="rounded-2xl border border-base bg-surface/70 px-3 py-2 text-xs text-muted">
+            Quantity is tracked separately in CPCB Upload Data. This selector only updates month-wise invoice coverage.
           </div>
           <div className="flex gap-2 pt-2 border-t border-base">
             <button type="submit" className="btn-primary flex-1 justify-center" disabled={inlineSaving}>
-              {inlineSaving ? "Saving..." : "Add Invoice Tracking"}
+              {inlineSaving ? "Saving..." : "Save Month Status"}
             </button>
             <button type="button" className="btn-secondary" onClick={closeInvoiceModal}>Cancel</button>
           </div>

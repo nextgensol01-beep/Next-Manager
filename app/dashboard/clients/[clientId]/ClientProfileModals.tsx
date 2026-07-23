@@ -264,7 +264,7 @@ export default function ClientProfileModals({
             <label className="label">Recipients *</label>
             <div className={`min-h-[44px] w-full rounded-lg border px-3 py-2 flex flex-wrap gap-2 items-center transition-colors ${reminderRecipients.length === 0 ? "border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/10" : "border-base bg-card"}`}>
               {reminderRecipients.map((recipient) => (
-                <span key={recipient.email} className="flex items-center gap-1.5 bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 text-xs font-medium px-2.5 py-1 rounded-full">
+                <span key={recipient.email} className="flex items-center gap-1.5 bg-brand-50 dark:bg-neutral-800 text-brand-700 dark:text-neutral-200 text-xs font-medium px-2.5 py-1 rounded-full">
                   <span className="max-w-[200px] truncate" title={recipient.email}>
                     {recipient.label !== recipient.email ? <><span className="font-semibold">{recipient.label}</span><span className="opacity-60 ml-1">- {recipient.email}</span></> : recipient.email}
                   </span>
@@ -312,10 +312,10 @@ export default function ClientProfileModals({
           <div><label className="label">Subject *</label><input className="input-field" value={reminderForm.subject} onChange={(e) => setReminderForm({ ...reminderForm, subject: e.target.value })} required /></div>
 
           {reminderPreviewHtml ? (
-            <div className="rounded-xl border border-blue-200 dark:border-blue-800 overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 dark:bg-blue-900/30">
-                <Send className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                <p className="text-sm font-semibold text-blue-700 dark:text-blue-300">Branded reminder template will be sent</p>
+            <div className="rounded-xl border border-base overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-2.5 bg-surface">
+                <Send className="w-4 h-4 text-muted" />
+                <p className="text-sm font-semibold text-default">Branded reminder template will be sent</p>
               </div>
               <iframe srcDoc={reminderPreviewHtml} className="w-full border-0" style={{ height: 280 }} title="Reminder Preview" />
             </div>

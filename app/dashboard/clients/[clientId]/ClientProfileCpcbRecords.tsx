@@ -214,14 +214,12 @@ export default function ClientProfileCpcbRecords({
     };
   }, [uploadRecords]);
 
-  if (invoices.length === 0 && uploadRecords.length === 0) return null;
-
   return (
-    <div className="bg-card rounded-2xl p-5 shadow-sm border border-base">
+    <div className="client-profile-card">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
         <div>
-          <h3 className="font-semibold text-default">CPCB Portal Records - FY {selectedFy}</h3>
-          <p className="text-xs text-faint mt-1">Invoice coverage and portal upload details linked to this client.</p>
+          <p className="client-profile-kicker">Compliance</p>
+          <h3 className="text-xl font-semibold text-default">CPCB Portal Records - FY {selectedFy}</h3>
         </div>
         <div className="glass-tray self-start">
           <button type="button" className="glass-pill" onClick={onAddInvoice}>
@@ -234,14 +232,14 @@ export default function ClientProfileCpcbRecords({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="rounded-xl border border-base bg-surface/70 p-4">
+        <div className="rounded-2xl border border-base bg-surface/70 p-4">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-brand-600" />
               <p className="text-sm font-semibold text-default">Invoice Coverage</p>
             </div>
             {invoices.length > 0 && (
-              <span className="text-xs bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-400 px-2 py-0.5 rounded-full font-medium">
+              <span className="text-xs bg-brand-50 text-brand-700 dark:bg-neutral-800 dark:text-neutral-200 px-2 py-0.5 rounded-full font-medium">
                 {invoices.length} entr{invoices.length === 1 ? "y" : "ies"}
               </span>
             )}
@@ -289,7 +287,7 @@ export default function ClientProfileCpcbRecords({
           )}
         </div>
 
-        <div className="rounded-xl border border-base bg-surface/70 p-4">
+        <div className="rounded-2xl border border-base bg-surface/70 p-4">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <Upload className="w-4 h-4 text-teal-600" />

@@ -2,8 +2,11 @@ export type InvoiceCoverageType = "sale" | "purchase";
 
 export type InvoiceCoverageInput = {
   invoiceType?: string | null;
+  status?: string | null;
   fromDate?: string | Date | null;
   toDate?: string | Date | null;
+  createdAt?: string | Date | null;
+  updatedAt?: string | Date | null;
 };
 
 export type InvoiceTypeCoverage = {
@@ -105,20 +108,45 @@ function summarizeTypeCoverage(coveredKeys: Set<string>, fy: string): InvoiceTyp
   };
 }
 
+function invoiceTimestamp(invoice: InvoiceCoverageInput) {
+  const date = parseDate(invoice.updatedAt || invoice.createdAt);
+  return date ? date.getTime() : 0;
+}
+
+function isReceivedCoverageStatus(status?: string | null) {
+  return !status || status === "Received" || status === "Nil / No Invoice";
+}
+
 export function buildInvoiceCoverageSummary(
   invoices: InvoiceCoverageInput[],
   fy: string,
 ): InvoiceCoverageSummary {
   const monthLabels = getFinancialYearMonths(fy).map((month) => month.label);
+  const latestByTypeMonth: Record<InvoiceCoverageType, Map<string, { status?: string | null; timestamp: number }>> = {
+    sale: new Map(),
+    purchase: new Map(),
+  };
+
+  invoices.forEach((invoice) => {
+    if (invoice.invoiceType !== "sale" && invoice.invoiceType !== "purchase") return;
+    const type = invoice.invoiceType as InvoiceCoverageType;
+    const timestamp = invoiceTimestamp(invoice);
+    getCoveredInvoiceMonths(invoice.fromDate, invoice.toDate, fy).forEach((key) => {
+      const existing = latestByTypeMonth[type].get(key);
+      if (!existing || timestamp >= existing.timestamp) {
+        latestByTypeMonth[type].set(key, { status: invoice.status, timestamp });
+      }
+    });
+  });
+
   const covered: Record<InvoiceCoverageType, Set<string>> = {
     sale: new Set<string>(),
     purchase: new Set<string>(),
   };
 
-  invoices.forEach((invoice) => {
-    if (invoice.invoiceType !== "sale" && invoice.invoiceType !== "purchase") return;
-    getCoveredInvoiceMonths(invoice.fromDate, invoice.toDate, fy).forEach((key) => {
-      covered[invoice.invoiceType as InvoiceCoverageType].add(key);
+  (Object.keys(latestByTypeMonth) as InvoiceCoverageType[]).forEach((type) => {
+    latestByTypeMonth[type].forEach((entry, key) => {
+      if (isReceivedCoverageStatus(entry.status)) covered[type].add(key);
     });
   });
 

@@ -62,10 +62,10 @@ export default function ClientProfileActivityTimeline({
   handleActivityAction,
 }: ClientProfileActivityTimelineProps) {
   return (
-    <div className="bg-card rounded-2xl shadow-sm border border-base overflow-hidden">
+    <div className="client-profile-card overflow-hidden !p-0">
       <div className="px-5 py-4 border-b border-base space-y-3">
         <CollapsibleSectionHeader
-          title="Recent Activity"
+          title="Activity Timeline"
           subtitle={`${activityWindowHelpText} FY-tagged events are highlighted and global events stay neutral.`}
           open={open}
           onToggle={onToggle}
@@ -117,7 +117,7 @@ export default function ClientProfileActivityTimeline({
                     key={event.id}
                     className={`flex items-start gap-3 px-5 py-3.5 transition-colors ${
                       event.financialYear === selectedFy
-                        ? "bg-brand-50/35 dark:bg-brand-900/10"
+                        ? "bg-brand-50/35 dark:bg-neutral-800/45"
                         : "hover:bg-surface bg-surface/40"
                     }`}
                   >

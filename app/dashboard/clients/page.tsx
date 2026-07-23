@@ -29,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import { invalidate, useCache } from "@/lib/useCache";
+import { useFinancialYearState } from "@/app/providers";
 import {
   normalizeEmailList,
   normalizePhoneList,
@@ -179,19 +180,23 @@ function ClientMobileSheet({
 function ActiveFilterChips({
   compact,
   categoryFilter,
+  registeredThisFyFilter,
   stateFilter,
   clearFilters,
   setCategoryFilter,
+  setRegisteredThisFyFilter,
   setStateFilter,
 }: {
   compact: boolean;
   categoryFilter: string;
+  registeredThisFyFilter: boolean;
   stateFilter: string;
   clearFilters: () => void;
   setCategoryFilter: (value: string) => void;
+  setRegisteredThisFyFilter: (value: boolean) => void;
   setStateFilter: (value: string) => void;
 }) {
-  if (categoryFilter === "all" && stateFilter === "all") return null;
+  if (categoryFilter === "all" && stateFilter === "all" && !registeredThisFyFilter) return null;
 
   return (
     <div className="clients-filter-chip-layer" data-compact={compact ? "true" : "false"}>
@@ -205,6 +210,12 @@ function ActiveFilterChips({
         {stateFilter !== "all" && (
           <button type="button" onClick={() => setStateFilter("all")}>
             {stateFilter}
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {registeredThisFyFilter && (
+          <button type="button" onClick={() => setRegisteredThisFyFilter(false)}>
+            Current FY Registration
             <X className="h-3.5 w-3.5" />
           </button>
         )}
@@ -268,9 +279,12 @@ type FilterPanelProps = {
   cancelFilters: () => void;
   className?: string;
   draftCategoryFilter: string;
+  draftRegisteredThisFyFilter: boolean;
   draftStateFilter: string;
+  financialYear: string;
   panelRef?: React.Ref<HTMLDivElement>;
   setDraftCategoryFilter: (value: string) => void;
+  setDraftRegisteredThisFyFilter: (value: boolean) => void;
   setDraftStateFilter: (value: string) => void;
   style?: React.CSSProperties;
 };
@@ -281,9 +295,12 @@ function FilterPanel({
   cancelFilters,
   className,
   draftCategoryFilter,
+  draftRegisteredThisFyFilter,
   draftStateFilter,
+  financialYear,
   panelRef,
   setDraftCategoryFilter,
+  setDraftRegisteredThisFyFilter,
   setDraftStateFilter,
   style,
 }: FilterPanelProps) {
@@ -300,7 +317,7 @@ function FilterPanel({
         <div className="min-w-0">
           <p className="text-[15px] font-semibold text-default">Filters</p>
           <p className="mt-0.5 text-xs text-faint">
-            {activeFilterCount > 0 ? `${activeFilterCount} active` : "Category and state"}
+            {activeFilterCount > 0 ? `${activeFilterCount} active` : "Category, state, and registration"}
           </p>
         </div>
         <button type="button" className="clients-filter-close" onClick={cancelFilters} aria-label="Close filters">
@@ -327,6 +344,21 @@ function FilterPanel({
         />
       </div>
 
+      <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-2xl border border-base bg-card px-3 py-3 text-left transition-colors hover:bg-hover">
+        <input
+          type="checkbox"
+          className="mt-1 h-4 w-4 rounded border-base accent-[var(--brand)]"
+          checked={draftRegisteredThisFyFilter}
+          onChange={(event) => setDraftRegisteredThisFyFilter(event.target.checked)}
+        />
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-default">Current FY Registration</span>
+          <span className="mt-0.5 block text-xs leading-relaxed text-faint">
+            CPCB registration or approval date falls in FY {financialYear}
+          </span>
+        </span>
+      </label>
+
       <div className="clients-filter-panel-actions">
         <button
           type="button"
@@ -334,6 +366,7 @@ function FilterPanel({
           onClick={() => {
             setDraftCategoryFilter("all");
             setDraftStateFilter("all");
+            setDraftRegisteredThisFyFilter(false);
           }}
         >
           Clear
@@ -474,7 +507,9 @@ function MorphingClientHeader({
   clearSearch,
   compact,
   draftCategoryFilter,
+  draftRegisteredThisFyFilter,
   draftStateFilter,
+  financialYear,
   filterOpen,
   filterPanelRef,
   filterPopoverRef,
@@ -487,6 +522,7 @@ function MorphingClientHeader({
   openFilters,
   searchInput,
   setDraftCategoryFilter,
+  setDraftRegisteredThisFyFilter,
   setDraftStateFilter,
   totalClients,
 }: {
@@ -497,7 +533,9 @@ function MorphingClientHeader({
   clearSearch: () => void;
   compact: boolean;
   draftCategoryFilter: string;
+  draftRegisteredThisFyFilter: boolean;
   draftStateFilter: string;
+  financialYear: string;
   filterOpen: boolean;
   filterPanelRef: React.RefObject<HTMLDivElement | null>;
   filterPopoverRef: React.RefObject<HTMLDivElement | null>;
@@ -510,6 +548,7 @@ function MorphingClientHeader({
   openFilters: () => void;
   searchInput: string;
   setDraftCategoryFilter: (value: string) => void;
+  setDraftRegisteredThisFyFilter: (value: boolean) => void;
   setDraftStateFilter: (value: string) => void;
   totalClients: number;
 }) {
@@ -578,9 +617,12 @@ function MorphingClientHeader({
                 applyFilters={applyFilters}
                 cancelFilters={cancelFilters}
                 draftCategoryFilter={draftCategoryFilter}
+                draftRegisteredThisFyFilter={draftRegisteredThisFyFilter}
                 draftStateFilter={draftStateFilter}
+                financialYear={financialYear}
                 panelRef={filterPopoverRef}
                 setDraftCategoryFilter={setDraftCategoryFilter}
+                setDraftRegisteredThisFyFilter={setDraftRegisteredThisFyFilter}
                 setDraftStateFilter={setDraftStateFilter}
               />
             )}
@@ -860,6 +902,7 @@ const syncEntrySelections = (entry: PersonEntry): PersonEntry => {
 
 export default function ClientsPage() {
   const router = useRouter();
+  const [financialYear] = useFinancialYearState();
   const [modalOpen, setModalOpen] = useState(false);
   const [editClient, setEditClient] = useState<Client | null>(null);
 
@@ -872,9 +915,11 @@ export default function ClientsPage() {
 
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stateFilter, setStateFilter] = useState("all");
+  const [registeredThisFyFilter, setRegisteredThisFyFilter] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftCategoryFilter, setDraftCategoryFilter] = useState("all");
   const [draftStateFilter, setDraftStateFilter] = useState("all");
+  const [draftRegisteredThisFyFilter, setDraftRegisteredThisFyFilter] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [toolbarCompact, setToolbarCompact] = useState(false);
   const [mobileActionsClient, setMobileActionsClient] = useState<Client | null>(null);
@@ -976,8 +1021,12 @@ export default function ClientsPage() {
     if (search) params.set("search", search);
     if (categoryFilter !== "all") params.set("category", categoryFilter);
     if (stateFilter !== "all") params.set("state", stateFilter);
+    if (registeredThisFyFilter) {
+      params.set("registeredThisFy", "1");
+      params.set("fy", financialYear);
+    }
     return params;
-  }, [categoryFilter, search, stateFilter]);
+  }, [categoryFilter, financialYear, registeredThisFyFilter, search, stateFilter]);
 
   const readErrorMessage = useCallback(async (response: Response, fallback: string) => {
     try {
@@ -1092,6 +1141,7 @@ export default function ClientsPage() {
         setFilterOpen(false);
         setDraftCategoryFilter(categoryFilter);
         setDraftStateFilter(stateFilter);
+        setDraftRegisteredThisFyFilter(registeredThisFyFilter);
       }
     };
 
@@ -1100,6 +1150,7 @@ export default function ClientsPage() {
       setFilterOpen(false);
       setDraftCategoryFilter(categoryFilter);
       setDraftStateFilter(stateFilter);
+      setDraftRegisteredThisFyFilter(registeredThisFyFilter);
     };
 
     document.addEventListener("pointerdown", handlePointerDown);
@@ -1108,7 +1159,7 @@ export default function ClientsPage() {
       document.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [categoryFilter, filterOpen, isMobileViewport, stateFilter]);
+  }, [categoryFilter, filterOpen, isMobileViewport, registeredThisFyFilter, stateFilter]);
 
   useEffect(() => {
     if (!mobileActionsClient) return;
@@ -1224,31 +1275,36 @@ export default function ClientsPage() {
     setSearch("");
     setCategoryFilter("all");
     setStateFilter("all");
+    setRegisteredThisFyFilter(false);
     setDraftCategoryFilter("all");
     setDraftStateFilter("all");
+    setDraftRegisteredThisFyFilter(false);
     setFilterOpen(false);
   }, []);
 
   const openFilters = useCallback(() => {
     setDraftCategoryFilter(categoryFilter);
     setDraftStateFilter(stateFilter);
+    setDraftRegisteredThisFyFilter(registeredThisFyFilter);
     setFilterOpen(true);
-  }, [categoryFilter, stateFilter]);
+  }, [categoryFilter, registeredThisFyFilter, stateFilter]);
 
   const cancelFilters = useCallback(() => {
     setDraftCategoryFilter(categoryFilter);
     setDraftStateFilter(stateFilter);
+    setDraftRegisteredThisFyFilter(registeredThisFyFilter);
     setFilterOpen(false);
-  }, [categoryFilter, stateFilter]);
+  }, [categoryFilter, registeredThisFyFilter, stateFilter]);
 
   const applyFilters = useCallback(() => {
     setCategoryFilter(draftCategoryFilter);
     setStateFilter(draftStateFilter);
+    setRegisteredThisFyFilter(draftRegisteredThisFyFilter);
     setFilterOpen(false);
-  }, [draftCategoryFilter, draftStateFilter]);
+  }, [draftCategoryFilter, draftRegisteredThisFyFilter, draftStateFilter]);
 
-  const isFiltered = Boolean(search || searchInput || categoryFilter !== "all" || stateFilter !== "all");
-  const activeFilterCount = Number(categoryFilter !== "all") + Number(stateFilter !== "all");
+  const isFiltered = Boolean(search || searchInput || categoryFilter !== "all" || stateFilter !== "all" || registeredThisFyFilter);
+  const activeFilterCount = Number(categoryFilter !== "all") + Number(stateFilter !== "all") + Number(registeredThisFyFilter);
   const activeFilterLabel = activeFilterCount === 0
     ? "No filters"
     : `${activeFilterCount} active filter${activeFilterCount === 1 ? "" : "s"}`;
@@ -1306,7 +1362,9 @@ export default function ClientsPage() {
           clearSearch={clearSearch}
           compact={toolbarCompact}
           draftCategoryFilter={draftCategoryFilter}
+          draftRegisteredThisFyFilter={draftRegisteredThisFyFilter}
           draftStateFilter={draftStateFilter}
+          financialYear={financialYear}
           filterOpen={filterOpen}
           filterPanelRef={filterPanelRef}
           filterPopoverRef={filterPopoverRef}
@@ -1319,6 +1377,7 @@ export default function ClientsPage() {
           openFilters={openFilters}
           searchInput={searchInput}
           setDraftCategoryFilter={setDraftCategoryFilter}
+          setDraftRegisteredThisFyFilter={setDraftRegisteredThisFyFilter}
           setDraftStateFilter={setDraftStateFilter}
           totalClients={totalClients}
         />
@@ -1326,9 +1385,11 @@ export default function ClientsPage() {
         <ActiveFilterChips
           compact={toolbarCompact}
           categoryFilter={categoryFilter}
+          registeredThisFyFilter={registeredThisFyFilter}
           stateFilter={stateFilter}
           clearFilters={clearFilters}
           setCategoryFilter={setCategoryFilter}
+          setRegisteredThisFyFilter={setRegisteredThisFyFilter}
           setStateFilter={setStateFilter}
         />
 
@@ -1455,8 +1516,11 @@ export default function ClientsPage() {
             applyFilters={applyFilters}
             cancelFilters={cancelFilters}
             draftCategoryFilter={draftCategoryFilter}
+            draftRegisteredThisFyFilter={draftRegisteredThisFyFilter}
             draftStateFilter={draftStateFilter}
+            financialYear={financialYear}
             setDraftCategoryFilter={setDraftCategoryFilter}
+            setDraftRegisteredThisFyFilter={setDraftRegisteredThisFyFilter}
             setDraftStateFilter={setDraftStateFilter}
           />
         )}

@@ -24,6 +24,10 @@ import {
   type ClientCustomFieldDefinition,
   type ClientCustomFieldValues,
 } from "@/lib/clientCustomFields";
+import {
+  getFinancialYearDateRange,
+  getLikelyCpcbRegistrationDateKeys,
+} from "@/lib/currentFyRegistration";
 
 type MaybeId = { toString(): string } | string;
 
@@ -702,6 +706,8 @@ async function buildClientListQuery(options: {
   category?: string | null;
   state?: string | null;
   search?: string | null;
+  registeredThisFy?: boolean | null;
+  financialYear?: string | null;
 }) {
   const query: Record<string, unknown> = {};
 
@@ -724,6 +730,26 @@ async function buildClientListQuery(options: {
     ];
   }
 
+  if (options.registeredThisFy) {
+    const fieldDefinitions = await ClientCustomField.find({ active: { $ne: false } })
+      .select("key label type")
+      .lean() as unknown as Array<Pick<ClientCustomFieldDefinition, "key" | "label" | "type">>;
+    const keys = getLikelyCpcbRegistrationDateKeys(fieldDefinitions);
+    const range = getFinancialYearDateRange(options.financialYear || undefined);
+    const registrationConditions = keys.flatMap((key) => {
+      const path = `customFields.${key}`;
+      return [
+        { [path]: { $gte: range.startInput, $lte: range.endInput } },
+        { [path]: { $gte: range.startDate, $lte: range.endDate } },
+      ];
+    });
+
+    query.$and = [
+      ...(Array.isArray(query.$and) ? query.$and : []),
+      registrationConditions.length > 0 ? { $or: registrationConditions } : { _id: null },
+    ];
+  }
+
   return query;
 }
 
@@ -731,6 +757,8 @@ export async function listClientsWithContacts(options: {
   category?: string | null;
   state?: string | null;
   search?: string | null;
+  registeredThisFy?: boolean | null;
+  financialYear?: string | null;
 }) {
   const query = await buildClientListQuery(options);
   const clients = await Client.find(query).sort({ createdAt: -1 });
@@ -746,6 +774,8 @@ export async function listClientsWithContactsPage(options: {
   category?: string | null;
   state?: string | null;
   search?: string | null;
+  registeredThisFy?: boolean | null;
+  financialYear?: string | null;
   limit: number;
   offset: number;
 }) {

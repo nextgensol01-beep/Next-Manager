@@ -9,7 +9,20 @@ const cleanInvoicePayload = (body: Record<string, unknown>) => ({
   clientId: String(body.clientId || "").trim(),
   financialYear: String(body.financialYear || "").trim(),
   invoiceType: body.invoiceType === "sale" || body.invoiceType === "purchase" ? body.invoiceType : undefined,
-  receivedVia: body.receivedVia === "hardcopy" || body.receivedVia === "mail" || body.receivedVia === "whatsapp" ? body.receivedVia : undefined,
+  status: (
+    body.status === "Pending" ||
+    body.status === "Received" ||
+    body.status === "Partial / Issue" ||
+    body.status === "Nil / No Invoice"
+  ) ? body.status : "Received",
+  receivedVia: (
+    body.receivedVia === "hardcopy" ||
+    body.receivedVia === "mail" ||
+    body.receivedVia === "whatsapp" ||
+    body.receivedVia === "excel" ||
+    body.receivedVia === "other"
+  ) ? body.receivedVia : undefined,
+  remarks: typeof body.remarks === "string" ? body.remarks.trim() : "",
   fromDate: body.fromDate,
   toDate: body.toDate,
 });

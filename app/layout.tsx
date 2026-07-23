@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./clients-premium.css";
+import "./client-profile-premium.css";
 import Providers from "./providers";
 
 export const metadata: Metadata = {

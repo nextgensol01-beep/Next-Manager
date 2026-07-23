@@ -1,7 +1,7 @@
 "use client";
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion, useDragControls } from "framer-motion";
+import { AnimatePresence, animate, motion, useDragControls, useMotionTemplate, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform, useVelocity, type MotionStyle } from "framer-motion";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
@@ -86,6 +86,9 @@ const EMAIL_TEMPLATE_VARIABLES: Record<EmailTemplateVariable, { label: string; t
 const CATEGORIES = ["CAT-I", "CAT-II", "CAT-III", "CAT-IV"];
 const TYPES = ["Recycling", "EOL", "Co-processing", "Energy Recovery", "Other"];
 const GST_OPTIONS = [...GST_PERCENT_OPTIONS];
+type QuotationTabKey = "editor" | "preview" | "timeline";
+type QuotationTabRect = { left: number; top: number; width: number; height: number };
+type QuotationTabEdges = { left: number; right: number; top: number; bottom: number };
 
 const STANDARD_SERVICES = [
   { label: "CAT-I Recycling Credit Procurement", category: "CAT-I", type: "Recycling", description: "CAT-I Recycling Credit Procurement" },
@@ -137,9 +140,304 @@ const quotationExpandedDockGlassStyle: React.CSSProperties = {
   WebkitBackdropFilter: "blur(40px) saturate(210%)",
   boxShadow: "0 22px 64px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.18), inset 0 0 0 1px var(--color-border-soft)",
 };
+
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+function useViewportWidth() {
+  const [width, setWidth] = useState(1024);
+
+  useIsomorphicLayoutEffect(() => {
+    let frameId = 0;
+    const readWidth = () => Math.round(window.innerWidth || document.documentElement.clientWidth || 1024);
+    const update = () => {
+      const nextWidth = readWidth();
+      setWidth(current => (current === nextWidth ? current : nextWidth));
+    };
+    const scheduleUpdate = () => {
+      if (frameId) return;
+      frameId = requestAnimationFrame(() => {
+        frameId = 0;
+        update();
+      });
+    };
+    update();
+    window.addEventListener("resize", scheduleUpdate);
+    window.addEventListener("orientationchange", scheduleUpdate);
+    window.visualViewport?.addEventListener("resize", scheduleUpdate);
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(scheduleUpdate);
+      resizeObserver.observe(document.documentElement);
+    }
+
+    const intervalId = window.setInterval(update, 250);
+
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      window.clearInterval(intervalId);
+      window.removeEventListener("resize", scheduleUpdate);
+      window.removeEventListener("orientationchange", scheduleUpdate);
+      window.visualViewport?.removeEventListener("resize", scheduleUpdate);
+      resizeObserver?.disconnect();
+    };
+  }, []);
+
+  return width;
+}
+
 const quotationExpandedDockMaxHeight = "calc(100svh - 58px - env(safe-area-inset-bottom))";
 const quotationExpandedDockScrollMaxHeight = "calc(100svh - 122px - env(safe-area-inset-bottom))";
 const PREVIEW_DOCUMENT_WIDTH = 860;
+const QUOTATION_TAB_LEAD_SPRING = { stiffness: 580, damping: 28, mass: 0.6 };
+const QUOTATION_TAB_TRAIL_SPRING = { stiffness: 260, damping: 26, mass: 1.5 };
+const QUOTATION_TAB_AXIS_SPRING = { stiffness: 580, damping: 30, mass: 0.6 };
+const QUOTATION_TAB_SQUASH_SPRING = { stiffness: 420, damping: 22, mass: 0.5 };
+const QUOTATION_TAB_REDUCED_SPRING = { stiffness: 300, damping: 40, mass: 1 };
+const QUOTATION_TAB_RECT_EPSILON = 0.5;
+
+function quotationTabEdges(rect: QuotationTabRect): QuotationTabEdges {
+  return {
+    bottom: rect.top + rect.height,
+    left: rect.left,
+    right: rect.left + rect.width,
+    top: rect.top,
+  };
+}
+
+function quotationTabRectFromEdges(edges: QuotationTabEdges): QuotationTabRect {
+  return {
+    height: Math.max(edges.bottom - edges.top, 4),
+    left: edges.left,
+    top: edges.top,
+    width: Math.max(edges.right - edges.left, 4),
+  };
+}
+
+function quotationTabCenter(rect: QuotationTabRect) {
+  return {
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2,
+  };
+}
+
+function quotationTabRectsAreEqual(a: QuotationTabRect | null, b: QuotationTabRect) {
+  if (!a) return false;
+  return (
+    Math.abs(a.left - b.left) < QUOTATION_TAB_RECT_EPSILON &&
+    Math.abs(a.top - b.top) < QUOTATION_TAB_RECT_EPSILON &&
+    Math.abs(a.width - b.width) < QUOTATION_TAB_RECT_EPSILON &&
+    Math.abs(a.height - b.height) < QUOTATION_TAB_RECT_EPSILON
+  );
+}
+
+function quotationTabDirectionalSpring(delta: number, leadsWhenPositive: boolean) {
+  if (Math.abs(delta) < QUOTATION_TAB_RECT_EPSILON) return QUOTATION_TAB_AXIS_SPRING;
+  return delta > 0 === leadsWhenPositive ? QUOTATION_TAB_LEAD_SPRING : QUOTATION_TAB_TRAIL_SPRING;
+}
+
+function QuotationAnimatedTabPill({
+  reduced,
+  targetRect,
+}: {
+  reduced: boolean;
+  targetRect: QuotationTabRect | null;
+}) {
+  const initialEdges = targetRect ? quotationTabEdges(targetRect) : { bottom: 0, left: 0, right: 0, top: 0 };
+  const leftEdge = useMotionValue(initialEdges.left);
+  const rightEdge = useMotionValue(initialEdges.right);
+  const topEdge = useMotionValue(initialEdges.top);
+  const bottomEdge = useMotionValue(initialEdges.bottom);
+  const previousRectRef = useRef<QuotationTabRect | null>(targetRect);
+  const controlsRef = useRef<Array<{ stop: () => void }>>([]);
+  const mountedRef = useRef(false);
+
+  const width = useTransform([rightEdge, leftEdge] as const, ([right, left]: number[]) => Math.max(right - left, 4));
+  const height = useTransform([bottomEdge, topEdge] as const, ([bottom, top]: number[]) => Math.max(bottom - top, 4));
+  const leftVelocity = useVelocity(leftEdge);
+  const rightVelocity = useVelocity(rightEdge);
+  const topVelocity = useVelocity(topEdge);
+  const bottomVelocity = useVelocity(bottomEdge);
+
+  const rawScaleX = useTransform(
+    [leftVelocity, rightVelocity, topVelocity, bottomVelocity] as const,
+    ([leftV, rightV, topV, bottomV]: number[]) => {
+      if (reduced) return 1;
+      const horizontal = Math.max(Math.abs(leftV), Math.abs(rightV));
+      const vertical = Math.max(Math.abs(topV), Math.abs(bottomV));
+      const horizontalAmount = Math.min(horizontal / 1200, 1);
+      const verticalAmount = Math.min(vertical / 900, 1);
+      const diagonal = horizontalAmount > 0.08 && verticalAmount > 0.08;
+      const squash = diagonal ? 0.026 : 0.044;
+      const counterStretch = diagonal ? horizontalAmount * 0.006 : 0;
+      return Math.max(0.955, Math.min(1.03, 1 - verticalAmount * squash + counterStretch));
+    }
+  );
+  const rawScaleY = useTransform(
+    [leftVelocity, rightVelocity, topVelocity, bottomVelocity] as const,
+    ([leftV, rightV, topV, bottomV]: number[]) => {
+      if (reduced) return 1;
+      const horizontal = Math.max(Math.abs(leftV), Math.abs(rightV));
+      const vertical = Math.max(Math.abs(topV), Math.abs(bottomV));
+      const horizontalAmount = Math.min(horizontal / 1200, 1);
+      const verticalAmount = Math.min(vertical / 900, 1);
+      const diagonal = horizontalAmount > 0.08 && verticalAmount > 0.08;
+      const squash = diagonal ? 0.026 : 0.044;
+      const counterStretch = diagonal ? verticalAmount * 0.006 : 0;
+      return Math.max(0.955, Math.min(1.03, 1 - horizontalAmount * squash + counterStretch));
+    }
+  );
+  const scaleX = useSpring(rawScaleX, reduced ? QUOTATION_TAB_REDUCED_SPRING : QUOTATION_TAB_SQUASH_SPRING);
+  const scaleY = useSpring(rawScaleY, reduced ? QUOTATION_TAB_REDUCED_SPRING : QUOTATION_TAB_SQUASH_SPRING);
+
+  useEffect(() => {
+    if (!targetRect) return;
+    const previousRect = previousRectRef.current;
+
+    if (!reduced && previousRect && quotationTabRectsAreEqual(previousRect, targetRect)) return;
+
+    controlsRef.current.forEach((control) => control.stop());
+    controlsRef.current = [];
+
+    const nextEdges = quotationTabEdges(targetRect);
+    const setDirectly = () => {
+      leftEdge.set(nextEdges.left);
+      rightEdge.set(nextEdges.right);
+      topEdge.set(nextEdges.top);
+      bottomEdge.set(nextEdges.bottom);
+    };
+
+    if (!mountedRef.current || reduced || !previousRect) {
+      setDirectly();
+      mountedRef.current = true;
+      previousRectRef.current = targetRect;
+      return;
+    }
+
+    const visualRect = quotationTabRectFromEdges({
+      bottom: bottomEdge.get(),
+      left: leftEdge.get(),
+      right: rightEdge.get(),
+      top: topEdge.get(),
+    });
+    const previousCenter = quotationTabCenter(visualRect);
+    const nextCenter = quotationTabCenter(targetRect);
+    const deltaX = nextCenter.x - previousCenter.x;
+    const deltaY = nextCenter.y - previousCenter.y;
+
+    controlsRef.current = [
+      animate(leftEdge, nextEdges.left, { type: "spring", ...quotationTabDirectionalSpring(deltaX, false) }),
+      animate(rightEdge, nextEdges.right, { type: "spring", ...quotationTabDirectionalSpring(deltaX, true) }),
+      animate(topEdge, nextEdges.top, { type: "spring", ...quotationTabDirectionalSpring(deltaY, false) }),
+      animate(bottomEdge, nextEdges.bottom, { type: "spring", ...quotationTabDirectionalSpring(deltaY, true) }),
+    ];
+    previousRectRef.current = targetRect;
+
+    return () => {
+      controlsRef.current.forEach((control) => control.stop());
+      controlsRef.current = [];
+    };
+  }, [bottomEdge, leftEdge, reduced, rightEdge, targetRect, topEdge]);
+
+  if (!targetRect) return null;
+
+  return (
+    <motion.span
+      aria-hidden
+      className={`absolute rounded-full ${quoteActiveSurface}`}
+      style={{
+        height,
+        left: leftEdge,
+        pointerEvents: "none",
+        scaleX,
+        scaleY,
+        top: topEdge,
+        transformOrigin: "center center",
+        width,
+        willChange: "left, top, width, height, transform",
+        zIndex: 0,
+      }}
+    />
+  );
+}
+
+function QuotationMainTabs({
+  activeTab,
+  isEditable,
+  onTabChange,
+}: {
+  activeTab: QuotationTabKey;
+  isEditable: boolean;
+  onTabChange: (tab: QuotationTabKey) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const reducedMotion = useReducedMotion();
+  const [pillRect, setPillRect] = useState<QuotationTabRect | null>(null);
+  const tabs: Array<{ key: QuotationTabKey; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+    { key: "editor", label: isEditable ? "Editor" : "Details", icon: FileText },
+    { key: "preview", label: "Preview", icon: Eye },
+    { key: "timeline", label: "Activity", icon: Activity },
+  ];
+
+  const measurePill = useCallback(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const button = track.querySelector<HTMLElement>(`[data-quote-tab="${activeTab}"]`);
+    if (!button) return;
+    const trackRect = track.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    const nextRect = {
+      height: buttonRect.height,
+      left: buttonRect.left - trackRect.left,
+      top: buttonRect.top - trackRect.top,
+      width: buttonRect.width,
+    };
+    setPillRect((previousRect) => quotationTabRectsAreEqual(previousRect, nextRect) ? previousRect : nextRect);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(measurePill);
+    return () => cancelAnimationFrame(frame);
+  }, [measurePill]);
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measurePill);
+      return () => window.removeEventListener("resize", measurePill);
+    }
+
+    const observer = new ResizeObserver(measurePill);
+    observer.observe(track);
+    Array.from(track.children).forEach((child) => observer.observe(child));
+    return () => observer.disconnect();
+  }, [measurePill]);
+
+  return (
+    <div ref={trackRef} className={`relative mb-5 grid w-full grid-cols-3 gap-1 overflow-hidden rounded-full p-1 shadow-sm sm:scrollbar-none sm:mb-8 sm:flex sm:w-fit sm:max-w-full sm:p-1.5 ${quoteSubtleSurface}`}>
+      <QuotationAnimatedTabPill reduced={reducedMotion ?? false} targetRect={pillRect} />
+      {tabs.map(({ key, label, icon: Icon }) => {
+        const active = activeTab === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            data-quote-tab={key}
+            onClick={() => onTabChange(key)}
+            className={`relative z-[1] flex min-w-0 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium transition-all duration-200 active:scale-[0.98] sm:gap-2 sm:px-5 sm:py-2.5 sm:text-sm ${
+              active ? "text-default" : "text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.08]"
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 truncate">{label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function clampPreviewScale(value: number) {
   return Math.min(1.25, Math.max(0.32, Math.round(value * 100) / 100));
@@ -471,7 +769,7 @@ export default function QuotationDetailPage() {
   const [quotation, setQuotation] = useState<Quotation | null>(null);
   const [loading, setLoading] = useState(true);
   const [savedStatus, setSavedStatus] = useState<"idle" | "saving" | "saved">("idle");
-  const [activeTab, setActiveTab] = useState<"editor" | "preview" | "timeline">("editor");
+  const [activeTab, setActiveTab] = useState<QuotationTabKey>("editor");
   const [selectedRevNum, setSelectedRevNum] = useState<number | null>(null);
 
   // Form state — mirrors current editable revision
@@ -536,6 +834,52 @@ export default function QuotationDetailPage() {
   const emailTemplateDropdownPanelRef = useRef<HTMLDivElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const previewPanelRef = useRef<HTMLDivElement | null>(null);
+  const viewportWidth = useViewportWidth();
+  const isMobileHeader = viewportWidth < 768;
+  const isDesktopHeader = viewportWidth >= 1280;
+  const { scrollY } = useScroll();
+
+  // Mobile header morph: one normalized scroll signal, then a light spring to remove wheel/touch jitter.
+  const rawHeaderMorphProgress = useTransform(scrollY, [0, 110], [0, 1], { clamp: true });
+  const headerMorphProgress = useSpring(rawHeaderMorphProgress, { stiffness: 180, damping: 28, mass: 0.3 });
+
+  // The card itself physically collapses on mobile; desktop keeps the existing CSS-variable behavior.
+  const mobileHeaderHeight = useTransform(headerMorphProgress, [0, 1], [138, 78]);
+  const mobileHeaderPaddingX = useTransform(headerMorphProgress, [0, 1], [14, 12]);
+  const mobileHeaderPaddingY = useTransform(headerMorphProgress, [0, 1], [16, 11]);
+  const mobileHeaderPadding = useMotionTemplate`${mobileHeaderPaddingY}px ${mobileHeaderPaddingX}px`;
+  const mobileHeaderIdentityColumnGap = useTransform(headerMorphProgress, [0, 1], [18, 14]);
+  const mobileHeaderIdentityRowGap = useTransform(headerMorphProgress, [0, 1], [0, 0]);
+  const mobileHeaderBackPadding = useTransform(headerMorphProgress, [0, 1], [11, 10]);
+  const mobileHeaderBackMarginTop = useTransform(headerMorphProgress, [0, 1], [1, 0]);
+  const mobileHeaderBackground = useTransform(headerMorphProgress, (progress) => `rgba(var(--quote-mobile-header-bg-rgb, var(--color-card-rgb)), ${lerp(0.78, 0.9, progress).toFixed(3)})`);
+  const mobileHeaderBackdrop = useTransform(headerMorphProgress, (progress) => `blur(${lerp(16, 24, progress).toFixed(1)}px) saturate(${Math.round(lerp(170, 215, progress))}%)`);
+  const mobileHeaderShadow = useTransform(headerMorphProgress, (progress) => {
+    const y = lerp(18, 10, progress);
+    const blur = lerp(54, 30, progress);
+    const alpha = lerp(0.16, 0.12, progress);
+    const highlightMultiplier = lerp(1.35, 1.1, progress);
+    return `0 ${y.toFixed(1)}px ${blur.toFixed(1)}px rgba(0,0,0,${alpha.toFixed(3)}), inset 0 1px 0 rgba(255,255,255,calc(var(--quote-mobile-header-highlight-alpha, var(--quote-header-highlight-alpha-default, 0.16)) * ${highlightMultiplier.toFixed(2)}))`;
+  });
+
+  // Text is scaled/transformed instead of font-size animated, preventing title reflow during the morph.
+  const mobileHeaderTitleScale = useTransform(headerMorphProgress, [0, 1], [1, 0.94]);
+  const mobileHeaderTitleY = useTransform(headerMorphProgress, [0, 1], [0, -1]);
+  // Metadata exits on staggered ranges so the collapse has depth instead of every label disappearing together.
+  const mobileHeaderMetaTop = useTransform(headerMorphProgress, [0, 1], [7, 3]);
+  const mobileHeaderMetaRowGap = useTransform(headerMorphProgress, [0, 1], [8, 3]);
+  const mobileHeaderMetaColumnGap = useTransform(headerMorphProgress, [0, 1], [12, 10]);
+  const mobileHeaderSubtitleOpacity = useTransform(headerMorphProgress, [0, 0.48], [1, 0]);
+  const mobileHeaderSubtitleY = useTransform(headerMorphProgress, [0, 0.48], [0, -10]);
+  const mobileHeaderFyOpacity = useTransform(headerMorphProgress, [0.08, 0.42], [1, 0]);
+  const mobileHeaderFyY = useTransform(headerMorphProgress, [0.08, 0.42], [0, -7]);
+  const mobileHeaderValidOpacity = useTransform(headerMorphProgress, [0, 0.58], [1, 0]);
+  const mobileHeaderValidY = useTransform(headerMorphProgress, [0, 0.58], [0, 6]);
+
+  // The status badge remains mounted and visible, only tightening toward the title as the card compacts.
+  const mobileHeaderBadgeScale = useTransform(headerMorphProgress, [0.2, 1], [1, 0.96]);
+  const mobileHeaderBadgeX = useTransform(headerMorphProgress, [0.2, 1], [0, 0]);
+  const mobileHeaderBadgeY = useTransform(headerMorphProgress, [0, 0.45, 1], [0, -14, -32]);
   const previewViewportRef = useRef<HTMLDivElement | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const moreMenuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -589,75 +933,165 @@ export default function QuotationDetailPage() {
     };
   }, []);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const scrollArea = document.getElementById("dashboard-scroll-area");
     let frameId = 0;
+    let dampFrameId = 0;
+    let targetProgress = 0;
+    let renderedProgress = 0;
+    let initialized = false;
+    const headerVarValues = new Map<string, string>();
 
-    const updateHeaderMorph = () => {
-      frameId = 0;
-      const header = stickyHeaderRef.current;
-      if (!header) return;
+    const setHeaderVar = (header: HTMLElement, name: string, value: string) => {
+      if (headerVarValues.get(name) === value) return;
+      headerVarValues.set(name, value);
+      header.style.setProperty(name, value);
+    };
 
+    const readHeaderTargetProgress = () => {
       const viewportWidth = window.innerWidth;
       const isDesktop = viewportWidth >= 1280;
       const isNativeMobileScroll = viewportWidth < 768;
-      const isSmallPhone = viewportWidth < 640;
       const scrollTop = Math.max(0, isNativeMobileScroll ? window.scrollY : (scrollArea?.scrollTop ?? window.scrollY));
       const start = isDesktop ? 12 : 8;
       const end = isDesktop ? 180 : 136;
-      const progress = easeOutCubic((scrollTop - start) / (end - start));
+      return easeOutCubic((scrollTop - start) / (end - start));
+    };
+
+    const writeHeaderMorph = (progress: number) => {
+      const header = stickyHeaderRef.current;
+      if (!header) return false;
+
+      const viewportWidth = window.innerWidth;
+      if (viewportWidth < 768) return true;
+
+      const isDesktop = viewportWidth >= 1280;
+      const isTablet = viewportWidth >= 768 && viewportWidth < 1280;
+      const isDarkMode = document.documentElement.classList.contains("dark");
+      const isNativeMobileScroll = viewportWidth < 768;
+      const isSmallPhone = viewportWidth < 640;
+      const mobileSecondaryWidth = Math.min(260, Math.max(160, viewportWidth - 128));
+      const tabletSecondaryWidth = Math.min(520, Math.max(280, viewportWidth - 260));
+      const desktopSecondaryWidth = Math.max(164, Math.min(260, viewportWidth - 1116));
+      const secondaryWidth = isDesktop ? desktopSecondaryWidth : isTablet ? tabletSecondaryWidth : mobileSecondaryWidth;
       const headerTop = isNativeMobileScroll
         ? 68
-        : lerp(16, isDesktop ? 12 : 8, progress);
+        : isDesktop ? lerp(16, 12, progress) : 8;
+      const mobileMorph = isDesktop ? 0 : progress;
+      const nonStatusOpacity = isDesktop ? lerp(1, 0.9, progress) : clamp01(1 - mobileMorph * 1.25);
+      const headerBgAlpha = isDarkMode
+        ? (isDesktop ? lerp(0.38, 0.48, progress) : lerp(0.50, 0.58, progress))
+        : (isDesktop ? lerp(0.48, 0.62, progress) : lerp(0.72, 0.82, progress));
+      const headerHighlightAlpha = isDarkMode
+        ? (isDesktop ? lerp(0.045, 0.07, progress) : lerp(0.05, 0.075, progress))
+        : (isDesktop ? lerp(0.16, 0.22, progress) : lerp(0.14, 0.20, progress));
+      const headerBorderAlpha = isDarkMode
+        ? (headerOverPreview ? lerp(0.105, 0.14, progress) : lerp(0.07, 0.095, progress))
+        : (headerOverPreview ? lerp(0.18, 0.24, progress) : lerp(0.10, 0.14, progress));
 
-      header.style.setProperty("--quote-header-progress", progress.toFixed(4));
-      header.style.setProperty("--quote-header-top", px(headerTop));
-      header.style.setProperty("--quote-header-margin", px(lerp(isDesktop ? 32 : 22, isDesktop ? 24 : 16, progress)));
-      header.style.setProperty("--quote-header-radius", px(lerp(isDesktop ? 32 : 28, isDesktop ? 28 : 24, progress)));
-      header.style.setProperty("--quote-header-pad-x", px(lerp(isDesktop ? 24 : 16, isDesktop ? 20 : 12, progress)));
-      header.style.setProperty("--quote-header-pad-y", px(lerp(isDesktop ? 16 : 14, isDesktop ? 12 : 10, progress)));
-      header.style.setProperty("--quote-header-section-gap", px(lerp(20, isDesktop ? 14 : 12, progress)));
-      header.style.setProperty("--quote-header-identity-gap", px(lerp(16, isDesktop ? 14 : 12, progress)));
-      header.style.setProperty("--quote-header-back-pad", px(lerp(12, 10, progress)));
-      header.style.setProperty("--quote-header-back-mt", px(lerp(4, 0, progress)));
-      header.style.setProperty("--quote-header-title-size", px(lerp(isDesktop ? 36 : isSmallPhone ? 28 : 32, isDesktop ? 28 : isSmallPhone ? 20 : 23, progress)));
-      header.style.setProperty("--quote-header-meta-size", px(lerp(14, 12, progress)));
-      header.style.setProperty("--quote-header-meta-top", px(lerp(8, 6, progress)));
-      header.style.setProperty("--quote-header-meta-row-gap", px(lerp(8, 6, progress)));
-      header.style.setProperty("--quote-header-meta-col-gap", px(isDesktop ? lerp(12, 10, progress) : lerp(12, 0, progress)));
-      header.style.setProperty("--quote-header-secondary-opacity", (isDesktop ? lerp(1, 0.9, progress) : clamp01(1 - progress * 1.2)).toFixed(3));
-      header.style.setProperty("--quote-header-secondary-width", isDesktop ? "999px" : px(lerp(260, 0, progress)));
-      header.style.setProperty("--quote-header-total-size", px(lerp(30, 24, progress)));
-      header.style.setProperty("--quote-header-action-pad-x", px(lerp(20, 16, progress)));
-      header.style.setProperty("--quote-header-action-pad-y", px(lerp(12, 10, progress)));
-      header.style.setProperty("--quote-header-bg-alpha", lerp(0.56, isDesktop ? 0.66 : 0.72, progress).toFixed(3));
-      header.style.setProperty("--quote-header-shadow-y", px(lerp(20, isDesktop ? 16 : 14, progress)));
-      header.style.setProperty("--quote-header-shadow-blur", px(lerp(60, isDesktop ? 46 : 40, progress)));
-      header.style.setProperty("--quote-header-shadow-alpha", lerp(0.08, isDesktop ? 0.16 : 0.18, progress).toFixed(3));
-      header.style.setProperty("--quote-header-highlight-alpha", lerp(0.2, 0.32, progress).toFixed(3));
+      setHeaderVar(header, "--quote-header-progress", progress.toFixed(4));
+      setHeaderVar(header, "--quote-header-morph", mobileMorph.toFixed(4));
+      setHeaderVar(header, "--quote-header-top", px(headerTop));
+      setHeaderVar(header, "--quote-header-margin", px(isDesktop ? lerp(32, 24, progress) : 22));
+      setHeaderVar(header, "--quote-header-radius", px(isDesktop ? 32 : 28));
+      setHeaderVar(header, "--quote-header-pad-x", px(isDesktop ? lerp(24, 20, progress) : 16));
+      setHeaderVar(header, "--quote-header-pad-y", px(isDesktop ? lerp(16, 12, progress) : 14));
+      setHeaderVar(header, "--quote-header-section-gap", px(isDesktop ? lerp(20, 14, progress) : 20));
+      setHeaderVar(header, "--quote-header-identity-gap", px(isDesktop ? lerp(16, 14, progress) : 16));
+      setHeaderVar(header, "--quote-header-back-pad", px(isDesktop ? lerp(12, 10, progress) : 12));
+      setHeaderVar(header, "--quote-header-back-mt", px(isDesktop ? lerp(4, 0, progress) : 4));
+      setHeaderVar(header, "--quote-header-title-size", px(isDesktop ? lerp(36, 28, progress) : isSmallPhone ? 28 : 32));
+      setHeaderVar(header, "--quote-header-title-scale", (isDesktop ? 1 : lerp(1, isSmallPhone ? 0.74 : 0.78, mobileMorph)).toFixed(4));
+      setHeaderVar(header, "--quote-header-title-y", px(isDesktop ? 0 : lerp(0, -2, mobileMorph)));
+      setHeaderVar(header, "--quote-header-content-y", px(isDesktop ? 0 : lerp(0, -8, mobileMorph)));
+      setHeaderVar(header, "--quote-header-meta-size", px(isDesktop ? lerp(14, 12, progress) : 14));
+      setHeaderVar(header, "--quote-header-meta-top", px(isDesktop ? lerp(8, 6, progress) : 8));
+      setHeaderVar(header, "--quote-header-meta-row-gap", px(isDesktop ? lerp(8, 6, progress) : 8));
+      setHeaderVar(header, "--quote-header-meta-col-gap", px(isDesktop ? (viewportWidth < 1360 ? 8 : lerp(12, 10, progress)) : 12));
+      setHeaderVar(header, "--quote-header-meta-y", px(isDesktop ? 0 : lerp(0, -6, mobileMorph)));
+      setHeaderVar(header, "--quote-header-nonstatus-opacity", nonStatusOpacity.toFixed(3));
+      setHeaderVar(header, "--quote-header-nonstatus-y", px(isDesktop ? 0 : lerp(0, -4, mobileMorph)));
+      setHeaderVar(header, "--quote-header-nonstatus-pointer-events", nonStatusOpacity > 0.08 ? "auto" : "none");
+      setHeaderVar(header, "--quote-header-secondary-width", px(secondaryWidth));
+      setHeaderVar(header, "--quote-header-total-size", px(isDesktop ? lerp(30, 24, progress) : 30));
+      setHeaderVar(header, "--quote-header-action-pad-x", px(isDesktop ? lerp(20, 16, progress) : 20));
+      setHeaderVar(header, "--quote-header-action-pad-y", px(isDesktop ? lerp(12, 10, progress) : 12));
+      setHeaderVar(header, "--quote-header-bg-alpha", headerBgAlpha.toFixed(3));
+      setHeaderVar(header, "--quote-header-blur", px(isDesktop ? lerp(30, 36, progress) : 28));
+      setHeaderVar(header, "--quote-header-saturate", `${Math.round(isDesktop ? lerp(180, 210, progress) : 185)}%`);
+      setHeaderVar(header, "--quote-header-shadow-y", px(isDesktop ? lerp(20, 16, progress) : 14));
+      setHeaderVar(header, "--quote-header-shadow-blur", px(isDesktop ? lerp(60, 46, progress) : 40));
+      setHeaderVar(header, "--quote-header-shadow-alpha", (isDesktop ? lerp(0.08, 0.16, progress) : 0.18).toFixed(3));
+      setHeaderVar(header, "--quote-header-highlight-alpha", headerHighlightAlpha.toFixed(3));
+      setHeaderVar(
+        header,
+        "--quote-header-border-color",
+        isDarkMode
+          ? `rgba(255,255,255,${headerBorderAlpha.toFixed(3)})`
+          : `rgba(0,0,0,${headerBorderAlpha.toFixed(3)})`,
+      );
 
       if (isDesktop && isDockExpandedRef.current) {
         isDockExpandedRef.current = false;
         setIsDockExpanded(false);
       }
+
+      return true;
+    };
+
+    const stepDampedHeaderMorph = () => {
+      dampFrameId = 0;
+      const delta = targetProgress - renderedProgress;
+      const nextProgress = Math.abs(delta) < 0.001 ? targetProgress : renderedProgress + delta * 0.22;
+      renderedProgress = nextProgress;
+      if (!writeHeaderMorph(renderedProgress)) {
+        dampFrameId = requestAnimationFrame(stepDampedHeaderMorph);
+        return;
+      }
+      if (Math.abs(targetProgress - renderedProgress) >= 0.001) {
+        dampFrameId = requestAnimationFrame(stepDampedHeaderMorph);
+      }
     };
 
     const scheduleHeaderUpdate = () => {
       if (frameId) return;
-      frameId = requestAnimationFrame(updateHeaderMorph);
+      frameId = requestAnimationFrame(() => {
+        frameId = 0;
+        targetProgress = readHeaderTargetProgress();
+        if (!initialized) {
+          renderedProgress = targetProgress;
+          initialized = true;
+          if (!writeHeaderMorph(renderedProgress)) {
+            frameId = requestAnimationFrame(scheduleHeaderUpdate);
+          }
+          return;
+        }
+        if (!dampFrameId) dampFrameId = requestAnimationFrame(stepDampedHeaderMorph);
+      });
     };
 
-    scheduleHeaderUpdate();
+    targetProgress = readHeaderTargetProgress();
+    renderedProgress = targetProgress;
+    initialized = true;
+    if (!writeHeaderMorph(renderedProgress)) {
+      frameId = requestAnimationFrame(scheduleHeaderUpdate);
+    } else {
+      scheduleHeaderUpdate();
+    }
     scrollArea?.addEventListener("scroll", scheduleHeaderUpdate, { passive: true });
     window.addEventListener("scroll", scheduleHeaderUpdate, { passive: true });
     window.addEventListener("resize", scheduleHeaderUpdate);
+    const themeObserver = new MutationObserver(scheduleHeaderUpdate);
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     return () => {
       if (frameId) cancelAnimationFrame(frameId);
+      if (dampFrameId) cancelAnimationFrame(dampFrameId);
       scrollArea?.removeEventListener("scroll", scheduleHeaderUpdate);
       window.removeEventListener("scroll", scheduleHeaderUpdate);
       window.removeEventListener("resize", scheduleHeaderUpdate);
+      themeObserver.disconnect();
     };
-  }, []);
+  }, [quotation?._id, headerOverPreview]);
 
   useEffect(() => {
     const editor = emailEditorRef.current;
@@ -1910,22 +2344,105 @@ export default function QuotationDetailPage() {
     </div>
   );
 
-  const quoteHeaderStyle = {
+  const quoteHeaderBaseStyle = {
     top: "var(--quote-header-top, 16px)",
     marginBottom: "var(--quote-header-margin, 32px)",
     borderRadius: "var(--quote-header-radius, 32px)",
-    padding: "var(--quote-header-pad-y, 16px) var(--quote-header-pad-x, 20px)",
-    backgroundColor: "rgba(var(--color-card-rgb), var(--quote-header-bg-alpha, 0.56))",
-    backgroundImage: "linear-gradient(180deg, rgba(255,255,255,var(--quote-header-highlight-alpha, 0.20)), rgba(255,255,255,0))",
+    padding: "var(--quote-header-pad-y, 16px) var(--quote-header-pad-x, 24px)",
+    borderColor: "var(--quote-header-border-color, var(--quote-header-border))",
+    backgroundColor: "rgba(var(--color-card-rgb), var(--quote-header-bg-alpha, 0.48))",
+    backgroundImage: "linear-gradient(180deg, rgba(255,255,255,var(--quote-header-highlight-alpha, var(--quote-header-highlight-alpha-default, 0.16))), rgba(255,255,255,0))",
+    backdropFilter: "blur(var(--quote-header-blur, 30px)) saturate(var(--quote-header-saturate, 180%))",
+    WebkitBackdropFilter: "blur(var(--quote-header-blur, 30px)) saturate(var(--quote-header-saturate, 180%))",
     boxShadow: headerOverPreview
-      ? "0 var(--quote-header-shadow-y, 20px) calc(var(--quote-header-shadow-blur, 60px) + 16px) rgba(0,0,0,var(--quote-header-shadow-alpha, 0.08)), inset 0 1px 0 rgba(255,255,255,var(--quote-header-highlight-alpha, 0.20))"
-      : "0 var(--quote-header-shadow-y, 20px) var(--quote-header-shadow-blur, 60px) rgba(0,0,0,var(--quote-header-shadow-alpha, 0.08)), inset 0 1px 0 rgba(255,255,255,var(--quote-header-highlight-alpha, 0.20))",
-    willChange: "top, margin-bottom, border-radius, padding, background-color, box-shadow",
+      ? "0 var(--quote-header-shadow-y, 20px) calc(var(--quote-header-shadow-blur, 60px) + 16px) rgba(0,0,0,var(--quote-header-shadow-alpha, 0.08)), inset 0 1px 0 rgba(255,255,255,var(--quote-header-highlight-alpha, var(--quote-header-highlight-alpha-default, 0.16)))"
+      : "0 var(--quote-header-shadow-y, 20px) var(--quote-header-shadow-blur, 60px) rgba(0,0,0,var(--quote-header-shadow-alpha, 0.08)), inset 0 1px 0 rgba(255,255,255,var(--quote-header-highlight-alpha, var(--quote-header-highlight-alpha-default, 0.16)))",
+    willChange: "background-color, backdrop-filter, box-shadow",
   } as React.CSSProperties;
+  const quoteHeaderStyle = (isMobileHeader
+    ? {
+      ...quoteHeaderBaseStyle,
+      top: 68,
+      height: mobileHeaderHeight,
+      marginBottom: 16,
+      borderRadius: 28,
+      padding: mobileHeaderPadding,
+      backgroundColor: mobileHeaderBackground,
+      backgroundImage: "linear-gradient(180deg, rgba(255,255,255,var(--quote-mobile-header-highlight-alpha, var(--quote-header-highlight-alpha-default, 0.16))), rgba(255,255,255,0))",
+      borderColor: "var(--quote-mobile-header-border, var(--quote-header-border))",
+      backdropFilter: mobileHeaderBackdrop,
+      WebkitBackdropFilter: mobileHeaderBackdrop,
+      boxShadow: mobileHeaderShadow,
+      willChange: "height, padding, background-color, backdrop-filter, box-shadow",
+    }
+    : quoteHeaderBaseStyle) as MotionStyle;
+  const quoteHeaderContentStyle = {
+    gap: "var(--quote-header-section-gap, 20px)",
+    transform: "translate3d(0, var(--quote-header-content-y, 0px), 0)",
+    willChange: "transform",
+  } as React.CSSProperties;
+  const quoteHeaderIdentityStyle = (isMobileHeader
+    ? { columnGap: mobileHeaderIdentityColumnGap, rowGap: mobileHeaderIdentityRowGap }
+    : { gap: "var(--quote-header-identity-gap, 16px)" }) as MotionStyle;
+  const quoteHeaderBackButtonStyle = (isMobileHeader
+    ? { marginTop: mobileHeaderBackMarginTop, padding: mobileHeaderBackPadding }
+    : { marginTop: "var(--quote-header-back-mt, 4px)", padding: "var(--quote-header-back-pad, 12px)" }) as MotionStyle;
+  const quoteHeaderTitleBaseStyle = {
+    fontSize: "var(--quote-header-title-size, clamp(30px, 7.8vw, 36px))",
+    transformOrigin: "left top",
+    willChange: "transform",
+  } as React.CSSProperties;
+  const quoteHeaderTitleStyle = (isMobileHeader
+    ? {
+      ...quoteHeaderTitleBaseStyle,
+      fontSize: viewportWidth < 380 ? 26 : 28,
+      scale: mobileHeaderTitleScale,
+      y: mobileHeaderTitleY,
+    }
+    : {
+      ...quoteHeaderTitleBaseStyle,
+      transform: "translate3d(0, var(--quote-header-title-y, 0px), 0) scale(var(--quote-header-title-scale, 1))",
+    }) as MotionStyle;
+  const quoteHeaderMetaStyle = {
+    columnGap: isMobileHeader
+      ? mobileHeaderMetaColumnGap
+      : isDesktopHeader
+        ? "var(--quote-header-meta-col-gap, clamp(8px, calc((100vw - 1280px) / 10 + 8px), 12px))"
+        : "var(--quote-header-meta-col-gap, 10px)",
+    rowGap: isMobileHeader ? mobileHeaderMetaRowGap : "var(--quote-header-meta-row-gap, 8px)",
+    fontSize: "var(--quote-header-meta-size, 14px)",
+    marginTop: isMobileHeader ? mobileHeaderMetaTop : "var(--quote-header-meta-top, 8px)",
+    transform: "translate3d(0, var(--quote-header-meta-y, 0px), 0)",
+    willChange: "transform",
+  } as MotionStyle;
   const quoteHeaderSecondaryStyle = {
-    maxWidth: "var(--quote-header-secondary-width, 260px)",
-    opacity: "var(--quote-header-secondary-opacity, 1)",
+    maxWidth: isMobileHeader
+      ? "min(var(--quote-header-secondary-width, 260px), 100%)"
+      : isDesktopHeader
+        ? "min(var(--quote-header-secondary-width, clamp(164px, calc(100vw - 1116px), 260px)), 100%)"
+        : "min(var(--quote-header-secondary-width, min(520px, calc(100vw - 260px))), 100%)",
   } as React.CSSProperties;
+  const quoteHeaderNonStatusStyle = {
+    opacity: "var(--quote-header-nonstatus-opacity, 1)",
+    pointerEvents: "var(--quote-header-nonstatus-pointer-events, auto)" as unknown as React.CSSProperties["pointerEvents"],
+    transform: "translate3d(0, var(--quote-header-nonstatus-y, 0px), 0)",
+    willChange: "opacity, transform",
+  } as React.CSSProperties;
+  const quoteHeaderSubtitleStyle = (isMobileHeader
+    ? { ...quoteHeaderSecondaryStyle, opacity: mobileHeaderSubtitleOpacity, y: mobileHeaderSubtitleY, willChange: "opacity, transform" }
+    : { ...quoteHeaderSecondaryStyle, ...quoteHeaderNonStatusStyle }) as MotionStyle;
+  const quoteHeaderFyStyle = (isMobileHeader
+    ? { ...quoteHeaderSecondaryStyle, opacity: mobileHeaderFyOpacity, y: mobileHeaderFyY, willChange: "opacity, transform" }
+    : { ...quoteHeaderSecondaryStyle, ...quoteHeaderNonStatusStyle }) as MotionStyle;
+  const quoteHeaderValidStyle = (isMobileHeader
+    ? { ...quoteHeaderSecondaryStyle, opacity: mobileHeaderValidOpacity, y: mobileHeaderValidY, willChange: "opacity, transform" }
+    : { ...quoteHeaderSecondaryStyle, ...quoteHeaderNonStatusStyle }) as MotionStyle;
+  const quoteHeaderStatusStyle = (isMobileHeader
+    ? { scale: mobileHeaderBadgeScale, x: mobileHeaderBadgeX, y: mobileHeaderBadgeY, transformOrigin: "left center", willChange: "transform", zIndex: 1 }
+    : {}) as MotionStyle;
+  const quoteHeaderSaveStateStyle = (isMobileHeader
+    ? { opacity: mobileHeaderSubtitleOpacity, y: mobileHeaderSubtitleY, willChange: "opacity, transform" }
+    : quoteHeaderNonStatusStyle) as MotionStyle;
   const quoteHeaderActionStyle = {
     padding: "var(--quote-header-action-pad-y, 12px) var(--quote-header-action-pad-x, 20px)",
   } as React.CSSProperties;
@@ -1936,74 +2453,67 @@ export default function QuotationDetailPage() {
       style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif' }}
     >
       {/* ─── TOP BAR ─── */}
-      <div
+      <motion.div
         ref={stickyHeaderRef}
-        className={`sticky z-20 border backdrop-blur-2xl dark:!bg-none xl:z-40 ${
-          headerOverPreview
-            ? "border-white/75 dark:border-white/[0.16]"
-            : "border-white/50 dark:border-white/[0.10]"
-        }`}
+        className="sticky z-20 overflow-hidden border backdrop-blur-2xl xl:z-40"
         style={quoteHeaderStyle}
       >
         <div
-          className="flex flex-col xl:flex-row xl:items-center xl:justify-between"
-          style={{ gap: "var(--quote-header-section-gap, 20px)" }}
+          className="flex flex-col xl:grid xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center"
+          style={quoteHeaderContentStyle}
         >
-          <div className="flex min-w-0 items-start" style={{ gap: "var(--quote-header-identity-gap, 16px)" }}>
-            <button
+          <motion.div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start" style={quoteHeaderIdentityStyle}>
+            <motion.button
               onClick={() => router.push("/dashboard/quotations")}
               className={`shrink-0 rounded-full text-muted transition duration-200 hover:-translate-y-0.5 hover:text-default hover:shadow-sm active:scale-[0.98] ${quoteControlSurface}`}
               title="Back to quotations"
-              style={{ marginTop: "var(--quote-header-back-mt, 4px)", padding: "var(--quote-header-back-pad, 12px)" }}
+              style={quoteHeaderBackButtonStyle}
             >
               <ArrowLeft className="h-4 w-4" />
-            </button>
+            </motion.button>
             <div className="min-w-0">
-              <h1
+              <motion.h1
                 className="min-w-0 truncate font-semibold leading-tight text-default"
-                style={{ fontSize: "var(--quote-header-title-size, clamp(30px, 7.8vw, 36px))" }}
+                style={quoteHeaderTitleStyle}
               >
                 {quotation.quotationNumber ? (
                   <span>{quotation.quotationNumber}</span>
                 ) : (
                   <span className="text-muted">Untitled Draft</span>
                 )}
-              </h1>
-              <div
-                className="flex flex-wrap items-center text-muted"
-                style={{
-                  columnGap: "var(--quote-header-meta-col-gap, 12px)",
-                  rowGap: "var(--quote-header-meta-row-gap, 8px)",
-                  fontSize: "var(--quote-header-meta-size, 14px)",
-                  marginTop: "var(--quote-header-meta-top, 8px)",
-                }}
+              </motion.h1>
+              <motion.div
+                className="flex w-full min-w-0 flex-wrap items-center text-muted"
+                style={quoteHeaderMetaStyle}
               >
-                <span
-                  className="inline-block overflow-hidden truncate whitespace-nowrap align-bottom font-medium text-default"
-                  style={quoteHeaderSecondaryStyle}
+                <motion.span
+                  className="inline-block basis-full overflow-hidden truncate whitespace-nowrap align-bottom font-medium text-default md:basis-auto"
+                  style={quoteHeaderSubtitleStyle}
                 >
                   {quotation.clientName}
-                </span>
-                <QuotationStatusPill status={quotation.status} />
-                <span
+                </motion.span>
+                <motion.span className="inline-flex shrink-0 align-bottom" style={quoteHeaderStatusStyle}>
+                  <QuotationStatusPill status={quotation.status} />
+                </motion.span>
+                <motion.span
                   className="inline-block overflow-hidden whitespace-nowrap align-bottom text-faint"
-                  style={quoteHeaderSecondaryStyle}
+                  style={quoteHeaderFyStyle}
                 >
                   FY {quotation.financialYear}
-                </span>
+                </motion.span>
                 {quotation.validTill && (
-                  <span
-                    className="inline-block overflow-hidden whitespace-nowrap align-bottom text-faint"
-                    style={quoteHeaderSecondaryStyle}
+                  <motion.span
+                    className="inline-block basis-full overflow-hidden whitespace-nowrap align-bottom text-faint md:basis-auto"
+                    style={quoteHeaderValidStyle}
                   >
                     Valid till {fmtDate(quotation.validTill)}
-                  </span>
+                  </motion.span>
                 )}
-                {savedStatus === "saving" && <span className="animate-pulse text-xs text-muted">Saving...</span>}
-                {savedStatus === "saved" && <span className="flex items-center gap-1 text-xs text-emerald-500"><CheckCircle2 className="h-3 w-3" />Saved</span>}
-              </div>
+                {savedStatus === "saving" && <motion.span className="animate-pulse text-xs text-muted" style={quoteHeaderSaveStateStyle}>Saving...</motion.span>}
+                {savedStatus === "saved" && <motion.span className="flex items-center gap-1 text-xs text-emerald-500" style={quoteHeaderSaveStateStyle}><CheckCircle2 className="h-3 w-3" />Saved</motion.span>}
+              </motion.div>
             </div>
-          </div>
+          </motion.div>
 
           <div
             className="hidden flex-col xl:flex xl:flex-row xl:items-center xl:justify-end"
@@ -2055,7 +2565,7 @@ export default function QuotationDetailPage() {
             </div>
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* ─── REVISION STEPPER ─── */}
       {quotation.revisions.length > 0 && (
@@ -2116,23 +2626,7 @@ export default function QuotationDetailPage() {
       )}
 
       {/* ─── MAIN TABS ─── */}
-      <div className={`mb-5 grid w-full grid-cols-3 gap-1 rounded-full p-1 shadow-sm sm:scrollbar-none sm:mb-8 sm:flex sm:w-fit sm:max-w-full sm:overflow-x-auto sm:p-1.5 ${quoteSubtleSurface}`}>
-        {[
-          { key: "editor", label: isEditable ? "Editor" : "Details", icon: FileText },
-          { key: "preview", label: "Preview", icon: Eye },
-          { key: "timeline", label: "Activity", icon: Activity },
-        ].map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => setActiveTab(key as "editor" | "preview" | "timeline")}
-            className={`flex min-w-0 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium transition-all duration-200 active:scale-[0.98] sm:gap-2 sm:px-5 sm:py-2.5 sm:text-sm ${
-              activeTab === key ? quoteActiveSurface : "text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.08]"
-            }`}
-          >
-            <Icon className="w-3.5 h-3.5" />{label}
-          </button>
-        ))}
-      </div>
+      <QuotationMainTabs activeTab={activeTab} isEditable={isEditable} onTabChange={setActiveTab} />
 
       {/* ─── EDITOR TAB ─── */}
       {activeTab === "editor" && (

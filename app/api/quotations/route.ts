@@ -23,18 +23,20 @@ export async function GET(req: NextRequest) {
   const parsedQuery = quotationListQuerySchema.safeParse({
     status: searchParams.get("status") ?? undefined,
     financialYear: searchParams.get("financialYear") ?? undefined,
+    clientId: searchParams.get("clientId") ?? undefined,
     search: searchParams.get("search") ?? undefined,
   });
   if (!parsedQuery.success) {
     return NextResponse.json({ error: validationErrorMessage(parsedQuery.error) }, { status: 400 });
   }
-  const { status, financialYear, search } = parsedQuery.data;
+  const { status, financialYear, clientId, search } = parsedQuery.data;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const filter: Record<string, any> = {};
   if (status === "awaitingResponse") filter.status = { $in: ["Finalized", "Sent"] };
   else if (status && status !== "all") filter.status = status;
   if (financialYear && financialYear !== "all") filter.financialYear = financialYear;
+  if (clientId) filter.clientId = clientId;
   if (search) {
     const safeSearch = escapeRegex(search);
     filter.$or = [

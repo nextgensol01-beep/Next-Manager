@@ -7,17 +7,32 @@ import DeletedRecord from "@/models/DeletedRecord";
 import type { ITargetEntry } from "@/models/FinancialYear";
 
 const VALID_TYPES = new Set(["RECYCLING", "EOL"]);
+const CAT_KEYS = ["1", "2", "3", "4"] as const;
 
 function normaliseEntries(raw: unknown[]): ITargetEntry[] {
-  return raw
-    .filter((t: unknown) => {
-      const e = t as ITargetEntry;
-      return e.categoryId && VALID_TYPES.has(e.type) && Number(e.value) >= 0;
-    })
-    .map((t: unknown) => {
-      const e = t as ITargetEntry;
-      return { categoryId: String(e.categoryId), type: e.type, value: Number(e.value) };
+  const entries = new Map<string, ITargetEntry>();
+
+  for (const item of raw) {
+    const entry = item as Partial<ITargetEntry>;
+    const categoryId = String(entry.categoryId ?? "");
+    const rawType = String(entry.type ?? "").toUpperCase();
+    const type = VALID_TYPES.has(rawType) ? rawType as ITargetEntry["type"] : null;
+    const value = Number(entry.value);
+
+    if (!(CAT_KEYS as readonly string[]).includes(categoryId) || !type || !Number.isFinite(value) || value <= 0) {
+      continue;
+    }
+
+    const key = `${categoryId}|${type}`;
+    const existing = entries.get(key);
+    entries.set(key, {
+      categoryId,
+      type,
+      value: (existing?.value ?? 0) + value,
     });
+  }
+
+  return Array.from(entries.values());
 }
 
 function deriveFlat(entries: ITargetEntry[], prefix: string): Record<string, number> {

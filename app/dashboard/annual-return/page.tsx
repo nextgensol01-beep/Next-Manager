@@ -12,7 +12,7 @@ import { Plus, Search, Pencil, Trash2, CheckCircle2, Clock, AlertCircle, ShieldC
 import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearPreference, useFinancialYearState } from "@/app/providers";
 
-type ReturnStatus = "Pending" | "In Progress" | "Filed" | "Verified";
+type ReturnStatus = "Pending" | "Not Started" | "In Progress" | "Filed" | "Verified" | "Not Required This FY";
 interface EmailOption { label: string; email: string; }
 
 function restoreSuggestion(email: string, currentSuggestions: EmailOption[], catalog: EmailOption[]) {
@@ -44,11 +44,13 @@ interface Client { clientId: string; companyName: string; category: string; }
 
 const STATUS_CONFIG: Record<ReturnStatus, { label: string; icon: React.ReactNode; badge: string; ring: string; bg: string; dot: string }> = {
   "Pending":     { label: "Pending",     icon: <AlertCircle  className="w-3.5 h-3.5" />, badge: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",         ring: "ring-red-300 dark:ring-red-700",     bg: "bg-red-50 dark:bg-red-900/10",     dot: "bg-red-500"     },
+  "Not Started": { label: "Not Started", icon: <AlertCircle  className="w-3.5 h-3.5" />, badge: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",         ring: "ring-red-300 dark:ring-red-700",     bg: "bg-red-50 dark:bg-red-900/10",     dot: "bg-red-500"     },
   "In Progress": { label: "In Progress", icon: <Clock        className="w-3.5 h-3.5" />, badge: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",   ring: "ring-amber-300 dark:ring-amber-700",  bg: "bg-amber-50 dark:bg-amber-900/10", dot: "bg-amber-400"   },
   "Filed":       { label: "Filed",       icon: <CheckCircle2 className="w-3.5 h-3.5" />, badge: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400",       ring: "ring-blue-300 dark:ring-blue-700",    bg: "bg-blue-50 dark:bg-blue-900/10",   dot: "bg-blue-500"    },
   "Verified":    { label: "Verified",    icon: <ShieldCheck  className="w-3.5 h-3.5" />, badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400", ring: "ring-emerald-300 dark:ring-emerald-700", bg: "bg-emerald-50 dark:bg-emerald-900/10", dot: "bg-emerald-500" },
+  "Not Required This FY": { label: "Not Required", icon: <ShieldCheck className="w-3.5 h-3.5" />, badge: "bg-slate-100 text-slate-700 dark:bg-neutral-800 dark:text-neutral-300", ring: "ring-slate-300 dark:ring-neutral-700", bg: "bg-slate-50 dark:bg-neutral-900/40", dot: "bg-slate-400" },
 };
-const STATUSES: ReturnStatus[] = ["Pending", "In Progress", "Filed", "Verified"];
+const STATUSES: ReturnStatus[] = ["Pending", "Not Started", "In Progress", "Filed", "Verified", "Not Required This FY"];
 
 function createEmptyForm(financialYear: string) {
   return {

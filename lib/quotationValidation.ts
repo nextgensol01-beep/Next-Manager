@@ -72,6 +72,7 @@ export const quotationPatchSchema = z.object({
 export const quotationListQuerySchema = z.object({
   status: z.union([quotationStatusSchema, z.literal("all"), z.literal("awaitingResponse")]).default("all"),
   financialYear: z.union([quotationFinancialYearSchema, z.literal("all")]).default("all"),
+  clientId: optionalText,
   search: z.string().trim().max(120).default(""),
 }).strict();
 

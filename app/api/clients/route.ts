@@ -59,6 +59,8 @@ export async function GET(req: NextRequest) {
       category: searchParams.get("category"),
       state: searchParams.get("state"),
       search: searchParams.get("search"),
+      registeredThisFy: searchParams.get("registeredThisFy") === "1",
+      financialYear: searchParams.get("fy"),
       limit: Number.isFinite(parsedLimit) ? parsedLimit : 30,
       offset: Number.isFinite(parsedOffset) ? parsedOffset : 0,
     });
@@ -70,6 +72,8 @@ export async function GET(req: NextRequest) {
     category: searchParams.get("category"),
     state: searchParams.get("state"),
     search: searchParams.get("search"),
+    registeredThisFy: searchParams.get("registeredThisFy") === "1",
+    financialYear: searchParams.get("fy"),
   });
 
   return NextResponse.json(clients);

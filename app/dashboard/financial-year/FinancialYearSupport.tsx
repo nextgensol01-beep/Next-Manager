@@ -373,11 +373,12 @@ interface TargetRowProps {
   entry: TargetEntry;
   index: number;
   isDupe: boolean;
+  canRemove?: boolean;
   onChange: (idx: number, updated: TargetEntry) => void;
   onRemove: (idx: number) => void;
 }
 
-export function TargetRow({ entry, index, isDupe, onChange, onRemove }: TargetRowProps) {
+export function TargetRow({ entry, index, isDupe, canRemove = true, onChange, onRemove }: TargetRowProps) {
   return (
     <div
       className={`grid grid-cols-[1fr_1.7fr_1fr_26px] items-center gap-2 px-2 py-1.5 rounded-xl border transition-colors
@@ -424,6 +425,7 @@ export function TargetRow({ entry, index, isDupe, onChange, onRemove }: TargetRo
       <input
         type="number"
         min="0"
+        step="0.01"
         className="input-field !py-1 !text-xs w-full font-mono text-center"
         value={entry.value === 0 ? "" : entry.value}
         placeholder="0"
@@ -435,9 +437,13 @@ export function TargetRow({ entry, index, isDupe, onChange, onRemove }: TargetRo
       {/* Remove */}
       <button
         type="button"
+        disabled={!canRemove}
+        aria-label="Remove entry row"
+        title={canRemove ? "Remove entry row" : "At least one row is required"}
         onClick={() => onRemove(index)}
         className="w-[26px] h-[26px] flex items-center justify-center text-[var(--color-text-faint)] hover:text-red-500
-                   hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                   hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors
+                   disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[var(--color-text-faint)]"
       >
         <X className="w-3.5 h-3.5" />
       </button>

@@ -13,11 +13,13 @@ export async function GET(req: NextRequest) {
     await connectDB();
     const { searchParams } = new URL(req.url);
     const fy     = searchParams.get("fy");
+    const clientId = searchParams.get("clientId");
     const status = searchParams.get("status");
     const search = searchParams.get("search");
 
     const query: Record<string, unknown> = {};
     if (fy)     query.financialYear = fy;
+    if (clientId) query.clientId = clientId;
     if (status && status !== "all") query.status = status;
 
     if (search) {

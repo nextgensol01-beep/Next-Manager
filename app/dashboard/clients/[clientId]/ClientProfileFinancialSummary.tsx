@@ -50,9 +50,12 @@ export default function ClientProfileFinancialSummary({
   setBreakdownRec,
 }: ClientProfileFinancialSummaryProps) {
   return (
-    <div className="bg-card rounded-2xl p-5 shadow-sm border border-base">
+    <div className="client-profile-card">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-default">{isPWP ? "Credits Summary" : "Target Summary"} {"\u2014"} FY {selectedFy}</h3>
+        <div>
+          <p className="client-profile-kicker">Financial Summary</p>
+          <h3 className="text-xl font-semibold text-default">{isPWP ? "Credits Summary" : "Target Summary"} - FY {selectedFy}</h3>
+        </div>
         <div className="glass-tray">
           <button
             type="button"
@@ -70,7 +73,7 @@ export default function ClientProfileFinancialSummary({
         </div>
       </div>
       {fyLastUpdated && <p className="text-xs text-faint mb-4">Last updated {formatDateTime(fyLastUpdated)}</p>}
-      <div className="border border-base rounded-xl overflow-hidden mb-4">
+      <div className="client-profile-table-scroll border border-base rounded-2xl overflow-hidden mb-4">
         <table className="w-full min-w-[400px] text-sm">
           <thead>
             <tr className="bg-surface border-b border-base">
@@ -110,7 +113,7 @@ export default function ClientProfileFinancialSummary({
                               {item.type === "RECYCLING"
                                 ? <Recycle className="w-3 h-3 text-teal-500 flex-shrink-0" />
                                 : <Leaf className="w-3 h-3 text-amber-500 flex-shrink-0" />}
-                              <span className={`font-mono ${isPWP ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}`}>{item.used.toLocaleString()}</span>
+                              <span className={`font-mono ${isPWP ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>{item.used.toLocaleString()}</span>
                               {item.base > 0 && <span className="text-[10px] text-faint">({typePct}%)</span>}
                             </div>
                           );
@@ -118,7 +121,7 @@ export default function ClientProfileFinancialSummary({
                       </div>
                     ) : (
                       <>
-                        <span className={`font-mono ${isPWP ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}`}>{row.used.toLocaleString()}</span>
+                        <span className={`font-mono ${isPWP ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>{row.used.toLocaleString()}</span>
                         {row.base > 0 && <span className="text-xs text-faint ml-1">({pct}%)</span>}
                       </>
                     )}
@@ -155,7 +158,7 @@ export default function ClientProfileFinancialSummary({
         ) : (
           <>
             <div className="bg-surface rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Total Target</p><p className="text-xl font-bold text-default">{(fyData.totalTarget ?? fyData.targetAmount ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.base.toLocaleString()}</span>)}</div>}</div>
-            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Achieved</p><p className="text-xl font-bold text-blue-600 dark:text-blue-400">{(fyData.totalAchieved ?? fyData.achievedAmount ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.used.toLocaleString()}</span>)}</div>}</div>
+            <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Achieved</p><p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{(fyData.totalAchieved ?? fyData.achievedAmount ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.used.toLocaleString()}</span>)}</div>}</div>
             <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Remaining</p><p className="text-xl font-bold text-amber-600 dark:text-amber-400">{(fyData.totalRemainingTarget ?? fyData.remainingTarget ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.remaining.toLocaleString()}</span>)}</div>}</div>
           </>
         )}
