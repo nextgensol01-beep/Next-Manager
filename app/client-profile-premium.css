@@ -297,6 +297,12 @@
   border-left-color: rgba(255,255,255,0.09);
 }
 
+.client-profile-health-detail-height {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .client-profile-health-detail-inner {
   min-height: 232px;
   color: var(--color-text);
@@ -738,7 +744,56 @@ button.client-profile-metric-card:hover,
 
 .client-profile-content-stack {
   display: grid;
+  align-content: start;
   gap: 24px;
+  scroll-margin-top: 108px;
+  border-radius: 24px;
+  --client-destination-halo: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  --client-destination-wash: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
+.client-profile-workspace-head {
+  width: 100%;
+  height: 0;
+  pointer-events: none;
+}
+
+.dark .client-profile-content-stack {
+  --client-destination-halo: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  --client-destination-wash: rgba(255,255,255,0.075);
+}
+
+.client-profile-content-stack[data-shortcut-focus="true"] > :last-child {
+  animation: client-profile-destination-halo 1100ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes client-profile-destination-halo {
+  0% {
+    box-shadow:
+      0 0 0 0 transparent,
+      inset 0 0 0 0 transparent;
+  }
+  24% {
+    box-shadow:
+      0 0 0 7px var(--client-destination-halo),
+      0 18px 52px var(--client-destination-halo),
+      inset 0 26px 72px var(--client-destination-wash);
+  }
+  100% {
+    box-shadow:
+      0 0 0 0 transparent,
+      0 8px 24px transparent,
+      inset 0 0 0 0 transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .client-profile-content-stack[data-shortcut-focus="true"] > :last-child {
+    animation: none;
+    box-shadow:
+      0 0 0 5px var(--client-destination-halo),
+      inset 0 22px 64px var(--client-destination-wash);
+  }
 }
 
 .client-profile-loading-state {
@@ -2287,6 +2342,11 @@ button.client-profile-metric-card:hover,
     padding-left: 0;
   }
 
+  .client-profile-health-detail-height {
+    height: auto !important;
+    overflow: visible;
+  }
+
   .dark .client-profile-health-detail {
     border-top-color: rgba(255,255,255,0.09);
   }
@@ -2344,6 +2404,26 @@ button.client-profile-metric-card:hover,
   .client-profile-health-detail-rows > div,
   .client-profile-health-milestones > div {
     min-height: 31px;
+    align-items: flex-start;
+    padding-block: 7px;
+  }
+
+  .client-profile-health-detail-rows span,
+  .client-profile-health-milestones span {
+    min-width: max-content;
+    flex: 0 0 auto;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+
+  .client-profile-health-detail-rows strong,
+  .client-profile-health-milestones strong {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    line-height: 1.35;
   }
 
   .client-profile-health-action {
@@ -2398,6 +2478,7 @@ button.client-profile-metric-card:hover,
 
   .client-profile-content-stack {
     gap: 20px;
+    scroll-margin-top: 190px;
   }
 
   .client-profile-field-grid,

@@ -243,13 +243,15 @@ export function getInvoiceMonthStates(
 
 export function ClientPrimaryTabs({
   activeTab,
+  navRef,
   onChange,
 }: {
   activeTab: ClientProfileTabId;
+  navRef?: React.Ref<HTMLElement>;
   onChange: (tab: ClientProfileTabId) => void;
 }) {
   return (
-    <nav className="client-profile-primary-tabs" aria-label="Client workspace tabs">
+    <nav ref={navRef} className="client-profile-primary-tabs" aria-label="Client workspace tabs">
       {PRIMARY_TABS.map((tab) => {
         const active = activeTab === tab.id;
         return (

@@ -8,6 +8,7 @@ import {
   useReducedMotion,
   useTransform,
   type MotionValue,
+  type PanInfo,
 } from "framer-motion";
 import {
   ArrowLeft,
@@ -444,8 +445,11 @@ export function HealthDashboard({ metrics }: { metrics: ClientProfileMetric[] })
   const [collapsed, setCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [responsiveReady, setResponsiveReady] = useState(false);
+  const [detailHeight, setDetailHeight] = useState<number | null>(null);
+  const [detailHeightReady, setDetailHeightReady] = useState(false);
   const selectorRef = useRef<HTMLDivElement | null>(null);
   const selectorButtonsRef = useRef<Array<HTMLButtonElement | null>>([]);
+  const detailContentRef = useRef<HTMLDivElement | null>(null);
   const selectedMetric = metrics[Math.min(selectedIndex, Math.max(metrics.length - 1, 0))];
   const summaryMetrics = useMemo(() => (
     ["AR Progress", "Annual Return", "Outstanding"]
@@ -509,12 +513,57 @@ export function HealthDashboard({ metrics }: { metrics: ClientProfileMetric[] })
     return () => scrollAnimation.stop();
   }, [collapsed, isMobile, reducedMotion, selectedIndex]);
 
+  useEffect(() => {
+    if (isMobile) {
+      setDetailHeight(null);
+      setDetailHeightReady(false);
+      return;
+    }
+
+    const detailContent = detailContentRef.current;
+    if (!detailContent) return;
+
+    let readyFrame = 0;
+    const updateDetailHeight = () => {
+      const nextHeight = Math.max(232, Math.ceil(detailContent.scrollHeight));
+      setDetailHeight((currentHeight) => currentHeight === nextHeight ? currentHeight : nextHeight);
+
+      if (!detailHeightReady && !readyFrame) {
+        readyFrame = window.requestAnimationFrame(() => setDetailHeightReady(true));
+      }
+    };
+
+    updateDetailHeight();
+    const resizeObserver = new ResizeObserver(updateDetailHeight);
+    resizeObserver.observe(detailContent);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.cancelAnimationFrame(readyFrame);
+    };
+  }, [detailHeightReady, isMobile, selectedMetric.label]);
+
   if (!metrics.length || !selectedMetric) return null;
 
   const selectMetric = (index: number) => {
     if (index === selectedIndex) return;
     setDirection(index > selectedIndex ? 1 : -1);
     setSelectedIndex(index);
+  };
+
+  const handleMetricSwipe = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    if (!isMobile) return;
+
+    const passedDistanceThreshold = Math.abs(info.offset.x) >= 46;
+    const passedVelocityThreshold = Math.abs(info.velocity.x) >= 420;
+    if (!passedDistanceThreshold && !passedVelocityThreshold) return;
+
+    const nextIndex = info.offset.x < 0 || info.velocity.x < -420
+      ? selectedIndex + 1
+      : selectedIndex - 1;
+
+    if (nextIndex < 0 || nextIndex >= metrics.length) return;
+    selectMetric(nextIndex);
   };
 
   const slideVariants = {
@@ -621,14 +670,33 @@ export function HealthDashboard({ metrics }: { metrics: ClientProfileMetric[] })
             </div>
 
             <div className="client-profile-health-detail" id="client-profile-health-detail" role="tabpanel">
-              <AnimatePresence custom={direction} mode="wait" initial={false}>
+              <motion.div
+                className="client-profile-health-detail-height"
+                initial={false}
+                animate={{
+                  height: isMobile || detailHeight === null ? "auto" : detailHeight,
+                }}
+                transition={{
+                  duration: reducedMotion || isMobile || !detailHeightReady ? 0 : 0.42,
+                  ease: [0.22, 1, 0.36, 1],
+                }}
+              >
+              <AnimatePresence custom={direction} mode={isMobile ? "wait" : "popLayout"} initial={false}>
                 <motion.div
+                  ref={detailContentRef}
                   key={selectedMetric.label}
                   custom={direction}
                   variants={slideVariants}
                   initial="enter"
                   animate="center"
                   exit="exit"
+                  drag={isMobile ? "x" : false}
+                  dragConstraints={{ left: 0, right: 0 }}
+                  dragElastic={0.07}
+                  dragMomentum={false}
+                  onDragEnd={handleMetricSwipe}
+                  whileDrag={reducedMotion ? undefined : { scale: 0.995 }}
+                  style={{ touchAction: isMobile ? "pan-y" : "auto" }}
                   transition={{
                     duration: reducedMotion ? 0 : isMobile ? 0.38 : 0.26,
                     ease: isMobile ? [0.16, 1, 0.3, 1] : [0.22, 1, 0.36, 1],
@@ -691,6 +759,7 @@ export function HealthDashboard({ metrics }: { metrics: ClientProfileMetric[] })
                   )}
                 </motion.div>
               </AnimatePresence>
+              </motion.div>
             </div>
           </motion.div>
         )}

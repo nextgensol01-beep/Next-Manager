@@ -1,7 +1,7 @@
 "use client";
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useMotionValue, useScroll, useSpring } from "framer-motion";
+import { useMotionValue, useReducedMotion, useScroll, useSpring } from "framer-motion";
 import { FINANCIAL_YEARS, formatCurrency, formatDate, PAYMENT_MODES } from "@/lib/utils";
 import { buildInvoiceCoverageSummary } from "@/lib/invoiceCoverage";
 import { findCpcbRegistrationDate, isDateInFinancialYear } from "@/lib/currentFyRegistration";
@@ -117,6 +117,14 @@ type InvoiceType = (typeof INVOICE_TYPE_OPTIONS)[number]["id"];
 type ReceivedVia = InvoiceReceivedVia;
 type InvoiceStatus = InvoiceMonthStatus;
 
+type ClientSectionDestination =
+  | { primary: "overview" }
+  | { primary: "compliance"; secondary: ComplianceSectionId }
+  | { primary: "financial"; secondary: FinancialSectionId }
+  | { primary: "documents"; secondary: DocumentsSectionId }
+  | { primary: "timeline"; secondary: TimelineSectionId }
+  | { primary: "notes"; secondary: NotesTasksSectionId };
+
 const CUSTOM_FIELD_ICON_COMPONENTS = {
   fileText: FileText,
   building: Building2,
@@ -144,6 +152,17 @@ export default function ClientProfilePage() {
   });
   const dashboardScrollRef = useRef<HTMLElement | null>(null);
   const headerCollapsedRef = useRef(false);
+  const workspaceNavigationLockRef = useRef(false);
+  const workspaceTabScrollOffsetsRef = useRef<Partial<Record<ClientProfileTabId, number>>>({});
+  const primaryTabsRef = useRef<HTMLElement | null>(null);
+  const workspaceHeadRef = useRef<HTMLDivElement | null>(null);
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const navigationFrameRef = useRef<number | null>(null);
+  const navigationHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const navigationScrollCleanupRef = useRef<(() => void) | null>(null);
+  const workspaceSnapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const workspaceSnapActiveRef = useRef(false);
+  const prefersReducedMotion = useReducedMotion();
 
   const [client, setClient] = useState<Client | null>(null);
   const [fyRecords, setFyRecords] = useState<FYRecord[]>([]);
@@ -179,6 +198,9 @@ export default function ClientProfilePage() {
   const [activeDocumentsSection, setActiveDocumentsSection] = useState<DocumentsSectionId>("all");
   const [activeTimelineSection, setActiveTimelineSection] = useState<TimelineSectionId>("all");
   const [activeNotesSection, setActiveNotesSection] = useState<NotesTasksSectionId>("notes");
+  const [workspacePinned, setWorkspacePinned] = useState(false);
+  const [workspaceMinHeight, setWorkspaceMinHeight] = useState(0);
+  const [workspaceHighlighted, setWorkspaceHighlighted] = useState(false);
   const [secondaryNavCollapsed, setSecondaryNavCollapsed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [docModal, setDocModal] = useState(false);
@@ -591,6 +613,173 @@ export default function ClientProfilePage() {
     });
   }, [profileScrollY, viewportScrollY]);
 
+  const getWorkspaceGeometry = useCallback(() => {
+    const nav = primaryTabsRef.current;
+    if (!nav) return null;
+
+    const desktop = window.matchMedia("(min-width: 768px)").matches;
+    const scrollContainer = desktop ? dashboardScrollRef.current : null;
+    const scrollportTop = scrollContainer?.getBoundingClientRect().top ?? 0;
+    const scrollportHeight = scrollContainer?.clientHeight ?? window.innerHeight;
+    const scrollportPaddingTop = scrollContainer
+      ? Number.parseFloat(window.getComputedStyle(scrollContainer).paddingTop) || 0
+      : 0;
+    const navStyles = window.getComputedStyle(nav);
+    const stickyTop = Number.parseFloat(navStyles.top) || 0;
+    const marginBottom = Number.parseFloat(navStyles.marginBottom) || 0;
+    const navRect = nav.getBoundingClientRect();
+    const effectiveStickyTop = stickyTop + scrollportPaddingTop;
+    const stickyLine = scrollportTop + effectiveStickyTop;
+    const naturallyPinned = (
+      profileScrollY.get() > 0 &&
+      navRect.top <= stickyLine + 2
+    );
+
+    return {
+      desktop,
+      marginBottom,
+      naturallyPinned,
+      navHeight: navRect.height,
+      navTop: navRect.top,
+      scrollContainer,
+      scrollportHeight,
+      effectiveStickyTop,
+      stickyLine,
+    };
+  }, [profileScrollY]);
+
+  const updateWorkspaceReserve = useCallback((forcePinned = false) => {
+    const geometry = getWorkspaceGeometry();
+    if (!geometry) return;
+
+    const {
+      effectiveStickyTop,
+      marginBottom,
+      naturallyPinned,
+      navHeight,
+      scrollportHeight,
+    } = geometry;
+    if (naturallyPinned) workspaceNavigationLockRef.current = false;
+    const pinned = forcePinned || workspaceNavigationLockRef.current || naturallyPinned;
+
+    const nextMinHeight = pinned
+      ? Math.max(0, Math.ceil(scrollportHeight - effectiveStickyTop - navHeight - marginBottom))
+      : 0;
+
+    setWorkspacePinned((current) => current === pinned ? current : pinned);
+    setWorkspaceMinHeight((current) => current === nextMinHeight ? current : nextMinHeight);
+  }, [getWorkspaceGeometry]);
+
+  useLayoutEffect(() => {
+    const nav = primaryTabsRef.current;
+    const workspace = workspaceRef.current;
+    const scrollContainer = dashboardScrollRef.current;
+    if (!nav || !workspace) return;
+
+    let frameId = 0;
+    const scheduleMeasurement = () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => updateWorkspaceReserve());
+    };
+
+    scheduleMeasurement();
+    scrollContainer?.addEventListener("scroll", scheduleMeasurement, { passive: true });
+    window.addEventListener("scroll", scheduleMeasurement, { passive: true });
+    window.addEventListener("resize", scheduleMeasurement);
+
+    const resizeObserver = new ResizeObserver(scheduleMeasurement);
+    resizeObserver.observe(nav);
+    resizeObserver.observe(workspace);
+    if (scrollContainer) resizeObserver.observe(scrollContainer);
+    const profileHeader = document.querySelector<HTMLElement>(".client-profile-header");
+    if (profileHeader) resizeObserver.observe(profileHeader);
+
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      resizeObserver.disconnect();
+      scrollContainer?.removeEventListener("scroll", scheduleMeasurement);
+      window.removeEventListener("scroll", scheduleMeasurement);
+      window.removeEventListener("resize", scheduleMeasurement);
+    };
+  }, [
+    activeComplianceSection,
+    activeDocumentsSection,
+    activeFinancialSection,
+    activeNotesSection,
+    activePrimaryTab,
+    activeTimelineSection,
+    loading,
+    secondaryNavCollapsed,
+    updateWorkspaceReserve,
+  ]);
+
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 768px)").matches;
+    const scrollTarget: HTMLElement | Window = desktop && dashboardScrollRef.current
+      ? dashboardScrollRef.current
+      : window;
+
+    const clearSnapTimer = () => {
+      if (!workspaceSnapTimerRef.current) return;
+      clearTimeout(workspaceSnapTimerRef.current);
+      workspaceSnapTimerRef.current = null;
+    };
+
+    const settleWorkspaceHead = () => {
+      workspaceSnapTimerRef.current = null;
+      if (workspaceSnapActiveRef.current || workspaceNavigationLockRef.current) return;
+
+      const geometry = getWorkspaceGeometry();
+      const workspaceHead = workspaceHeadRef.current;
+      if (!geometry || !workspaceHead || (!geometry.naturallyPinned && !workspacePinned)) return;
+
+      const contentTop = geometry.stickyLine + geometry.navHeight + geometry.marginBottom;
+      const scrollDelta = workspaceHead.getBoundingClientRect().top - contentTop;
+
+      // This is intentionally a small magnetic zone. Strong upward scrolling
+      // crosses it normally and exits focused workspace mode.
+      if (Math.abs(scrollDelta) <= 1.5 || Math.abs(scrollDelta) > 52) return;
+
+      workspaceSnapActiveRef.current = true;
+      const releaseSnap = () => {
+        workspaceSnapActiveRef.current = false;
+        scrollTarget.removeEventListener("scrollend", releaseSnap);
+      };
+
+      scrollTarget.addEventListener("scrollend", releaseSnap, { once: true });
+      if (geometry.desktop && geometry.scrollContainer) {
+        geometry.scrollContainer.scrollBy({
+          top: scrollDelta,
+          behavior: prefersReducedMotion ? "auto" : "smooth",
+        });
+      } else {
+        window.scrollBy({
+          top: scrollDelta,
+          behavior: prefersReducedMotion ? "auto" : "smooth",
+        });
+      }
+
+      if (prefersReducedMotion) {
+        releaseSnap();
+      } else {
+        window.setTimeout(releaseSnap, 480);
+      }
+    };
+
+    const scheduleWorkspaceSettle = () => {
+      if (workspaceSnapActiveRef.current || workspaceNavigationLockRef.current) return;
+      clearSnapTimer();
+      workspaceSnapTimerRef.current = setTimeout(settleWorkspaceHead, 110);
+    };
+
+    scrollTarget.addEventListener("scroll", scheduleWorkspaceSettle, { passive: true });
+    return () => {
+      clearSnapTimer();
+      workspaceSnapActiveRef.current = false;
+      scrollTarget.removeEventListener("scroll", scheduleWorkspaceSettle);
+    };
+  }, [getWorkspaceGeometry, prefersReducedMotion, workspacePinned]);
+
   useEffect(() => {
     const scrollContainer = dashboardScrollRef.current;
     let previousScrollTop = profileScrollY.get();
@@ -700,6 +889,161 @@ export default function ClientProfilePage() {
     };
   }, [client, headerProgress]);
 
+  const enterWorkspaceMode = useCallback((
+    destination: ClientSectionDestination,
+    options: { restoreTabPosition?: boolean } = {}
+  ) => {
+    headerCollapsedRef.current = true;
+    workspaceNavigationLockRef.current = true;
+    headerProgressTarget.set(1);
+    headerProgress.jump(1);
+    updateWorkspaceReserve(true);
+    setActivePrimaryTab(destination.primary);
+
+    if (destination.primary === "compliance") setActiveComplianceSection(destination.secondary);
+    if (destination.primary === "financial") setActiveFinancialSection(destination.secondary);
+    if (destination.primary === "documents") setActiveDocumentsSection(destination.secondary);
+    if (destination.primary === "timeline") setActiveTimelineSection(destination.secondary);
+    if (destination.primary === "notes") setActiveNotesSection(destination.secondary);
+
+    if (navigationFrameRef.current !== null) cancelAnimationFrame(navigationFrameRef.current);
+    if (navigationHighlightTimerRef.current) clearTimeout(navigationHighlightTimerRef.current);
+    navigationScrollCleanupRef.current?.();
+    navigationScrollCleanupRef.current = null;
+    setWorkspaceHighlighted(false);
+
+    navigationFrameRef.current = requestAnimationFrame(() => {
+      navigationFrameRef.current = requestAnimationFrame(() => {
+        const geometry = getWorkspaceGeometry();
+        if (!geometry || !workspaceHeadRef.current) {
+          navigationFrameRef.current = null;
+          return;
+        }
+
+        const contentTop = geometry.stickyLine + geometry.navHeight + geometry.marginBottom;
+        const restoredOffset = options.restoreTabPosition
+          ? workspaceTabScrollOffsetsRef.current[destination.primary] ?? 0
+          : 0;
+        const desiredHeadTop = contentTop - restoredOffset;
+        const scrollDelta = workspaceHeadRef.current.getBoundingClientRect().top - desiredHeadTop;
+        const behavior: ScrollBehavior = prefersReducedMotion ? "auto" : "smooth";
+
+        const showArrivalCue = () => {
+          navigationScrollCleanupRef.current?.();
+          navigationScrollCleanupRef.current = null;
+          if (navigationHighlightTimerRef.current) clearTimeout(navigationHighlightTimerRef.current);
+          workspaceNavigationLockRef.current = false;
+          updateWorkspaceReserve();
+          setWorkspaceHighlighted(true);
+          navigationHighlightTimerRef.current = setTimeout(() => {
+            setWorkspaceHighlighted(false);
+            navigationHighlightTimerRef.current = null;
+          }, prefersReducedMotion ? 500 : 1100);
+        };
+
+        if (Math.abs(scrollDelta) <= 1) {
+          showArrivalCue();
+        } else {
+          const scrollTarget: EventTarget = geometry.scrollContainer ?? window;
+          const handleScrollEnd = () => showArrivalCue();
+          scrollTarget.addEventListener("scrollend", handleScrollEnd, { once: true });
+          navigationScrollCleanupRef.current = () => {
+            scrollTarget.removeEventListener("scrollend", handleScrollEnd);
+          };
+
+          if (geometry.desktop && geometry.scrollContainer) {
+            geometry.scrollContainer.scrollTo({
+              top: geometry.scrollContainer.scrollTop + scrollDelta,
+              behavior,
+            });
+          } else {
+            window.scrollTo({
+              top: window.scrollY + scrollDelta,
+              behavior,
+            });
+          }
+
+          if (prefersReducedMotion) {
+            showArrivalCue();
+          } else {
+            navigationHighlightTimerRef.current = setTimeout(showArrivalCue, 700);
+          }
+        }
+        navigationFrameRef.current = null;
+      });
+    });
+  }, [
+    getWorkspaceGeometry,
+    headerProgress,
+    headerProgressTarget,
+    prefersReducedMotion,
+    updateWorkspaceReserve,
+  ]);
+
+  const handlePrimaryTabChange = useCallback((tab: ClientProfileTabId) => {
+    if (tab === activePrimaryTab) return;
+
+    const geometry = getWorkspaceGeometry();
+    const workspaceHead = workspaceHeadRef.current;
+    if (geometry && workspaceHead && (geometry.naturallyPinned || workspacePinned)) {
+      const contentTop = geometry.stickyLine + geometry.navHeight + geometry.marginBottom;
+      workspaceTabScrollOffsetsRef.current[activePrimaryTab] = Math.max(
+        0,
+        Math.round(contentTop - workspaceHead.getBoundingClientRect().top)
+      );
+    } else {
+      workspaceTabScrollOffsetsRef.current[activePrimaryTab] = 0;
+    }
+
+    if (tab === "compliance") {
+      enterWorkspaceMode(
+        { primary: tab, secondary: activeComplianceSection },
+        { restoreTabPosition: true }
+      );
+    } else if (tab === "financial") {
+      enterWorkspaceMode(
+        { primary: tab, secondary: activeFinancialSection },
+        { restoreTabPosition: true }
+      );
+    } else if (tab === "documents") {
+      enterWorkspaceMode(
+        { primary: tab, secondary: activeDocumentsSection },
+        { restoreTabPosition: true }
+      );
+    } else if (tab === "timeline") {
+      enterWorkspaceMode(
+        { primary: tab, secondary: activeTimelineSection },
+        { restoreTabPosition: true }
+      );
+    } else if (tab === "notes") {
+      enterWorkspaceMode(
+        { primary: tab, secondary: activeNotesSection },
+        { restoreTabPosition: true }
+      );
+    } else {
+      enterWorkspaceMode({ primary: "overview" }, { restoreTabPosition: true });
+    }
+  }, [
+    activeComplianceSection,
+    activeDocumentsSection,
+    activeFinancialSection,
+    activeNotesSection,
+    activePrimaryTab,
+    activeTimelineSection,
+    enterWorkspaceMode,
+    getWorkspaceGeometry,
+    workspacePinned,
+  ]);
+
+  const navigateToClientSection = enterWorkspaceMode;
+
+  useEffect(() => () => {
+    if (navigationFrameRef.current !== null) cancelAnimationFrame(navigationFrameRef.current);
+    if (navigationHighlightTimerRef.current) clearTimeout(navigationHighlightTimerRef.current);
+    if (workspaceSnapTimerRef.current) clearTimeout(workspaceSnapTimerRef.current);
+    navigationScrollCleanupRef.current?.();
+  }, []);
+
   const closeDocumentModal = () => {
     setDocModal(false);
     setDocModalMode("create");
@@ -756,6 +1100,7 @@ export default function ClientProfilePage() {
       });
       closeDocumentModal();
       toast.success(editingDocumentId ? "Document updated!" : "Document added!");
+      navigateToClientSection({ primary: "documents", secondary: "all" });
     } finally {
       setInlineSaving(false);
     }
@@ -863,6 +1208,7 @@ export default function ClientProfilePage() {
       savedRecords.forEach((saved, index) => optimisticOps[index]?.commit(saved));
       invalidate("/api/invoices");
       toast.success(`${savedRecords.length} month${savedRecords.length === 1 ? "" : "s"} updated.`);
+      navigateToClientSection({ primary: "compliance", secondary: "invoiceTracking" });
     } catch {
       optimisticOps.forEach((ops) => ops.rollback());
       toast.error("Something went wrong saving invoice.");
@@ -933,6 +1279,7 @@ export default function ClientProfilePage() {
       commit(saved);
       invalidate("/api/upload-records");
       toast.success("Upload record added!");
+      navigateToClientSection({ primary: "compliance", secondary: "cpcbUpload" });
     } catch {
       rollback();
       toast.error("Something went wrong saving upload record.");
@@ -956,9 +1303,9 @@ export default function ClientProfilePage() {
 
   const openBillingModalForRecord = (record?: Billing | null) => {
     if (!record && client && (client.category === "Importer" || client.category === "Brand Owner")) {
-      setActivePrimaryTab("financial");
       if (acceptedQuotations.length === 0) {
         toast.error("Accept a quotation before generating a bill for this client type.");
+        navigateToClientSection({ primary: "financial", secondary: "quotations" });
         return;
       }
       if (acceptedQuotations.length === 1) {
@@ -966,6 +1313,7 @@ export default function ClientProfilePage() {
         return;
       }
       toast("Use an accepted quotation to generate this bill.");
+      navigateToClientSection({ primary: "financial", secondary: "quotations" });
       return;
     }
 
@@ -1117,6 +1465,7 @@ export default function ClientProfilePage() {
       };
       ops?.commit?.(safeCommit);
       toast.success(editingBillingId ? "Billing updated!" : "Billing saved!");
+      navigateToClientSection({ primary: "financial", secondary: "bills" });
     } catch {
       ops?.rollback?.();
       toast.error("Something went wrong saving billing.");
@@ -1236,6 +1585,7 @@ export default function ClientProfilePage() {
       const saved = await response.json();
       ops?.commit?.(saved);
       toast.success(editingPaymentId ? "Payment updated!" : "Payment recorded!");
+      navigateToClientSection({ primary: "financial", secondary: "payments" });
     } catch {
       ops?.rollback?.();
       toast.error("Something went wrong saving payment.");
@@ -1331,6 +1681,7 @@ export default function ClientProfilePage() {
       setSelectedFy(payload.financialYear);
       invalidate("/api/financial-year", "/api/dashboard", "/api/activities");
       toast.success(isPWP ? "Credit data saved!" : "FY data saved!");
+      navigateToClientSection({ primary: "compliance", secondary: "targetsCredits" });
     } finally {
       setInlineSaving(false);
     }
@@ -1506,6 +1857,7 @@ export default function ClientProfilePage() {
 
       closeReminderModal();
       toast.success(`Reminder sent to ${reminderRecipients.length} recipient${reminderRecipients.length === 1 ? "" : "s"}!`);
+      navigateToClientSection({ primary: "financial", secondary: "outstanding" });
     } finally {
       setReminderSending(false);
     }
@@ -1986,10 +2338,7 @@ export default function ClientProfilePage() {
         { label: "Filing State", value: annualReturnStatus },
         { label: "Registration", value: registeredThisFy ? "Registered this FY" : registrationStatus },
       ],
-      onClick: () => {
-        setActivePrimaryTab("compliance");
-        setActiveComplianceSection("annualReturn");
-      },
+      onClick: () => navigateToClientSection({ primary: "compliance", secondary: "annualReturn" }),
     },
     {
       label: "AR Progress",
@@ -2008,10 +2357,7 @@ export default function ClientProfilePage() {
         value: step.progress >= 1 ? "Complete" : step.progress > 0 ? "In progress" : "Pending",
         state: step.progress >= 1 ? "done" : step.progress > 0 ? "partial" : "pending",
       })),
-      onClick: () => {
-        setActivePrimaryTab("compliance");
-        setActiveComplianceSection("annualReturn");
-      },
+      onClick: () => navigateToClientSection({ primary: "compliance", secondary: "annualReturn" }),
     },
     {
       label: "Invoice Coverage",
@@ -2027,10 +2373,7 @@ export default function ClientProfilePage() {
         { label: "Sale Months", value: `${invoiceCoverage.sale.doneCount}/12` },
         { label: "Purchase Months", value: `${invoiceCoverage.purchase.doneCount}/12` },
       ],
-      onClick: () => {
-        setActivePrimaryTab("compliance");
-        setActiveComplianceSection("invoiceTracking");
-      },
+      onClick: () => navigateToClientSection({ primary: "compliance", secondary: "invoiceTracking" }),
     },
     {
       label: "CPCB Uploaded",
@@ -2044,10 +2387,7 @@ export default function ClientProfilePage() {
         ...cpcbUploadedCategoryTotals.map((item) => ({ label: item.label, value: `${item.value.toLocaleString("en-IN")} MT` })),
         { label: "Invoices Uploaded", value: cpcbUploadedInvoiceCount.toLocaleString("en-IN") },
       ],
-      onClick: () => {
-        setActivePrimaryTab("compliance");
-        setActiveComplianceSection("cpcbUpload");
-      },
+      onClick: () => navigateToClientSection({ primary: "compliance", secondary: "cpcbUpload" }),
     },
     {
       label: "Outstanding",
@@ -2061,7 +2401,9 @@ export default function ClientProfilePage() {
         { label: "Total Billed", value: formatCurrency(billing?.totalAmount || 0) },
         { label: "Paid", value: formatCurrency(billing?.totalPaid || 0) },
       ],
-      onClick: () => openBillingModalForRecord(billing),
+      onClick: () => billing
+        ? navigateToClientSection({ primary: "financial", secondary: "outstanding" })
+        : openBillingModalForRecord(),
     },
     {
       label: "Payment Status",
@@ -2075,7 +2417,9 @@ export default function ClientProfilePage() {
         { label: "Paid", value: formatCurrency(billing?.totalPaid || 0) },
         { label: "Last Payment", value: latestPayment ? `${formatCurrency(latestPayment.amountPaid)} on ${formatDate(latestPayment.paymentDate)}` : "Not recorded" },
       ],
-      onClick: () => latestPayment ? openPaymentModalForRecord(latestPayment) : openPaymentModalForRecord(),
+      onClick: () => latestPayment
+        ? navigateToClientSection({ primary: "financial", secondary: "paymentHistory" })
+        : openPaymentModalForRecord(),
     },
     {
       label: "Documents",
@@ -2102,7 +2446,7 @@ export default function ClientProfilePage() {
         { label: "Date", value: lastEmailActivity ? formatDate(lastEmailActivity.date) : "-" },
         { label: "Total Activity", value: activitiesTotal.toLocaleString("en-IN") },
       ],
-      onClick: () => setActivePrimaryTab("timeline"),
+      onClick: () => navigateToClientSection({ primary: "timeline", secondary: "all" }),
     },
   ];
 
@@ -2114,10 +2458,7 @@ export default function ClientProfilePage() {
       tone: "warning",
       icon: <AlertCircle className="h-4 w-4" />,
       actionLabel: "Open",
-      onAction: () => {
-        setActivePrimaryTab("compliance");
-        setActiveComplianceSection("annualReturn");
-      },
+      onAction: () => navigateToClientSection({ primary: "compliance", secondary: "annualReturn" }),
     } : null,
     invoicePendingMonths > 0 ? {
       id: "invoice-data",
@@ -2126,10 +2467,7 @@ export default function ClientProfilePage() {
       tone: "warning",
       icon: <FileText className="h-4 w-4" />,
       actionLabel: "Update",
-      onAction: () => {
-        setActivePrimaryTab("compliance");
-        setActiveComplianceSection("invoiceTracking");
-      },
+      onAction: () => navigateToClientSection({ primary: "compliance", secondary: "invoiceTracking" }),
     } : null,
     requiresAcceptedQuotation && !quotationAccepted ? {
       id: "quotation-not-accepted",
@@ -2140,10 +2478,7 @@ export default function ClientProfilePage() {
       tone: "warning",
       icon: <Receipt className="h-4 w-4" />,
       actionLabel: "Open",
-      onAction: () => {
-        setActivePrimaryTab("financial");
-        setActiveFinancialSection("quotations");
-      },
+      onAction: () => navigateToClientSection({ primary: "financial", secondary: "quotations" }),
     } : null,
     billing && billing.pendingAmount > 0 ? {
       id: "payment-pending",
@@ -2161,10 +2496,10 @@ export default function ClientProfilePage() {
       tone: "neutral",
       icon: <Receipt className="h-4 w-4" />,
       actionLabel: "Open",
-      onAction: () => {
-        setActivePrimaryTab("financial");
-        setActiveFinancialSection(client.category === "PWP" ? "bills" : "quotations");
-      },
+      onAction: () => navigateToClientSection({
+        primary: "financial",
+        secondary: client.category === "PWP" ? "bills" : "quotations",
+      }),
     } : null,
     registeredThisFy && annualReturnStatus === "Not Required This FY" ? {
       id: "registered-current-fy",
@@ -2173,10 +2508,7 @@ export default function ClientProfilePage() {
       tone: "success",
       icon: <CheckCircle2 className="h-4 w-4" />,
       actionLabel: "Review",
-      onAction: () => {
-        setActivePrimaryTab("compliance");
-        setActiveComplianceSection("annualReturn");
-      },
+      onAction: () => navigateToClientSection({ primary: "compliance", secondary: "annualReturn" }),
     } : null,
   ].filter(Boolean) as ClientProfileAlert[];
 
@@ -2538,9 +2870,24 @@ export default function ClientProfilePage() {
         <HealthDashboard metrics={healthMetrics} />
         <ClientAlerts alerts={profileAlerts} />
         <QuickActions actions={quickActions} />
-        <ClientPrimaryTabs activeTab={activePrimaryTab} onChange={setActivePrimaryTab} />
+        <ClientPrimaryTabs
+          activeTab={activePrimaryTab}
+          navRef={primaryTabsRef}
+          onChange={handlePrimaryTabChange}
+        />
+        <div
+          ref={workspaceHeadRef}
+          className="client-profile-workspace-head"
+          aria-hidden="true"
+        />
 
-        <div className="client-profile-content-stack">
+        <div
+          ref={workspaceRef}
+          className="client-profile-content-stack"
+          data-shortcut-focus={workspaceHighlighted ? "true" : undefined}
+          data-workspace-pinned={workspacePinned ? "true" : undefined}
+          style={workspacePinned && workspaceMinHeight > 0 ? { minHeight: workspaceMinHeight } : undefined}
+        >
           {activePrimaryTab === "overview" && (
             <>
               <AnnualReturnProgressPanel
