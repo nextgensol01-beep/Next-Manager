@@ -1,6 +1,10 @@
 import mongoose, { Schema, Document } from "mongoose";
+import {
+  ANNUAL_RETURN_STATUSES,
+  type AnnualReturnStatus,
+} from "@/lib/annualReturnStatus";
 
-export type ReturnStatus = "Pending" | "Not Started" | "In Progress" | "Filed" | "Verified" | "Not Required This FY";
+export type ReturnStatus = AnnualReturnStatus;
 
 export interface IAnnualReturn extends Document {
   clientId: string;
@@ -17,7 +21,7 @@ const AnnualReturnSchema = new Schema<IAnnualReturn>(
   {
     clientId:            { type: String, required: true },
     financialYear:       { type: String, required: true },
-    status:              { type: String, enum: ["Pending", "Not Started", "In Progress", "Filed", "Verified", "Not Required This FY"], default: "Pending" },
+    status:              { type: String, enum: ANNUAL_RETURN_STATUSES, default: "Pending" },
     filingDate:          { type: Date, default: null },
     acknowledgeNumber:   { type: String, default: "" },
     remarks:             { type: String, default: "" },

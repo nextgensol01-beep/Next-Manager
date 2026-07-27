@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     const existingIds = new Set(existing.map((r) => r.clientId));
     const toCreate = clients
       .filter((c) => !existingIds.has(c.clientId))
-      .map((c) => ({ clientId: c.clientId, financialYear, status: "Pending" }));
+      .map((c) => ({ clientId: c.clientId, financialYear, status: "Not Started" }));
 
     if (toCreate.length > 0) {
       await AnnualReturn.insertMany(toCreate, { ordered: false });

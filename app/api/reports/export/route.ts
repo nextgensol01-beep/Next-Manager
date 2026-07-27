@@ -749,9 +749,11 @@ export async function GET(req: NextRequest) {
     const returnMap = new Map(returns.map((ret) => [String(ret.clientId), ret]));
     const statusOrder: Record<string, number> = {
       Pending: 0,
+      "Not Started": 0,
       "In Progress": 1,
-      Filed: 2,
-      Verified: 3,
+      "Ready to File": 2,
+      Filed: 3,
+      Verified: 4,
     };
     const exportRows = allClients
       .map((client) => {
@@ -792,7 +794,9 @@ export async function GET(req: NextRequest) {
         Filed: "FF16A34A",
         Verified: "FF2563EB",
         "In Progress": "FFCA8A04",
+        "Ready to File": "FF7C3AED",
         Pending: "FFDC2626",
+        "Not Started": "FFDC2626",
       };
       const st = ret.status;
       if (st in statusColors) row.getCell("status").font = { bold: true, color: { argb: statusColors[st] } };

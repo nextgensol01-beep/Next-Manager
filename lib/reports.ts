@@ -37,7 +37,7 @@ export const REPORT_DEFINITIONS = [
   {
     id: "annual-return",
     label: "EPR Annual Return",
-    description: "Filing status for all clients with Pending, In Progress, Filed, and Verified states",
+    description: "Filing status for all clients from Not Started through Ready to File, Filed, and Verified",
     summary: "Filing status for every client in the selected FY",
     filePrefix: "annual-return",
   },

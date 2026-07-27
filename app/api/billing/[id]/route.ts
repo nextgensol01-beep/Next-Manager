@@ -6,6 +6,7 @@ import { connectDB } from "@/lib/mongoose";
 import Billing from "@/models/Billing";
 import Payment from "@/models/Payment";
 import DeletedRecord from "@/models/DeletedRecord";
+import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
 
 
 // ── Re-fetch a billing doc through the full aggregation pipeline so the
@@ -107,6 +108,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const { id } = await params;
     const record = await Billing.findByIdAndUpdate(id, { ...body, updatedAt: new Date() }, { new: true, runValidators: true });
     if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    await syncAnnualReturnStatus(record.clientId, record.financialYear);
     // Re-fetch through aggregation pipeline so response includes totalPaid, pendingAmount, paymentStatus
     const full = await fetchBillingAggregated(record._id);
     return NextResponse.json(full ?? record);

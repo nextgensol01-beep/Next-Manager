@@ -7,6 +7,7 @@ import QuotationRevision from "@/models/QuotationRevision";
 import { calculateQuotationGrandTotal, calculateQuotationItems } from "@/lib/quotationRules";
 import { quotationCreateSchema, quotationListQuerySchema, validationErrorMessage } from "@/lib/quotationValidation";
 import { expireStaleQuotations } from "@/lib/quotationWorkflow";
+import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
 
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -141,6 +142,9 @@ export async function POST(req: NextRequest) {
     isFinalised: false,
   });
 
+  if (quotation.clientId) {
+    await syncAnnualReturnStatus(quotation.clientId, quotation.financialYear);
+  }
   const obj = quotation.toObject();
   return NextResponse.json({ ...obj, _id: String(obj._id) }, { status: 201 });
 }

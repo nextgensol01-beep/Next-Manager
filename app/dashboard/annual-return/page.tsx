@@ -8,11 +8,16 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { FINANCIAL_YEARS, formatDate } from "@/lib/utils";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
 import TableWrapper from "@/components/ui/TableWrapper";
-import { Plus, Search, Pencil, Trash2, CheckCircle2, Clock, AlertCircle, ShieldCheck, Sparkles, Mail, FileEdit, ExternalLink, ChevronDown } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, CheckCircle2, Clock, AlertCircle, ShieldCheck, Sparkles, Mail, FileEdit, ExternalLink, ChevronDown, RefreshCw } from "lucide-react";
 import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearPreference, useFinancialYearState } from "@/app/providers";
+import {
+  ANNUAL_RETURN_STATUSES,
+  MANUAL_ANNUAL_RETURN_STATUSES,
+  type AnnualReturnStatus,
+} from "@/lib/annualReturnStatus";
 
-type ReturnStatus = "Pending" | "Not Started" | "In Progress" | "Filed" | "Verified" | "Not Required This FY";
+type ReturnStatus = AnnualReturnStatus;
 interface EmailOption { label: string; email: string; }
 
 function restoreSuggestion(email: string, currentSuggestions: EmailOption[], catalog: EmailOption[]) {
@@ -43,20 +48,31 @@ interface AnnualReturn {
 interface Client { clientId: string; companyName: string; category: string; }
 
 const STATUS_CONFIG: Record<ReturnStatus, { label: string; icon: React.ReactNode; badge: string; ring: string; bg: string; dot: string }> = {
-  "Pending":     { label: "Pending",     icon: <AlertCircle  className="w-3.5 h-3.5" />, badge: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",         ring: "ring-red-300 dark:ring-red-700",     bg: "bg-red-50 dark:bg-red-900/10",     dot: "bg-red-500"     },
+  "Pending":     { label: "Not Started", icon: <AlertCircle  className="w-3.5 h-3.5" />, badge: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",         ring: "ring-red-300 dark:ring-red-700",     bg: "bg-red-50 dark:bg-red-900/10",     dot: "bg-red-500"     },
   "Not Started": { label: "Not Started", icon: <AlertCircle  className="w-3.5 h-3.5" />, badge: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",         ring: "ring-red-300 dark:ring-red-700",     bg: "bg-red-50 dark:bg-red-900/10",     dot: "bg-red-500"     },
   "In Progress": { label: "In Progress", icon: <Clock        className="w-3.5 h-3.5" />, badge: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",   ring: "ring-amber-300 dark:ring-amber-700",  bg: "bg-amber-50 dark:bg-amber-900/10", dot: "bg-amber-400"   },
+  "Ready to File": { label: "Ready to File", icon: <Sparkles className="w-3.5 h-3.5" />, badge: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300", ring: "ring-violet-300 dark:ring-violet-700", bg: "bg-violet-50 dark:bg-violet-900/10", dot: "bg-violet-500" },
   "Filed":       { label: "Filed",       icon: <CheckCircle2 className="w-3.5 h-3.5" />, badge: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400",       ring: "ring-blue-300 dark:ring-blue-700",    bg: "bg-blue-50 dark:bg-blue-900/10",   dot: "bg-blue-500"    },
   "Verified":    { label: "Verified",    icon: <ShieldCheck  className="w-3.5 h-3.5" />, badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400", ring: "ring-emerald-300 dark:ring-emerald-700", bg: "bg-emerald-50 dark:bg-emerald-900/10", dot: "bg-emerald-500" },
   "Not Required This FY": { label: "Not Required", icon: <ShieldCheck className="w-3.5 h-3.5" />, badge: "bg-slate-100 text-slate-700 dark:bg-neutral-800 dark:text-neutral-300", ring: "ring-slate-300 dark:ring-neutral-700", bg: "bg-slate-50 dark:bg-neutral-900/40", dot: "bg-slate-400" },
 };
-const STATUSES: ReturnStatus[] = ["Pending", "Not Started", "In Progress", "Filed", "Verified", "Not Required This FY"];
+const STATUSES: ReturnStatus[] = [...ANNUAL_RETURN_STATUSES];
+const VISIBLE_STATUSES: ReturnStatus[] = STATUSES.filter((status) => status !== "Pending");
+const EDITABLE_STATUSES: ReturnStatus[] = [...MANUAL_ANNUAL_RETURN_STATUSES];
+
+function nextAnnualReturnStatus(status: ReturnStatus): ReturnStatus | null {
+  if (status === "Pending" || status === "Not Started") return "In Progress";
+  if (status === "In Progress") return "Ready to File";
+  if (status === "Ready to File") return "Filed";
+  if (status === "Filed") return "Verified";
+  return null;
+}
 
 function createEmptyForm(financialYear: string) {
   return {
     clientId: "",
     financialYear,
-    status: "Pending" as ReturnStatus,
+    status: "Not Started" as ReturnStatus,
     filingDate: "",
     acknowledgeNumber: "",
     remarks: "",
@@ -100,6 +116,8 @@ export default function AnnualReturnPage() {
   const [form, setForm]         = useState(() => createEmptyForm(effectiveFinancialYear));
   const [saving, setSaving]     = useState(false);
   const [initLoading, setInitLoading] = useState(false);
+  const [statusSyncing, setStatusSyncing] = useState(false);
+  const [lastSyncResult, setLastSyncResult] = useState<{ fy: string; changed: number } | null>(null);
 
   // Draft modal state
   const [draftModal, setDraftModal] = useState(false);
@@ -131,6 +149,48 @@ export default function AnnualReturnPage() {
   const records = Array.isArray(rawRecords) ? rawRecords : [];
   const { data: rawClients } = useCache<Client[]>("/api/clients");
   const clients = Array.isArray(rawClients) ? rawClients : [];
+  const reconciledFinancialYearsRef = React.useRef(new Set<string>());
+
+  const reconcileStatuses = React.useCallback(async (showToast = false) => {
+    setStatusSyncing(true);
+    try {
+      const response = await fetch("/api/annual-return/reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ financialYear: fy }),
+      });
+      if (!response.ok) {
+        reconciledFinancialYearsRef.current.delete(fy);
+        if (showToast) toast.error("Failed to sync workflow statuses.");
+        return;
+      }
+
+      const result = await response.json() as { changed?: number };
+      const changed = Number(result.changed) || 0;
+      reconciledFinancialYearsRef.current.add(fy);
+      setLastSyncResult({ fy, changed });
+      invalidate("/api/annual-return", "/api/dashboard");
+      await refetchRecords();
+      if (showToast) {
+        toast.success(
+          changed > 0
+            ? `${changed} annual return status${changed === 1 ? "" : "es"} updated.`
+            : "All annual return statuses are already up to date.",
+        );
+      }
+    } catch {
+      reconciledFinancialYearsRef.current.delete(fy);
+      if (showToast) toast.error("Failed to sync workflow statuses.");
+    } finally {
+      setStatusSyncing(false);
+    }
+  }, [fy, refetchRecords]);
+
+  React.useEffect(() => {
+    if (!financialYearLoaded || reconciledFinancialYearsRef.current.has(fy)) return;
+    reconciledFinancialYearsRef.current.add(fy);
+    void reconcileStatuses();
+  }, [financialYearLoaded, fy, reconcileStatuses]);
 
   React.useEffect(() => {
     const removedRecipients = previousDraftToRef.current.filter(
@@ -166,7 +226,12 @@ export default function AnnualReturnPage() {
         ? await fetch(`/api/annual-return/${editRecord._id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
         : await fetch("/api/annual-return", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!r.ok) { toast.error("Failed to save"); return; }
-      toast.success(editRecord ? "Updated!" : "Record added!");
+      const saved = await r.json() as AnnualReturn;
+      toast.success(
+        saved.status === form.status
+          ? editRecord ? "Annual return updated." : "Annual return record saved."
+          : `Saved. Workflow status remains ${saved.status}.`,
+      );
       invalidate("/api/annual-return", "/api/dashboard"); setModalOpen(false); refetchRecords();
     } finally { setSaving(false); }
   };
@@ -177,13 +242,24 @@ export default function AnnualReturnPage() {
     toast.success("Deleted"); invalidate("/api/annual-return", "/api/dashboard"); refetchRecords();
   };
 
-  const quickStatus = async (rec: AnnualReturn, next: ReturnStatus) => {
-    await fetch(`/api/annual-return/${rec._id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: next }) });
-    toast.success(`Marked as ${next}`); invalidate("/api/annual-return", "/api/dashboard"); refetchRecords();
+  const advanceStatus = async (rec: AnnualReturn, nextStatus: ReturnStatus) => {
+    const response = await fetch(`/api/annual-return/${rec._id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: nextStatus }),
+    });
+    if (!response.ok) {
+      toast.error("Failed to update status.");
+      return;
+    }
+    const saved = await response.json() as AnnualReturn;
+    toast.success(`Status updated to ${saved.status}.`);
+    invalidate("/api/annual-return", "/api/dashboard");
+    refetchRecords();
   };
 
   const bulkInit = async () => {
-    if (!confirm(`Create Pending records for ALL clients in FY ${fy}? (Existing records are skipped)`)) return;
+    if (!confirm(`Create Not Started records for ALL clients in FY ${fy}? (Existing records are skipped)`)) return;
     setInitLoading(true);
     try {
       const r = await fetch("/api/annual-return/bulk-init", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ financialYear: fy }) });
@@ -304,11 +380,18 @@ export default function AnnualReturnPage() {
   const counts = STATUSES.reduce((acc, s) => { acc[s] = records.filter(r => r.status === s).length; return acc; }, {} as Record<ReturnStatus, number>);
   const total = records.length;
   const pct = (n: number) => total ? Math.round((n / total) * 100) : 0;
+  const visibleStatusCount = (status: ReturnStatus) => (
+    status === "Not Started" ? counts["Not Started"] + counts.Pending : counts[status]
+  );
 
   return (
     <div>
       <PageHeader title="EPR Annual Return" description="Track annual return filing status for all clients per financial year">
         <div className="glass-tray">
+          <button className="glass-pill" onClick={() => void reconcileStatuses(true)} disabled={statusSyncing}>
+            <RefreshCw className={`w-3.5 h-3.5 ${statusSyncing ? "animate-spin" : ""}`} />
+            {statusSyncing ? "Syncing…" : "Sync Statuses"}
+          </button>
           <button className="glass-pill" onClick={bulkInit} disabled={initLoading}>
             <Sparkles className="w-3.5 h-3.5" />{initLoading ? "Initialising…" : `Init FY ${fy}`}
           </button>
@@ -321,9 +404,22 @@ export default function AnnualReturnPage() {
           
           <FYTabBar value={fy} onChange={setFy} />
 
+          <div className="mb-4 flex items-center gap-2 text-xs text-muted">
+            <RefreshCw className={`h-3.5 w-3.5 ${statusSyncing ? "animate-spin text-violet-500" : "text-faint"}`} />
+            <span>
+              {statusSyncing
+                ? `Checking FY ${fy} against quotation, invoice, upload, and billing activity…`
+                : lastSyncResult?.fy === fy
+                  ? lastSyncResult.changed > 0
+                    ? `${lastSyncResult.changed} workflow status${lastSyncResult.changed === 1 ? "" : "es"} automatically updated.`
+                    : "Workflow statuses are up to date."
+                  : "Workflow statuses are checked automatically for this financial year."}
+            </span>
+          </div>
+
           {/* Summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            {STATUSES.map((s) => {
+            {VISIBLE_STATUSES.map((s) => {
               const cfg = STATUS_CONFIG[s];
               const active = statusFilter === s;
               return (
@@ -333,8 +429,8 @@ export default function AnnualReturnPage() {
                     <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.dot}`} />
                     <span className="text-xs font-semibold text-muted uppercase tracking-wide leading-tight">{cfg.label}</span>
                   </div>
-                  <p className="text-3xl font-black text-default">{counts[s]}</p>
-                  {total > 0 && <p className="text-xs text-muted mt-1">{pct(counts[s])}% of {total}</p>}
+                  <p className="text-3xl font-black text-default">{visibleStatusCount(s)}</p>
+                  {total > 0 && <p className="text-xs text-muted mt-1">{pct(visibleStatusCount(s))}% of {total}</p>}
                 </button>
               );
             })}
@@ -350,11 +446,12 @@ export default function AnnualReturnPage() {
               <div className="w-full h-4 bg-surface rounded-full overflow-hidden flex gap-px">
                 <div className="bg-emerald-500 h-full transition-all rounded-l-full" style={{ width: `${pct(counts.Verified)}%` }} />
                 <div className="bg-blue-500 h-full transition-all" style={{ width: `${pct(counts.Filed)}%` }} />
+                <div className="bg-violet-500 h-full transition-all" style={{ width: `${pct(counts["Ready to File"])}%` }} />
                 <div className="bg-amber-400 h-full transition-all" style={{ width: `${pct(counts["In Progress"])}%` }} />
-                <div className="bg-red-400 h-full transition-all rounded-r-full flex-1" style={{ minWidth: pct(counts.Pending) === 0 ? "0" : undefined }} />
+                <div className="bg-red-400 h-full transition-all rounded-r-full flex-1" style={{ minWidth: pct(counts.Pending + counts["Not Started"]) === 0 ? "0" : undefined }} />
               </div>
               <div className="flex flex-wrap gap-4 mt-2">
-                {[["bg-emerald-500","Verified",counts.Verified],["bg-blue-500","Filed",counts.Filed],["bg-amber-400","In Progress",counts["In Progress"]],["bg-red-400","Pending",counts.Pending]].map(([dot,lbl,n])=>(
+                {[["bg-emerald-500","Verified",counts.Verified],["bg-blue-500","Filed",counts.Filed],["bg-violet-500","Ready to File",counts["Ready to File"]],["bg-amber-400","In Progress",counts["In Progress"]],["bg-red-400","Not Started",counts.Pending + counts["Not Started"]]].map(([dot,lbl,n])=>(
                   <div key={lbl as string} className="flex items-center gap-1.5">
                     <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dot}`}/>
                     <span className="text-xs text-muted">{lbl}: <strong className="text-default">{n as number}</strong></span>
@@ -376,7 +473,7 @@ export default function AnnualReturnPage() {
                 className={`glass-pill ${statusFilter === "all" ? "glass-pill-active" : ""}`}>
                 All
               </button>
-              {STATUSES.map((s) => (
+              {VISIBLE_STATUSES.map((s) => (
                 <button key={s} onClick={() => setStatusFilter(statusFilter === s ? "all" : s)}
                   className={`glass-pill ${statusFilter === s ? "glass-pill-active" : ""}`}>
                   {STATUS_CONFIG[s].icon}{s}
@@ -393,7 +490,7 @@ export default function AnnualReturnPage() {
                   <CheckCircle2 className="w-7 h-7 text-faint" />
                 </div>
                 <p className="font-semibold text-default mb-1">No records for FY {fy}</p>
-                <p className="text-sm text-muted mb-5">Use <strong>Init FY {fy}</strong> to bulk-create Pending records for every client, or add them one by one.</p>
+                <p className="text-sm text-muted mb-5">Use <strong>Init FY {fy}</strong> to bulk-create Not Started records for every client, or add them one by one.</p>
                 <div className="flex gap-1.5 justify-center">
                   <div className="glass-tray">
                     <button className="glass-pill" onClick={bulkInit} disabled={initLoading}>
@@ -425,7 +522,7 @@ export default function AnnualReturnPage() {
                       <tbody>
                         {records.map((rec) => {
                           const cfg = STATUS_CONFIG[rec.status];
-                          const nextStatus = STATUSES[(STATUSES.indexOf(rec.status) + 1) % STATUSES.length];
+                          const nextStatus = nextAnnualReturnStatus(rec.status);
                           return (
                             <tr key={rec._id} className="border-t border-soft hover:bg-hover transition-colors">
                               <td className="table-cell whitespace-nowrap">
@@ -436,11 +533,16 @@ export default function AnnualReturnPage() {
                               <td className="table-cell text-sm text-muted whitespace-nowrap">{rec.client?.state || "—"}</td>
                               <td className="table-cell whitespace-nowrap">
                                 <div className="group relative inline-block">
-                                  <button onClick={() => quickStatus(rec, nextStatus)} title={`Click to mark as ${nextStatus}`}
-                                    className={`status-badge hover:opacity-80 active:scale-95 cursor-pointer ${cfg.badge} ${rec.status === "Pending" ? "badge-pulse" : ""}`}>
+                                  <button
+                                    onClick={() => nextStatus && void advanceStatus(rec, nextStatus)}
+                                    disabled={!nextStatus}
+                                    title={nextStatus ? `Click to move to ${nextStatus}` : `${cfg.label} is a final status`}
+                                    className={`status-badge ${nextStatus ? "hover:opacity-80 active:scale-95 cursor-pointer" : "cursor-default"} ${cfg.badge} ${rec.status === "Pending" ? "badge-pulse" : ""}`}>
                                     {cfg.icon}{cfg.label}
                                   </button>
-                                  <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 whitespace-nowrap bg-slate-900 dark:bg-slate-700 text-white text-xs px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10">→ {nextStatus}</span>
+                                  {nextStatus && (
+                                    <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 whitespace-nowrap bg-slate-900 dark:bg-slate-700 text-white text-xs px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10">→ {nextStatus}</span>
+                                  )}
                                 </div>
                               </td>
                               <td className="table-cell text-sm font-mono whitespace-nowrap">{rec.filingDate ? formatDate(rec.filingDate) : <span className="text-faint">—</span>}</td>
@@ -468,7 +570,7 @@ export default function AnnualReturnPage() {
                 <div className="lg:hidden divide-y divide-[var(--color-border-soft)]">
                   {records.map((rec) => {
                     const cfg = STATUS_CONFIG[rec.status];
-                    const nextStatus = STATUSES[(STATUSES.indexOf(rec.status) + 1) % STATUSES.length];
+                    const nextStatus = nextAnnualReturnStatus(rec.status);
                     const isExpanded = expandedRows.has(rec._id);
                     return (
                       <div key={rec._id}>
@@ -495,9 +597,11 @@ export default function AnnualReturnPage() {
                             )}
                             {rec.remarks && <div><span className="text-xs text-faint block mb-1">Remarks</span><p className="text-sm text-default">{rec.remarks}</p></div>}
                             <div className="glass-tray" style={{ flexWrap: "wrap", marginTop: "8px" }}>
-                              <button onClick={() => quickStatus(rec, nextStatus)} className={`glass-pill glass-pill-active`}>
-                                {cfg.icon} Mark as {nextStatus}
-                              </button>
+                              {nextStatus && (
+                                <button onClick={() => void advanceStatus(rec, nextStatus)} className="glass-pill glass-pill-active">
+                                  {cfg.icon} Mark as {nextStatus}
+                                </button>
+                              )}
                               {rec.status === "Verified" && (
                                 <button onClick={() => openDraftModal(rec)} className="glass-pill">
                                   <FileEdit className="w-3.5 h-3.5" />Draft Email
@@ -523,7 +627,7 @@ export default function AnnualReturnPage() {
 
       {/* ── EDIT/ADD MODAL ── */}
       <Modal open={modalOpen} onClose={() => setModalOpen(false)}
-        title={editRecord ? `Edit — ${editRecord.client?.companyName || editRecord.clientId}` : "Add Annual Return Record"}>
+        title={editRecord ? `Update Status — ${editRecord.client?.companyName || editRecord.clientId}` : "Add or Update Annual Return"}>
         <form onSubmit={handleSubmit} className="space-y-4">
           {!editRecord && (
             <>
@@ -531,7 +635,7 @@ export default function AnnualReturnPage() {
                 <label className="label">Company *</label>
                 <select className="input-field" value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })} required>
                   <option value="">Select Company</option>
-                  {clients.map((c) => <option key={c.clientId} value={c.clientId}>{c.companyName} ({c.category})</option>)}
+                  {clients.map((c) => <option key={c.clientId} value={c.clientId}>{c.companyName} — {c.clientId} ({c.category})</option>)}
                 </select>
               </div>
               <div>
@@ -544,8 +648,19 @@ export default function AnnualReturnPage() {
           )}
           <div>
             <label className="label">Status *</label>
+            {form.status === "Ready to File" && (
+              <div className="mb-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-sm text-violet-800 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-200">
+                <div className="flex items-center gap-2 font-semibold">
+                  <Sparkles className="h-4 w-4" />
+                  Ready to File
+                </div>
+                <p className="mt-1 text-xs opacity-80">
+                  The workflow sets this automatically when its prerequisites are complete. You can also select it manually after reviewing the client&apos;s records.
+                </p>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {STATUSES.map((s) => {
+              {EDITABLE_STATUSES.map((s) => {
                 const cfg = STATUS_CONFIG[s];
                 const selected = form.status === s;
                 return (
@@ -557,6 +672,9 @@ export default function AnnualReturnPage() {
                 );
               })}
             </div>
+            <p className="mt-2 text-xs text-faint">
+              In Progress and Ready to File are updated automatically from workflow activity, but can also be selected after manual review. Filing and verification remain manual.
+            </p>
           </div>
           {(form.status === "Filed" || form.status === "Verified") && (
             <>
@@ -580,7 +698,7 @@ export default function AnnualReturnPage() {
           </div>
           <div className="flex gap-2 pt-2 border-t border-base">
             <button type="submit" className="btn-primary flex-1 justify-center" disabled={saving}>
-              {saving ? "Saving…" : editRecord ? "Update" : "Add Record"}
+              {saving ? "Saving…" : editRecord ? "Update Status" : "Save Record"}
             </button>
             <button type="button" className="btn-secondary" onClick={() => setModalOpen(false)}>Cancel</button>
           </div>

@@ -18,6 +18,7 @@ import {
   restoreClientAggregate,
   restoreLegacyContactRecord,
 } from "@/lib/server/client-contact-service";
+import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
 
 type RestorableModel = mongoose.Model<Record<string, unknown>>;
 
@@ -83,6 +84,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { _id, __v, ...data } = rawData;
     void _id; void __v;
     await Model.create(data);
+    if (
+      (trashRecord.recordType === "billing" ||
+        trashRecord.recordType === "invoice" ||
+        trashRecord.recordType === "uploadRecord") &&
+      typeof data.clientId === "string" &&
+      typeof data.financialYear === "string"
+    ) {
+      await syncAnnualReturnStatus(data.clientId, data.financialYear);
+    }
     await DeletedRecord.findByIdAndDelete(id);
     return NextResponse.json({ success: true });
   } catch (err) {

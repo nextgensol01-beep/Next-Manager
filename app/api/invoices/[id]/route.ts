@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import Invoice from "@/models/Invoice";
 import DeletedRecord from "@/models/DeletedRecord";
+import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
 
 const cleanInvoicePayload = (body: Record<string, unknown>) => ({
   clientId: String(body.clientId || "").trim(),
@@ -40,6 +41,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       { new: true, runValidators: true }
     );
     if (!invoice) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    await syncAnnualReturnStatus(invoice.clientId, invoice.financialYear);
     return NextResponse.json(invoice);
   } catch (error) {
     console.error("PUT /api/invoices/[id]:", error);

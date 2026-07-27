@@ -68,7 +68,7 @@ import {
 } from "./ClientProfileWorkspaceSections";
 import {
   AlertCircle, BarChart2, Building2, Calendar, CheckCircle2, ClipboardCheck, FileText, FileUp,
-  Hash, Mail, MapPin, Phone, Receipt, Send,
+  Hash, Mail, MapPin, Pencil, Phone, Receipt, Send,
   Shield, Target, Upload, User, Wallet, Zap
 } from "lucide-react";
 import {
@@ -277,7 +277,7 @@ export default function ClientProfilePage() {
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sectionOpen, setSectionOpen] = useState({
     contacts: true,
-    portal: true,
+    portal: false,
     documents: true,
     recentActivity: true,
   });
@@ -1147,6 +1147,28 @@ export default function ClientProfilePage() {
     setInvoiceModal(true);
   };
 
+  const refreshAnnualReturnForFy = async (financialYear: string) => {
+    try {
+      const response = await fetch(
+        `/api/annual-return?clientId=${encodeURIComponent(clientId)}&fy=${encodeURIComponent(financialYear)}`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) return;
+      const records = await response.json() as AnnualReturnRecord[];
+      const refreshed = records.find((record) => record.financialYear === financialYear);
+      if (!refreshed) return;
+      setAnnualReturns((current) => {
+        const exists = current.some((record) => record.financialYear === financialYear);
+        return exists
+          ? current.map((record) => record.financialYear === financialYear ? refreshed : record)
+          : [...current, refreshed];
+      });
+    } catch {
+      // The workflow write already succeeded; a later page refresh will retrieve
+      // the synchronized status if this best-effort UI refresh is interrupted.
+    }
+  };
+
   const saveInvoiceTracking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!invoiceForm.invoiceType) {
@@ -1207,6 +1229,7 @@ export default function ClientProfilePage() {
       const savedRecords = await Promise.all(responses.map((response) => response.json() as Promise<InvoiceTrackingRecord>));
       savedRecords.forEach((saved, index) => optimisticOps[index]?.commit(saved));
       invalidate("/api/invoices");
+      await refreshAnnualReturnForFy(invoiceForm.financialYear);
       toast.success(`${savedRecords.length} month${savedRecords.length === 1 ? "" : "s"} updated.`);
       navigateToClientSection({ primary: "compliance", secondary: "invoiceTracking" });
     } catch {
@@ -1278,6 +1301,7 @@ export default function ClientProfilePage() {
       const saved = await response.json();
       commit(saved);
       invalidate("/api/upload-records");
+      await refreshAnnualReturnForFy(payload.financialYear);
       toast.success("Upload record added!");
       navigateToClientSection({ primary: "compliance", secondary: "cpcbUpload" });
     } catch {
@@ -1464,6 +1488,7 @@ export default function ClientProfilePage() {
         paymentStatus: saved.paymentStatus ?? "Unpaid",
       };
       ops?.commit?.(safeCommit);
+      await refreshAnnualReturnForFy(payload.financialYear);
       toast.success(editingBillingId ? "Billing updated!" : "Billing saved!");
       navigateToClientSection({ primary: "financial", secondary: "bills" });
     } catch {
@@ -1721,7 +1746,12 @@ export default function ClientProfilePage() {
           : [...current, saved];
       });
       invalidate("/api/annual-return", "/api/dashboard", "/api/activities");
-      toast.success(`Annual return marked as ${status === "Pending" ? "Not Started" : status}.`);
+      const displayedStatus = saved.status === "Pending" ? "Not Started" : saved.status;
+      toast.success(
+        displayedStatus === status
+          ? `Annual return marked as ${displayedStatus}.`
+          : `Annual return is ${displayedStatus} based on the current workflow.`,
+      );
     } finally {
       setInlineSaving(false);
     }
@@ -2209,7 +2239,7 @@ export default function ClientProfilePage() {
       id: "annual-return",
       label: "Annual Return Filed",
       detail: annualReturnComplete ? annualReturnStatus : `Current status: ${annualReturnStatus}`,
-      progress: annualReturnComplete ? 1 : annualReturnStatus === "In Progress" ? 0.5 : 0,
+      progress: annualReturnComplete ? 1 : annualReturnStatus === "Ready to File" ? 0.9 : annualReturnStatus === "In Progress" ? 0.5 : 0,
     },
   ].filter(Boolean) as AnnualReturnProgressStep[];
   const annualReturnProgress = annualReturnProgressSteps.length > 0
@@ -2453,7 +2483,11 @@ export default function ClientProfilePage() {
   const profileAlerts: ClientProfileAlert[] = [
     annualReturnStatus !== "Filed" && annualReturnStatus !== "Verified" && annualReturnStatus !== "Not Required This FY" ? {
       id: "annual-return",
-      title: annualReturnStatus === "In Progress" ? "Annual Return In Progress" : "Annual Return Pending",
+      title: annualReturnStatus === "Ready to File"
+        ? "Annual Return Ready to File"
+        : annualReturnStatus === "In Progress"
+          ? "Annual Return In Progress"
+          : "Annual Return Pending",
       detail: `FY ${selectedFy} filing status is ${annualReturnStatus}.`,
       tone: "warning",
       icon: <AlertCircle className="h-4 w-4" />,
@@ -2890,11 +2924,27 @@ export default function ClientProfilePage() {
         >
           {activePrimaryTab === "overview" && (
             <>
+              <section className="client-profile-overview-intro">
+                <div>
+                  <p className="client-profile-kicker">Overview</p>
+                  <h2>Client workspace</h2>
+                  <span>Identity, compliance progress, contacts, and account essentials.</span>
+                </div>
+                <div className="client-profile-overview-intro-actions">
+                  <span><Calendar className="h-4 w-4" /> FY {selectedFy}</span>
+                  <button type="button" onClick={openBasicEdit}>
+                    <Pencil className="h-4 w-4" />
+                    Edit client
+                  </button>
+                </div>
+              </section>
               <AnnualReturnProgressPanel
                 progress={annualReturnProgress}
                 selectedFy={selectedFy}
                 steps={annualReturnProgressSteps}
                 subtitle={isPWP ? "PWP annual return workflow" : `${client.category} annual return workflow`}
+                variant="hero"
+                onAction={() => navigateToClientSection({ primary: "compliance", secondary: "annualReturn" })}
               />
               <CompanyOverview
                 client={client}

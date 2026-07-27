@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AnimatePresence,
   animate as animateValue,
@@ -19,6 +20,7 @@ import {
   Lock,
   Mail,
   MapPin,
+  MoreHorizontal,
   Pencil,
   Phone,
   Plus,
@@ -70,6 +72,202 @@ export type ClientProfileCustomField = {
   mono?: boolean;
   position: "beforeContact" | "afterContact" | "afterCompany";
 };
+
+type MobileTitleFit = {
+  fontSize: number;
+  lines: 1 | 2 | 3;
+};
+
+const MOBILE_TITLE_FIT_OPTIONS: ReadonlyArray<MobileTitleFit> = [
+  ...[22, 21, 20, 19, 18].map((fontSize) => ({ fontSize, lines: 1 as const })),
+  ...[20, 19, 18, 17].map((fontSize) => ({ fontSize, lines: 2 as const })),
+  ...[18, 17, 16].map((fontSize) => ({ fontSize, lines: 3 as const })),
+];
+
+function AdaptiveMobileClientTitle({ children }: { children: string }) {
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
+  const [fit, setFit] = useState<MobileTitleFit | null>(null);
+
+  useLayoutEffect(() => {
+    const title = titleRef.current;
+    if (!title) return;
+
+    const mobileQuery = window.matchMedia("(max-width: 767px)");
+
+    const measure = () => {
+      if (!mobileQuery.matches) {
+        setFit(null);
+        return;
+      }
+
+      const availableWidth = title.clientWidth;
+      if (!availableWidth) return;
+
+      const computed = window.getComputedStyle(title);
+      const probe = title.cloneNode(true) as HTMLHeadingElement;
+      probe.removeAttribute("data-fit-ready");
+      probe.style.position = "fixed";
+      probe.style.inset = "0 auto auto -10000px";
+      probe.style.display = "block";
+      probe.style.width = `${availableWidth}px`;
+      probe.style.height = "auto";
+      probe.style.margin = "0";
+      probe.style.padding = "0";
+      probe.style.visibility = "hidden";
+      probe.style.pointerEvents = "none";
+      probe.style.overflow = "visible";
+      probe.style.fontFamily = computed.fontFamily;
+      probe.style.fontWeight = computed.fontWeight;
+      probe.style.letterSpacing = computed.letterSpacing;
+      probe.style.textAlign = "center";
+      probe.style.webkitLineClamp = "unset";
+      probe.style.webkitBoxOrient = "unset";
+      document.body.appendChild(probe);
+
+      let nextFit = MOBILE_TITLE_FIT_OPTIONS[MOBILE_TITLE_FIT_OPTIONS.length - 1];
+
+      for (const option of MOBILE_TITLE_FIT_OPTIONS) {
+        const lineHeight = option.fontSize * (option.lines === 1 ? 1.08 : 1.12);
+        probe.style.fontSize = `${option.fontSize}px`;
+        probe.style.lineHeight = `${lineHeight}px`;
+        probe.style.whiteSpace = option.lines === 1 ? "nowrap" : "normal";
+
+        const fits = option.lines === 1
+          ? probe.scrollWidth <= availableWidth + 0.5
+          : probe.scrollHeight <= (lineHeight * option.lines) + 1;
+
+        if (fits) {
+          nextFit = option;
+          break;
+        }
+      }
+
+      probe.remove();
+      setFit((current) => (
+        current?.fontSize === nextFit.fontSize && current.lines === nextFit.lines
+          ? current
+          : nextFit
+      ));
+    };
+
+    measure();
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(title);
+    mobileQuery.addEventListener("change", measure);
+
+    return () => {
+      resizeObserver.disconnect();
+      mobileQuery.removeEventListener("change", measure);
+    };
+  }, [children]);
+
+  return (
+    <h1
+      ref={titleRef}
+      className="client-profile-title"
+      data-fit-ready={fit ? "true" : undefined}
+      data-lines={fit?.lines}
+      style={fit ? { "--mobile-title-size": `${fit.fontSize}px` } as React.CSSProperties : undefined}
+      title={children}
+    >
+      {children}
+    </h1>
+  );
+}
+
+function ClientHeaderActionSheet({
+  selectedFy,
+  financialYears,
+  onFinancialYearChange,
+  onEdit,
+  onClose,
+}: {
+  selectedFy: string;
+  financialYears: string[];
+  onFinancialYearChange: (financialYear: string) => void;
+  onEdit: () => void;
+  onClose: () => void;
+}) {
+  const reducedMotion = useReducedMotion();
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <motion.div
+      id="client-profile-mobile-header-menu"
+      className="client-profile-action-sheet-root"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: reducedMotion ? 0 : 0.24 }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Client actions"
+    >
+      <button
+        type="button"
+        className="client-profile-action-sheet-backdrop"
+        onClick={onClose}
+        aria-label="Close client actions"
+      />
+      <motion.div
+        className="client-profile-action-sheet"
+        initial={reducedMotion ? false : { y: "110%", scale: 0.96 }}
+        animate={{ y: 0, scale: 1 }}
+        exit={reducedMotion ? { opacity: 0 } : { y: "110%", scale: 0.97 }}
+        transition={reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 420, damping: 38, mass: 0.9 }}
+      >
+        <div className="client-profile-action-sheet-card">
+          <label className="client-profile-action-sheet-row">
+            <span><Calendar className="h-[19px] w-[19px]" /> Financial year</span>
+            <span className="client-profile-action-sheet-select">
+              <select
+                value={selectedFy}
+                onChange={(event) => {
+                  onFinancialYearChange(event.target.value);
+                  onClose();
+                }}
+                aria-label="Financial year"
+              >
+                {financialYears.map((financialYear) => (
+                  <option key={financialYear} value={financialYear}>FY {financialYear}</option>
+                ))}
+              </select>
+              <ChevronDown className="h-4 w-4" aria-hidden="true" />
+            </span>
+          </label>
+          <button
+            type="button"
+            className="client-profile-action-sheet-row"
+            onClick={() => {
+              onClose();
+              onEdit();
+            }}
+          >
+            <span><Pencil className="h-[19px] w-[19px]" /> Edit client</span>
+          </button>
+        </div>
+
+        <button type="button" className="client-profile-action-sheet-cancel" onClick={onClose}>
+          Cancel
+        </button>
+      </motion.div>
+    </motion.div>,
+    document.body
+  );
+}
 
 type ClientProfileHeaderProps = {
   client: Client;
@@ -230,44 +428,66 @@ function ContactList({
   onCopy: (value: string, key: string, label: string) => void;
 }) {
   return (
-    <div className="client-profile-contact-grid">
+    <div className="client-profile-contact-list">
       {contacts.map((contact, index) => {
         const phones = getContactPhones(contact);
         const emails = getContactEmails(contact);
+        const primaryPhone = phones[0];
+        const primaryEmail = emails[0];
 
         return (
           <div key={contact._id} className="client-profile-contact-card">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-default">{contact.name}</p>
-                {contact.designation && <p className="text-xs text-faint">{contact.designation}</p>}
+            <div className="client-profile-contact-person">
+              <div className="client-profile-contact-avatar" aria-hidden="true">{getInitials(contact.name)}</div>
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <p className="truncate text-[15px] font-semibold text-default">{contact.name}</p>
+                  {index === 0 && <span className="client-profile-contact-primary">Primary</span>}
+                </div>
+                <p className="truncate text-xs text-faint">{contact.designation || "Contact"}</p>
               </div>
-              {index === 0 && <span className="client-profile-soft-badge">Primary</span>}
+              <div className="client-profile-contact-actions">
+                {primaryPhone && (
+                  <a href={`tel:${primaryPhone.replace(/[^\d+]/g, "")}`} aria-label={`Call ${contact.name}`} title={`Call ${contact.name}`}>
+                    <Phone className="h-4 w-4" />
+                  </a>
+                )}
+                {primaryEmail && (
+                  <a href={`mailto:${primaryEmail}`} aria-label={`Email ${contact.name}`} title={`Email ${contact.name}`}>
+                    <Mail className="h-4 w-4" />
+                  </a>
+                )}
+              </div>
             </div>
-            <div className="mt-3 space-y-2">
+
+            {(phones.length > 0 || emails.length > 0) && (
+              <div className="client-profile-contact-details">
               {phones.map((phone, phoneIndex) => (
                 <div key={`phone-${phoneIndex}`} className="client-profile-contact-line">
-                  <Phone className="h-3.5 w-3.5 text-faint" />
+                  <span>mobile</span>
                   <span className="min-w-0 flex-1 truncate font-mono">{phone}</span>
                   <CopyButton
                     copied={copiedKey === `contact-phone-${contact._id}-${phoneIndex}`}
                     label={`${contact.name} phone`}
                     onClick={() => onCopy(phone, `contact-phone-${contact._id}-${phoneIndex}`, `${contact.name} phone`)}
+                    className="client-profile-contact-copy"
                   />
                 </div>
               ))}
               {emails.map((email, emailIndex) => (
                 <div key={`email-${emailIndex}`} className="client-profile-contact-line">
-                  <Mail className="h-3.5 w-3.5 text-faint" />
+                  <span>email</span>
                   <span className="min-w-0 flex-1 truncate">{email}</span>
                   <CopyButton
                     copied={copiedKey === `contact-email-${contact._id}-${emailIndex}`}
                     label={`${contact.name} email`}
                     onClick={() => onCopy(email, `contact-email-${contact._id}-${emailIndex}`, `${contact.name} email`)}
+                    className="client-profile-contact-copy"
                   />
                 </div>
               ))}
-            </div>
+              </div>
+            )}
           </div>
         );
       })}
@@ -293,6 +513,7 @@ export function ClientProfileHeader({
 }: ClientProfileHeaderProps) {
   const [expandedHeaderHeight, setExpandedHeaderHeight] = useState(252);
   const [isMobileHeader, setIsMobileHeader] = useState<boolean | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const expandedHeaderRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -303,6 +524,10 @@ export function ClientProfileHeader({
     mediaQuery.addEventListener("change", syncBreakpoint);
     return () => mediaQuery.removeEventListener("change", syncBreakpoint);
   }, []);
+
+  useEffect(() => {
+    if (isMobileHeader === false) setMobileMenuOpen(false);
+  }, [isMobileHeader]);
 
   useEffect(() => {
     const updateHeaderHeight = () => {
@@ -373,13 +598,26 @@ export function ClientProfileHeader({
               <CategoryBadge category={client.category} />
               <span className="client-profile-soft-badge">{registrationStatus}</span>
             </div>
-            <h1 className="client-profile-title">{client.companyName}</h1>
+            <AdaptiveMobileClientTitle>{client.companyName}</AdaptiveMobileClientTitle>
             {legalName && <p className="client-profile-legal-name">{legalName}</p>}
           </div>
-          <button type="button" onClick={onEdit} className="client-profile-header-edit">
-            <Pencil className="h-4 w-4" />
-            <span>Edit Client</span>
-          </button>
+          {isMobileHeader ? (
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen((isOpen) => !isOpen)}
+              className="client-profile-header-edit"
+              aria-label="More client actions"
+              aria-expanded={mobileMenuOpen}
+              aria-controls="client-profile-mobile-header-menu"
+            >
+              <MoreHorizontal className="h-5 w-5" />
+            </button>
+          ) : (
+            <button type="button" onClick={onEdit} className="client-profile-header-edit">
+              <Pencil className="h-4 w-4" />
+              <span>Edit Client</span>
+            </button>
+          )}
         </div>
 
         <div className="client-profile-header-meta">
@@ -419,6 +657,18 @@ export function ClientProfileHeader({
           ))}
         </div>
       </motion.div>
+
+      <AnimatePresence>
+        {isMobileHeader && mobileMenuOpen && (
+          <ClientHeaderActionSheet
+            selectedFy={selectedFy}
+            financialYears={financialYears}
+            onFinancialYearChange={onFinancialYearChange}
+            onEdit={onEdit}
+            onClose={() => setMobileMenuOpen(false)}
+          />
+        )}
+      </AnimatePresence>
 
       <motion.div className="client-profile-header-compact" style={{ opacity: compactOpacity, y: compactY, pointerEvents: compactPointerEvents }}>
         <button type="button" onClick={onBack} className="client-profile-icon-button" aria-label="Go back">

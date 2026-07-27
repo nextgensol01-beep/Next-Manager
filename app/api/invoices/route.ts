@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import Invoice from "@/models/Invoice";
 import Client from "@/models/Client";
+import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
 
 const cleanInvoicePayload = (body: Record<string, unknown>) => ({
   clientId: String(body.clientId || "").trim(),
@@ -66,6 +67,7 @@ export async function POST(req: NextRequest) {
     await connectDB();
     const body = await req.json();
     const invoice = await Invoice.create(cleanInvoicePayload(body));
+    await syncAnnualReturnStatus(invoice.clientId, invoice.financialYear);
     return NextResponse.json(invoice, { status: 201 });
   } catch (error) {
     console.error("POST /api/invoices:", error);

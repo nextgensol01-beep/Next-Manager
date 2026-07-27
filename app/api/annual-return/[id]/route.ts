@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import AnnualReturn from "@/models/AnnualReturn";
 import DeletedRecord from "@/models/DeletedRecord";
+import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -12,8 +13,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     await connectDB();
     const body = await req.json();
     const { id } = await params;
-    const record = await AnnualReturn.findByIdAndUpdate(id, body, { new: true });
+    let record = await AnnualReturn.findByIdAndUpdate(id, body, { new: true, runValidators: true });
     if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    await syncAnnualReturnStatus(record.clientId, record.financialYear);
+    record = await AnnualReturn.findById(record._id);
     return NextResponse.json(record);
   } catch (error) {
     console.error("PUT /api/annual-return/[id]:", error);

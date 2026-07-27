@@ -5,6 +5,7 @@ import { connectDB } from "@/lib/mongoose";
 import Quotation from "@/models/Quotation";
 import { mongoObjectIdSchema, quotationStatusPatchSchema, validationErrorMessage } from "@/lib/quotationValidation";
 import { QuotationWorkflowError, applyQuotationStatusChange } from "@/lib/quotationWorkflow";
+import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -32,5 +33,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     throw error;
   }
   await quotation.save();
+  if (quotation.clientId) {
+    await syncAnnualReturnStatus(quotation.clientId, quotation.financialYear);
+  }
   return NextResponse.json(quotation);
 }

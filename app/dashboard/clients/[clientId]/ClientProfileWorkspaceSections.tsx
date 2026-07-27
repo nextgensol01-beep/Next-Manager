@@ -8,6 +8,7 @@ import {
   CalendarCheck,
   CheckCircle2,
   ChevronLeft,
+  ChevronRight,
   ClipboardCheck,
   FileText,
   FolderOpen,
@@ -72,7 +73,7 @@ export type AnnualReturnRecord = {
   _id: string;
   clientId: string;
   financialYear: string;
-  status: "Pending" | "Not Started" | "In Progress" | "Filed" | "Verified" | "Not Required This FY";
+  status: "Pending" | "Not Started" | "In Progress" | "Ready to File" | "Filed" | "Verified" | "Not Required This FY";
   filingDate?: string | null;
   acknowledgeNumber?: string;
   remarks?: string;
@@ -428,28 +429,55 @@ export function AnnualReturnProgressPanel({
   steps,
   subtitle,
   title = "Annual Return Progress",
+  variant = "default",
+  onAction,
 }: {
   progress: number;
   selectedFy: string;
   steps: AnnualReturnProgressStep[];
   subtitle?: string;
   title?: string;
+  variant?: "default" | "hero";
+  onAction?: () => void;
 }) {
   const percentage = Math.round(Math.max(0, Math.min(1, progress)) * 100);
   const completeCount = steps.filter((step) => step.progress >= 1).length;
+  const activeStep = steps.find((step) => step.progress > 0 && step.progress < 1)
+    || steps.find((step) => step.progress < 1)
+    || steps[steps.length - 1];
 
   return (
-    <section className="client-profile-card client-profile-progress-card">
+    <section className={`client-profile-card client-profile-progress-card ${variant === "hero" ? "client-profile-progress-hero" : ""}`}>
       <div className="client-profile-card-header">
         <div>
-          <p className="client-profile-kicker">FY {selectedFy}</p>
+          <p className="client-profile-kicker">{variant === "hero" ? "Annual Return" : `FY ${selectedFy}`}</p>
           <h2>{title}</h2>
           {subtitle && <span>{subtitle}</span>}
+          {variant === "hero" && activeStep && (
+            <p className="client-profile-progress-next">
+              <span>Next</span>
+              {activeStep.label} · {activeStep.detail}
+            </p>
+          )}
         </div>
-        <div className="client-profile-progress-value">
-          <strong>{percentage}%</strong>
-          <span>{completeCount}/{steps.length} complete</span>
-        </div>
+        {variant === "hero" ? (
+          <div
+            className="client-profile-progress-ring"
+            style={{ background: `conic-gradient(#0071e3 ${percentage * 3.6}deg, rgba(120,120,128,0.14) 0deg)` }}
+            role="img"
+            aria-label={`${percentage}% complete`}
+          >
+            <div>
+              <strong>{percentage}%</strong>
+              <span>{completeCount}/{steps.length}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="client-profile-progress-value">
+            <strong>{percentage}%</strong>
+            <span>{completeCount}/{steps.length} complete</span>
+          </div>
+        )}
       </div>
 
       <div
@@ -484,6 +512,15 @@ export function AnnualReturnProgressPanel({
           );
         })}
       </div>
+      {variant === "hero" && onAction && (
+        <div className="client-profile-progress-hero-footer">
+          <span>FY {selectedFy}</span>
+          <button type="button" onClick={onAction}>
+            Continue workflow
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -733,7 +770,7 @@ export function AnnualReturnTracker({
 }) {
   const status = annualReturnLabel(annualReturn?.status);
   const nextFy = selectedFy.replace(/^(\d{4})-(\d{2})$/, (_, start: string) => `${Number(start) + 1}-${String(Number(start) + 2).slice(-2)}`);
-  const statusOptions: Array<AnnualReturnRecord["status"]> = ["Not Started", "In Progress", "Filed"];
+  const statusOptions: Array<AnnualReturnRecord["status"]> = ["Not Started", "In Progress", "Ready to File", "Filed"];
 
   return (
     <section className="client-profile-card">
@@ -822,6 +859,7 @@ export function AnnualReturnTracker({
 }
 
 function ClockIcon({ status }: { status: string }) {
+  if (status === "Ready to File") return <CheckCircle2 className="h-4 w-4" />;
   return status === "In Progress" ? <Bell className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />;
 }
 

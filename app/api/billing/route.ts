@@ -5,6 +5,7 @@ import { normalizeBillingBody } from "@/lib/billing-utils";
 import { connectDB } from "@/lib/mongoose";
 import Billing from "@/models/Billing";
 import Payment from "@/models/Payment";
+import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -198,12 +199,14 @@ export async function POST(req: NextRequest) {
         { $set: { ...body, updatedAt: now } }
       );
       const full = await fetchBillingAggregated(existing._id);
+      await syncAnnualReturnStatus(body.clientId, body.financialYear);
       return NextResponse.json(full);
     }
 
     const insertedBilling = { ...body, createdAt: now, updatedAt: now };
     const result = await Billing.collection.insertOne(insertedBilling);
     const full = await fetchBillingAggregated(result.insertedId);
+    await syncAnnualReturnStatus(body.clientId, body.financialYear);
     return NextResponse.json(full, { status: 201 });
   } catch (error) {
     console.error("POST /api/billing:", error);

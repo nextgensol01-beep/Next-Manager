@@ -5,6 +5,7 @@ import { connectDB } from "@/lib/mongoose";
 import AnnualReturn from "@/models/AnnualReturn";
 import Client from "@/models/Client";
 import { getClientContactsMap } from "@/lib/server/client-contact-service";
+import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -17,10 +18,16 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get("status");
     const search = searchParams.get("search");
 
+    // Client profiles self-heal legacy stale statuses when their FY is opened.
+    if (clientId && fy) {
+      await syncAnnualReturnStatus(clientId, fy);
+    }
+
     const query: Record<string, unknown> = {};
     if (fy)     query.financialYear = fy;
     if (clientId) query.clientId = clientId;
-    if (status && status !== "all") query.status = status;
+    if (status === "Not Started") query.status = { $in: ["Not Started", "Pending"] };
+    else if (status && status !== "all") query.status = status;
 
     if (search) {
       const clients = await Client.find({ companyName: { $regex: search, $options: "i" } }).select("clientId");
@@ -82,11 +89,13 @@ export async function POST(req: NextRequest) {
     await connectDB();
     const body = await req.json();
 
-    const record = await AnnualReturn.findOneAndUpdate(
+    let record = await AnnualReturn.findOneAndUpdate(
       { clientId: body.clientId, financialYear: body.financialYear },
       { $set: body },
-      { new: true, upsert: true }
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
+    await syncAnnualReturnStatus(record.clientId, record.financialYear);
+    record = await AnnualReturn.findById(record._id);
 
     return NextResponse.json(record, { status: 201 });
   } catch (error) {

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import UploadRecord from "@/models/UploadRecord";
+import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
 
 const cleanUploadPayload = (body: Record<string, unknown>) => ({
   clientId: String(body.clientId || "").trim(),
@@ -48,6 +49,7 @@ export async function POST(req: NextRequest) {
     };
     const result = await UploadRecord.collection.insertOne(payload);
     const record = await UploadRecord.collection.findOne({ _id: result.insertedId });
+    await syncAnnualReturnStatus(payload.clientId, payload.financialYear);
     return NextResponse.json(record, { status: 201 });
   } catch (error) {
     console.error("POST /api/upload-records:", error);
