@@ -1599,16 +1599,18 @@ export default function ClientFormModal({
                       <p className="text-[11px] text-red-500 mt-1 font-medium">Company name is required</p>
                     )}
                   </FieldRow>
-                  <FieldRow label="Legal Name" last={companyCustomFields.length === 0}>
-                    <div className="cfm-input-row">
-                      <input
-                        className="input-field"
-                        style={{ fontSize: "13px" }}
-                        value={form.legalName}
-                        onChange={(e) => setForm({ ...form, legalName: e.target.value })}
-                      />
-                    </div>
-                  </FieldRow>
+                  {form.category !== "PWP" && (
+                    <FieldRow label="Legal Name" last={companyCustomFields.length === 0}>
+                      <div className="cfm-input-row">
+                        <input
+                          className="input-field"
+                          style={{ fontSize: "13px" }}
+                          value={form.legalName}
+                          onChange={(e) => setForm({ ...form, legalName: e.target.value })}
+                        />
+                      </div>
+                    </FieldRow>
+                  )}
                   {renderCustomFieldRows(companyCustomFields)}
                 </InsetGroup>
 
@@ -1724,7 +1726,7 @@ export default function ClientFormModal({
                       />
                     </div>
                   </FieldRow>
-                  <FieldRow label="Address">
+                  <FieldRow label="Address" last={form.category === "PWP"}>
                     <div className="cfm-input-row">
                       <textarea
                         className="input-field"
@@ -1735,16 +1737,18 @@ export default function ClientFormModal({
                       />
                     </div>
                   </FieldRow>
-                  <FieldRow label="Reg. Number" last>
-                    <div className="cfm-input-row">
-                      <input
-                        className="input-field font-mono"
-                        style={{ fontSize: "13px" }}
-                        value={form.registrationNumber}
-                        onChange={(e) => setForm({ ...form, registrationNumber: e.target.value })}
-                      />
-                    </div>
-                  </FieldRow>
+                  {form.category !== "PWP" && (
+                    <FieldRow label="CPCB Registration Number" last>
+                      <div className="cfm-input-row">
+                        <input
+                          className="input-field font-mono"
+                          style={{ fontSize: "13px" }}
+                          value={form.registrationNumber}
+                          onChange={(e) => setForm({ ...form, registrationNumber: e.target.value })}
+                        />
+                      </div>
+                    </FieldRow>
+                  )}
                 </InsetGroup>
               </div>
             </div>

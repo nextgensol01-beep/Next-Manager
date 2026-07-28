@@ -45,124 +45,96 @@ export default function ClientProfileFinancialSummary({
   fyLastUpdated,
   fyCategoryRows,
   fyHasTypedSplit,
-  fyTypeTotals,
   openFYModal,
   setBreakdownRec,
 }: ClientProfileFinancialSummaryProps) {
+  const baseTotal = fyCategoryRows.reduce((sum, row) => sum + row.base, 0);
+  const usedTotal = fyCategoryRows.reduce((sum, row) => sum + row.used, 0);
+  const remainingTotal = baseTotal - usedTotal;
+  const percentage = baseTotal > 0 ? Math.round((usedTotal / baseTotal) * 100) : 0;
+  const safePercentage = Math.max(0, Math.min(100, percentage));
+
   return (
-    <div className="client-profile-card">
-      <div className="flex items-center justify-between mb-4">
+    <div className="client-profile-card client-profile-fy-progress">
+      <div className="client-profile-card-header">
         <div>
-          <p className="client-profile-kicker">Financial Summary</p>
-          <h3 className="text-xl font-semibold text-default">{isPWP ? "Credits Summary" : "Target Summary"} - FY {selectedFy}</h3>
+          <p className="client-profile-kicker">{isPWP ? "FY Credits" : "FY Targets"}</p>
+          <h2>{isPWP ? "Generated and sold credits" : "Target achievement"} · FY {selectedFy}</h2>
+          <span>{isPWP ? "Generated credits are compared only with sold or used credits." : "Targets are compared only with achieved quantities."}</span>
         </div>
-        <div className="glass-tray">
+        <div className="client-profile-fy-actions">
           <button
             type="button"
             onClick={() => openFYModal(fyData)}
-            className="glass-pill"
+            className="client-profile-secondary-button"
           >
             <Pencil className="w-3.5 h-3.5" /> Edit FY
           </button>
           <button
+            type="button"
             onClick={() => setBreakdownRec(fyData)}
-            className="glass-pill"
+            className="client-profile-secondary-button"
           >
             <BarChart2 className="w-3.5 h-3.5" /> Breakdown
           </button>
         </div>
       </div>
-      {fyLastUpdated && <p className="text-xs text-faint mb-4">Last updated {formatDateTime(fyLastUpdated)}</p>}
-      <div className="client-profile-table-scroll border border-base rounded-2xl overflow-hidden mb-4">
-        <table className="w-full min-w-[400px] text-sm">
-          <thead>
-            <tr className="bg-surface border-b border-base">
-              <th className="text-left text-xs text-muted font-semibold px-4 py-2">Category</th>
-              <th className="text-right text-xs text-muted font-semibold px-4 py-2">{isPWP ? "Generated" : "Target"}</th>
-              <th className="text-right text-xs text-muted font-semibold px-4 py-2">{isPWP ? "Sold" : "Achieved"}</th>
-              <th className="text-right text-xs text-muted font-semibold px-4 py-2">Remaining</th>
-            </tr>
-          </thead>
-          <tbody>
-            {fyCategoryRows.map((row) => {
-              const pct = row.base > 0 ? Math.round((row.used / row.base) * 100) : 0;
-              return (
-                <tr key={row.categoryId} className="border-b border-base last:border-0">
-                  <td className="px-4 py-2.5 font-medium text-default">{row.label}</td>
-                  <td className="px-4 py-2.5 text-right font-mono">
-                    {fyHasTypedSplit ? (
-                      <div className="space-y-1">
-                        {row.typedRows.map((item) => (
-                          <div key={item.type} className="flex items-center justify-end gap-1.5">
-                            {item.type === "RECYCLING"
-                              ? <Recycle className="w-3 h-3 text-teal-500 flex-shrink-0" />
-                              : <Leaf className="w-3 h-3 text-amber-500 flex-shrink-0" />}
-                            <span>{item.base.toLocaleString()}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : row.base.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    {fyHasTypedSplit ? (
-                      <div className="space-y-1">
-                        {row.typedRows.map((item) => {
-                          const typePct = item.base > 0 ? Math.round((item.used / item.base) * 100) : 0;
-                          return (
-                            <div key={item.type} className="flex items-center justify-end gap-1.5">
-                              {item.type === "RECYCLING"
-                                ? <Recycle className="w-3 h-3 text-teal-500 flex-shrink-0" />
-                                : <Leaf className="w-3 h-3 text-amber-500 flex-shrink-0" />}
-                              <span className={`font-mono ${isPWP ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>{item.used.toLocaleString()}</span>
-                              {item.base > 0 && <span className="text-[10px] text-faint">({typePct}%)</span>}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <>
-                        <span className={`font-mono ${isPWP ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>{row.used.toLocaleString()}</span>
-                        {row.base > 0 && <span className="text-xs text-faint ml-1">({pct}%)</span>}
-                      </>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    {fyHasTypedSplit ? (
-                      <div className="space-y-1">
-                        {row.typedRows.map((item) => (
-                          <div key={item.type} className="flex items-center justify-end gap-1.5">
-                            {item.type === "RECYCLING"
-                              ? <Recycle className="w-3 h-3 text-teal-500 flex-shrink-0" />
-                              : <Leaf className="w-3 h-3 text-amber-500 flex-shrink-0" />}
-                            <span className={`font-mono font-semibold ${item.remaining < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>{item.remaining.toLocaleString()}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className={`font-mono font-semibold ${row.remaining < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>{row.remaining.toLocaleString()}</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+
+      <div className="client-profile-fy-hero">
+        <div
+          className="client-profile-fy-ring"
+          data-exceeded={percentage > 100 ? "true" : "false"}
+          style={{ background: `conic-gradient(${percentage > 100 ? "#ff3b30" : "#14a39a"} ${safePercentage * 3.6}deg, rgba(120,120,128,0.14) 0)` }}
+        >
+          <div><strong>{percentage}%</strong><span>{isPWP ? "utilised" : "achieved"}</span></div>
+        </div>
+        <div className="client-profile-fy-total">
+          <small>{isPWP ? "Generated" : "Target"}</small>
+          <strong>{baseTotal.toLocaleString("en-IN")}</strong>
+        </div>
+        <div className="client-profile-fy-total" data-tone="used">
+          <small>{isPWP ? "Sold / Used" : "Achieved"}</small>
+          <strong>{usedTotal.toLocaleString("en-IN")}</strong>
+        </div>
+        <div className="client-profile-fy-total" data-tone={remainingTotal < 0 ? "danger" : "remaining"}>
+          <small>Remaining</small>
+          <strong>{remainingTotal.toLocaleString("en-IN")}</strong>
+        </div>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {isPWP ? (
-          <>
-            <div className="bg-surface rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Total Generated</p><p className="text-xl font-bold text-default">{(fyData.totalGenerated ?? fyData.totalCredits ?? fyData.availableCredits ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.base.toLocaleString()}</span>)}</div>}</div>
-            <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Total Sold</p><p className="text-xl font-bold text-red-600 dark:text-red-400">{(fyData.totalSold ?? fyData.totalUsed ?? fyData.usedCredits ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.used.toLocaleString()}</span>)}</div>}</div>
-            <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Remaining</p><p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{(fyData.totalRemaining ?? fyData.remainingCredits ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.remaining.toLocaleString()}</span>)}</div>}</div>
-          </>
-        ) : (
-          <>
-            <div className="bg-surface rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Total Target</p><p className="text-xl font-bold text-default">{(fyData.totalTarget ?? fyData.targetAmount ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.base.toLocaleString()}</span>)}</div>}</div>
-            <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Achieved</p><p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{(fyData.totalAchieved ?? fyData.achievedAmount ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.used.toLocaleString()}</span>)}</div>}</div>
-            <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 text-center"><p className="text-xs text-muted mb-1">Remaining</p><p className="text-xl font-bold text-amber-600 dark:text-amber-400">{(fyData.totalRemainingTarget ?? fyData.remainingTarget ?? 0).toLocaleString()}</p>{fyHasTypedSplit && <div className="mt-2 flex justify-center gap-2 text-[10px] text-faint">{fyTypeTotals.map((item) => <span key={item.type}>{item.type === "RECYCLING" ? "R" : "E"}: {item.remaining.toLocaleString()}</span>)}</div>}</div>
-          </>
-        )}
+
+      <div className="client-profile-fy-categories">
+        {fyCategoryRows.map((row) => {
+          const rowPercentage = row.base > 0 ? Math.round((row.used / row.base) * 100) : 0;
+          return (
+            <div
+              key={row.categoryId}
+              data-empty={row.base === 0 && row.used === 0 ? "true" : "false"}
+              data-exceeded={row.remaining < 0 ? "true" : "false"}
+            >
+              <div className="client-profile-fy-category-head">
+                <div><strong>{row.label}</strong><span>{rowPercentage}% {isPWP ? "utilised" : "achieved"}</span></div>
+                <strong>{row.remaining.toLocaleString("en-IN")} remaining</strong>
+              </div>
+              <div className="client-profile-fy-category-track"><span style={{ width: `${Math.max(0, Math.min(100, rowPercentage))}%` }} /></div>
+              <div className="client-profile-fy-category-values">
+                <span>{isPWP ? "Generated" : "Target"} <strong>{row.base.toLocaleString("en-IN")}</strong></span>
+                <span>{isPWP ? "Sold / Used" : "Achieved"} <strong>{row.used.toLocaleString("en-IN")}</strong></span>
+              </div>
+              {fyHasTypedSplit && (
+                <div className="client-profile-fy-types">
+                  {row.typedRows.map((item) => (
+                    <span key={item.type}>
+                      {item.type === "RECYCLING" ? <Recycle className="h-3.5 w-3.5" /> : <Leaf className="h-3.5 w-3.5" />}
+                      {item.type === "RECYCLING" ? "Recycling" : "EOL"} · {item.used.toLocaleString("en-IN")} / {item.base.toLocaleString("en-IN")}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
+      {fyLastUpdated && <p className="client-profile-fy-updated">Last updated {formatDateTime(fyLastUpdated)}</p>}
     </div>
   );
 }

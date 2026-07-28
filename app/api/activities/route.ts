@@ -9,10 +9,15 @@ import Billing from "@/models/Billing";
 import Payment from "@/models/Payment";
 import EmailLog from "@/models/EmailLog";
 import DeletedRecord from "@/models/DeletedRecord";
+import AnnualReturn from "@/models/AnnualReturn";
+import Invoice from "@/models/Invoice";
+import UploadRecord from "@/models/UploadRecord";
+import Quotation from "@/models/Quotation";
+import DocumentRecord from "@/models/Document";
 
 type ActivityRecord = {
   id: string;
-  category: "credits" | "financial-year" | "billing" | "payments" | "emails" | "recycle-bin";
+  category: "compliance" | "financial" | "communications" | "documents" | "system";
   type: string;
   label: string;
   detail: string;
@@ -22,7 +27,7 @@ type ActivityRecord = {
   badge?: string;
   badgeColor?: string;
   entityId?: string;
-  entityType?: "billing" | "payment" | "financial-year" | "email" | "trash";
+  entityType?: "billing" | "payment" | "financial-year" | "annual-return" | "invoice" | "upload" | "quotation" | "document" | "email" | "trash";
   recordType?: string;
   actionSearch?: string;
 };
@@ -30,12 +35,11 @@ type ActivityRecord = {
 type ActivityRange = "7d" | "30d" | "year";
 
 const ACTIVITY_CATEGORIES = new Set<ActivityRecord["category"]>([
-  "credits",
-  "financial-year",
-  "billing",
-  "payments",
-  "emails",
-  "recycle-bin",
+  "compliance",
+  "financial",
+  "communications",
+  "documents",
+  "system",
 ]);
 
 const emailTypeLabel: Record<string, string> = {
@@ -60,6 +64,7 @@ const recycleBinLabels: Record<string, string> = {
   annualReturn: "Annual return moved to recycle bin",
   uploadRecord: "Upload record moved to recycle bin",
   invoice: "Invoice moved to recycle bin",
+  document: "Document moved to recycle bin",
   client: "Client moved to recycle bin",
 };
 
@@ -160,11 +165,16 @@ export async function GET(req: NextRequest) {
       .lean() as { companyName?: string } | null;
     const clientName = typeof client?.companyName === "string" ? client.companyName.trim() : "";
 
-    const [transactions, fyRecords, billings, payments, emailLogs, deletedRecords] = await Promise.all([
+    const [transactions, fyRecords, annualReturns, invoices, uploads, quotations, documents, billings, payments, emailLogs, deletedRecords] = await Promise.all([
       CreditTransaction.find({
         $or: [{ fromClientId: clientId }, { toClientId: clientId }],
       }).lean(),
       FinancialYear.find({ clientId }).lean(),
+      AnnualReturn.find({ clientId }).lean(),
+      Invoice.find({ clientId }).lean(),
+      UploadRecord.find({ clientId }).lean(),
+      Quotation.find({ clientId }).lean(),
+      DocumentRecord.find({ clientId }).lean(),
       Billing.find({ clientId }).lean(),
       Payment.find({ clientId }).lean(),
       EmailLog.find(clientName
@@ -180,7 +190,7 @@ export async function GET(req: NextRequest) {
         $or: [
           {
             recordType: {
-              $in: ["financialYear", "billing", "payment", "annualReturn", "uploadRecord", "invoice"],
+              $in: ["financialYear", "billing", "payment", "annualReturn", "uploadRecord", "invoice", "document"],
             },
             "data.clientId": clientId,
           },
@@ -202,7 +212,7 @@ export async function GET(req: NextRequest) {
       if (isSeller) {
         activities.push({
           id: `credit-sold-${String(txRecord._id || Math.random())}`,
-          category: "credits",
+          category: "compliance",
           type: "credit_sold",
           label: "Credits Sold",
           detail: `${qty.toLocaleString("en-IN")} units${financialYear ? ` - FY ${financialYear}` : ""}`,
@@ -217,7 +227,7 @@ export async function GET(req: NextRequest) {
       if (isBuyer) {
         activities.push({
           id: `target-achieved-${String(txRecord._id || Math.random())}`,
-          category: "credits",
+          category: "compliance",
           type: "target_achieved",
           label: "Target Achieved",
           detail: `${qty.toLocaleString("en-IN")} units${financialYear ? ` - FY ${financialYear}` : ""}`,
@@ -249,7 +259,7 @@ export async function GET(req: NextRequest) {
       if (totalTarget > 0) {
         activities.push({
           id: `fy-target-${String(fyRecord._id || financialYear || Math.random())}`,
-          category: "financial-year",
+          category: "compliance",
           type: "target_set",
           label: "Target Set",
           detail: `${totalTarget.toLocaleString("en-IN")} units${financialYear ? ` - FY ${financialYear}` : ""}`,
@@ -266,7 +276,7 @@ export async function GET(req: NextRequest) {
       if (totalCredits > 0) {
         activities.push({
           id: `fy-credits-${String(fyRecord._id || financialYear || Math.random())}`,
-          category: "financial-year",
+          category: "compliance",
           type: "credits_set",
           label: "Credits Allocated",
           detail: `${totalCredits.toLocaleString("en-IN")} units${financialYear ? ` - FY ${financialYear}` : ""}`,
@@ -281,13 +291,115 @@ export async function GET(req: NextRequest) {
       }
     });
 
+    annualReturns.forEach((record) => {
+      const item = record as unknown as Record<string, unknown>;
+      const financialYear = extractFinancialYear(item.financialYear);
+      const status = typeof item.status === "string" ? item.status : "Not Started";
+      activities.push({
+        id: `annual-return-${String(item._id || financialYear || Math.random())}`,
+        category: "compliance",
+        type: "annual_return_updated",
+        label: "Annual Return Updated",
+        detail: `Status changed to ${status}${item.acknowledgeNumber ? ` · Acknowledgement: ${String(item.acknowledgeNumber)}` : ""}`,
+        date: readDate(item.updatedAt || item.createdAt),
+        color: status === "Filed" || status === "Verified" ? "emerald" : "amber",
+        financialYear,
+        badge: status,
+        badgeColor: status === "Filed" || status === "Verified"
+          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+          : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+        entityId: String(item._id || ""),
+        entityType: "annual-return",
+      });
+    });
+
+    invoices.forEach((record) => {
+      const item = record as unknown as Record<string, unknown>;
+      const financialYear = extractFinancialYear(item.financialYear);
+      const invoiceType = item.invoiceType === "purchase" ? "Purchase" : "Sale";
+      const status = typeof item.status === "string" ? item.status : "Received";
+      activities.push({
+        id: `invoice-${String(item._id || Math.random())}`,
+        category: "compliance",
+        type: "invoice_tracking_updated",
+        label: `${invoiceType} Invoice Tracking Updated`,
+        detail: `${status}${item.receivedVia ? ` · Received via ${String(item.receivedVia)}` : ""}`,
+        date: readDate(item.updatedAt || item.createdAt),
+        color: status === "Received" ? "emerald" : "amber",
+        financialYear,
+        badge: status,
+        badgeColor: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+        entityId: String(item._id || ""),
+        entityType: "invoice",
+      });
+    });
+
+    uploads.forEach((record) => {
+      const item = record as unknown as Record<string, unknown>;
+      const financialYear = extractFinancialYear(item.financialYear);
+      const quantity = sumCreditCategories(item);
+      activities.push({
+        id: `upload-${String(item._id || Math.random())}`,
+        category: "compliance",
+        type: "cpcb_upload_recorded",
+        label: "CPCB Upload Recorded",
+        detail: `${item.uploadType === "purchase" ? "Purchase" : "Sale"} data · ${quantity.toLocaleString("en-IN")} MT`,
+        date: readDate(item.updatedAt || item.createdAt),
+        color: "violet",
+        financialYear,
+        badge: `${quantity.toLocaleString("en-IN")} MT`,
+        badgeColor: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300",
+        entityId: String(item._id || ""),
+        entityType: "upload",
+      });
+    });
+
+    quotations.forEach((record) => {
+      const item = record as unknown as Record<string, unknown>;
+      const financialYear = extractFinancialYear(item.financialYear);
+      const status = typeof item.status === "string" ? item.status : "Draft";
+      activities.push({
+        id: `quotation-${String(item._id || Math.random())}`,
+        category: "financial",
+        type: "quotation_updated",
+        label: typeof item.quotationNumber === "string" && item.quotationNumber ? item.quotationNumber : "Quotation Updated",
+        detail: `Quotation status: ${status}`,
+        date: readDate(item.updatedAt || item.createdAt),
+        color: status === "Accepted" ? "emerald" : "brand",
+        financialYear,
+        badge: status,
+        badgeColor: status === "Accepted"
+          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+        entityId: String(item._id || ""),
+        entityType: "quotation",
+      });
+    });
+
+    documents.forEach((record) => {
+      const item = record as unknown as Record<string, unknown>;
+      activities.push({
+        id: `document-${String(item._id || Math.random())}`,
+        category: "documents",
+        type: "document_linked",
+        label: "Document Linked",
+        detail: typeof item.documentName === "string" ? item.documentName : "Client document",
+        date: readDate(item.updatedAt || item.uploadedDate || item.createdAt),
+        color: "blue",
+        badge: "Document",
+        badgeColor: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+        entityId: String(item._id || ""),
+        entityType: "document",
+      });
+    });
+
     billings.forEach((billing) => {
       const billingRecord = billing as unknown as Record<string, unknown>;
       const financialYear = extractFinancialYear(billingRecord.financialYear);
       const paymentStatus = typeof billingRecord.paymentStatus === "string" ? billingRecord.paymentStatus : "";
       activities.push({
         id: `billing-${String(billingRecord._id || financialYear || Math.random())}`,
-        category: "billing",
+        category: "financial",
         type: "billing_created",
         label: "Billing Created",
         detail: `Total: ${formatAmount(billingRecord.totalAmount)} · Paid: ${formatAmount(billingRecord.totalPaid)} · Pending: ${formatAmount(billingRecord.pendingAmount)}`,
@@ -311,7 +423,7 @@ export async function GET(req: NextRequest) {
       const isAdvancePayment = paymentRecord.paymentType === "advance";
       activities.push({
         id: `payment-${String(paymentRecord._id || Math.random())}`,
-        category: "payments",
+        category: "financial",
         type: isAdvancePayment ? "advance_payment_received" : "payment_received",
         label: isAdvancePayment ? "Advance Payment Received" : "Payment Received",
         detail: `${isAdvancePayment ? "Advance of " : ""}${formatAmount(paymentRecord.amountPaid)} via ${String(paymentRecord.paymentMode || "-")}${paymentRecord.referenceNumber ? ` · Ref: ${String(paymentRecord.referenceNumber)}` : ""}`,
@@ -335,7 +447,7 @@ export async function GET(req: NextRequest) {
         : [];
       activities.push({
         id: `email-${String(emailRecord._id || Math.random())}`,
-        category: "emails",
+        category: "communications",
         type: isDraft ? "email_draft" : "email_sent",
         label: typeof emailRecord.subject === "string" && emailRecord.subject.trim()
           ? emailRecord.subject
@@ -366,7 +478,7 @@ export async function GET(req: NextRequest) {
 
       activities.push({
         id: `trash-${String(deletedRecord._id || Math.random())}`,
-        category: "recycle-bin",
+        category: "system",
         type: `deleted_${recordType}`,
         label,
         detail: detailParts.join(" · "),
@@ -383,7 +495,7 @@ export async function GET(req: NextRequest) {
     });
 
     activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    const latestEmailActivity = activities.find((activity) => activity.category === "emails") || null;
+    const latestEmailActivity = activities.find((activity) => activity.category === "communications") || null;
     const filteredActivities = applyActivityFilters(activities, { category, financialYear, range });
     const items = filteredActivities.slice(offset, offset + limit);
 

@@ -16,7 +16,7 @@ import type { ClientCustomFieldDefinition } from "@/lib/clientCustomFields";
 import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearState } from "@/app/providers";
 import ClientProfileActivityTimeline from "./ClientProfileActivityTimeline";
-import ClientProfileBillingPayments from "./ClientProfileBillingPayments";
+import ClientProfileBillingPayments, { FinancialOverviewPanel } from "./ClientProfileBillingPayments";
 import ClientProfileFinancialSummary from "./ClientProfileFinancialSummary";
 import ClientProfileModals from "./ClientProfileModals";
 import {
@@ -48,6 +48,7 @@ import {
   INVOICE_STATUS_OPTIONS,
   InvoiceMonthSelector,
   InvoiceTrackingWorkspace,
+  getComplianceNavStates,
   NOTES_TASKS_NAV,
   RegistrationDetails,
   TIMELINE_NAV,
@@ -69,12 +70,11 @@ import {
 import {
   AlertCircle, BarChart2, Building2, Calendar, CheckCircle2, ClipboardCheck, FileText, FileUp,
   Hash, Mail, MapPin, Pencil, Phone, Receipt, Send,
-  Shield, Target, Upload, User, Wallet, Zap
+  Shield, Target, Trash2, Upload, User, Wallet, Zap
 } from "lucide-react";
 import {
   ACTIVITY_PAGE_SIZE,
   ACTIVITY_RANGES,
-  ACTIVITY_SCROLL_THRESHOLD,
   buildEntryValueMap,
   buildFyEntries,
   buildLinkedContactEmailOptions,
@@ -189,12 +189,11 @@ export default function ClientProfilePage() {
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const clientRef = useRef<Client | null>(null);
   const activityRequestIdRef = useRef(0);
-  const activityTimelineListRef = useRef<HTMLDivElement | null>(null);
 
   // UI state
   const [activePrimaryTab, setActivePrimaryTab] = useState<ClientProfileTabId>("overview");
-  const [activeComplianceSection, setActiveComplianceSection] = useState<ComplianceSectionId>("annualReturn");
-  const [activeFinancialSection, setActiveFinancialSection] = useState<FinancialSectionId>("quotations");
+  const [activeComplianceSection, setActiveComplianceSection] = useState<ComplianceSectionId>("status");
+  const [activeFinancialSection, setActiveFinancialSection] = useState<FinancialSectionId>("overview");
   const [activeDocumentsSection, setActiveDocumentsSection] = useState<DocumentsSectionId>("all");
   const [activeTimelineSection, setActiveTimelineSection] = useState<TimelineSectionId>("all");
   const [activeNotesSection, setActiveNotesSection] = useState<NotesTasksSectionId>("notes");
@@ -207,6 +206,7 @@ export default function ClientProfilePage() {
   const [docForm, setDocForm] = useState({ documentName: "", driveLink: "" });
   const [docModalMode, setDocModalMode] = useState<"create" | "edit">("create");
   const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null);
+  const [documentPendingDelete, setDocumentPendingDelete] = useState<Document | null>(null);
   const [invoiceModal, setInvoiceModal] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState<{
     financialYear: string;
@@ -540,19 +540,12 @@ export default function ClientProfilePage() {
       });
   }, [activityHasMore, activityLoading, activityLoadingMore, activityOffset, fetchActivitiesPage]);
 
-  const handleActivityScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
-    const element = event.currentTarget;
-    const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-    if (distanceToBottom <= ACTIVITY_SCROLL_THRESHOLD) {
-      loadMoreActivities();
-    }
-  }, [loadMoreActivities]);
-
   const billing  = allBillings.find((b) => b.financialYear === selectedFy) || null;
   const payments = allPayments.filter((p) => p.financialYear === selectedFy);
   const invoices = allInvoices.filter((invoice) => invoice.financialYear === selectedFy);
   const uploadRecords = allUploadRecords.filter((record) => record.financialYear === selectedFy);
-  const acceptedQuotations = linkedQuotations.filter((quotation) => quotation.status === "Accepted" && quotation.financialYear === selectedFy);
+  const fyLinkedQuotations = linkedQuotations.filter((quotation) => quotation.financialYear === selectedFy);
+  const acceptedQuotations = fyLinkedQuotations.filter((quotation) => quotation.status === "Accepted");
   const hasSentLinkedQuotation = linkedQuotations.some((quotation) => (
     quotation.financialYear === selectedFy &&
     (quotation.status === "Sent" || quotation.status === "Accepted")
@@ -566,17 +559,6 @@ export default function ClientProfilePage() {
     Number(billingForm.otherCharges || 0);
   const fyGeneratedTotal = sumFyEntries(fyForm.generated);
   const fyTargetTotal = sumFyEntries(fyForm.targets);
-
-  useEffect(() => {
-    if (activityLoading || activityLoadingMore || !activityHasMore || filteredActivities.length === 0) return;
-
-    const lists = [activityTimelineListRef.current].filter(Boolean) as HTMLDivElement[];
-    const shouldPrefetch = lists.some((element) => element.scrollHeight <= element.clientHeight + 8);
-
-    if (shouldPrefetch) {
-      loadMoreActivities();
-    }
-  }, [activityHasMore, activityLoading, activityLoadingMore, filteredActivities.length, loadMoreActivities]);
 
   useEffect(() => {
     const scrollContainer = document.getElementById("dashboard-scroll-area");
@@ -1106,16 +1088,18 @@ export default function ClientProfilePage() {
     }
   };
 
-  const deleteDocument = async (id: string) => {
-    if (!confirm("Delete this document?")) return;
-    setBusyAction(`document-${id}`);
+  const deleteDocument = async () => {
+    if (!documentPendingDelete) return;
+    const documentToDelete = documentPendingDelete;
+    setBusyAction(`document-${documentToDelete._id}`);
     try {
-      const response = await fetch(`/api/documents/${id}`, { method: "DELETE" });
+      const response = await fetch(`/api/documents/${documentToDelete._id}`, { method: "DELETE" });
       if (!response.ok) {
         toast.error("Failed to remove document.");
         return;
       }
-      setDocuments((prev) => prev.filter((d) => d._id !== id));
+      setDocuments((prev) => prev.filter((d) => d._id !== documentToDelete._id));
+      setDocumentPendingDelete(null);
       invalidate("/api/trash", "/api/documents");
       toast.success("Document moved to recycle bin");
     } finally {
@@ -1135,14 +1119,20 @@ export default function ClientProfilePage() {
     });
   };
 
-  const openInvoiceModal = () => {
+  const openInvoiceModal = (context?: {
+    invoiceType: "sale" | "purchase";
+    monthKey: string;
+    status: InvoiceStatus;
+    receivedVia?: ReceivedVia;
+    remarks?: string;
+  }) => {
     setInvoiceForm({
       financialYear: selectedFy,
-      invoiceType: "",
-      status: "Received",
-      receivedVia: "",
-      selectedMonths: [],
-      remarks: "",
+      invoiceType: context?.invoiceType || "",
+      status: context?.status || "Received",
+      receivedVia: context?.receivedVia || "",
+      selectedMonths: context?.monthKey ? [context.monthKey] : [],
+      remarks: context?.remarks || "",
     });
     setInvoiceModal(true);
   };
@@ -1490,7 +1480,7 @@ export default function ClientProfilePage() {
       ops?.commit?.(safeCommit);
       await refreshAnnualReturnForFy(payload.financialYear);
       toast.success(editingBillingId ? "Billing updated!" : "Billing saved!");
-      navigateToClientSection({ primary: "financial", secondary: "bills" });
+      navigateToClientSection({ primary: "financial", secondary: "billing" });
     } catch {
       ops?.rollback?.();
       toast.error("Something went wrong saving billing.");
@@ -1887,7 +1877,7 @@ export default function ClientProfilePage() {
 
       closeReminderModal();
       toast.success(`Reminder sent to ${reminderRecipients.length} recipient${reminderRecipients.length === 1 ? "" : "s"}!`);
-      navigateToClientSection({ primary: "financial", secondary: "outstanding" });
+      navigateToClientSection({ primary: "financial", secondary: "billing" });
     } finally {
       setReminderSending(false);
     }
@@ -1919,6 +1909,33 @@ export default function ClientProfilePage() {
 
     if (activity.entityType === "financial-year") {
       openFYModal(fyRecords.find((record) => record._id === activity.entityId) || fyData || null);
+      return;
+    }
+
+    if (activity.entityType === "annual-return") {
+      navigateToClientSection({ primary: "compliance", secondary: "annualReturn" });
+      return;
+    }
+
+    if (activity.entityType === "invoice") {
+      navigateToClientSection({ primary: "compliance", secondary: "invoiceTracking" });
+      return;
+    }
+
+    if (activity.entityType === "upload") {
+      navigateToClientSection({ primary: "compliance", secondary: "cpcbUpload" });
+      return;
+    }
+
+    if (activity.entityType === "quotation" && activity.entityId) {
+      router.push(`/dashboard/quotations/${activity.entityId}`);
+      return;
+    }
+
+    if (activity.entityType === "document") {
+      const targetDocument = documents.find((record) => record._id === activity.entityId);
+      if (targetDocument?.driveLink) window.open(targetDocument.driveLink, "_blank", "noopener,noreferrer");
+      else navigateToClientSection({ primary: "documents", secondary: "all" });
       return;
     }
 
@@ -2043,6 +2060,11 @@ export default function ClientProfilePage() {
     if (activity.entityType === "billing") return "Open Billing";
     if (activity.entityType === "payment") return "Open Payment";
     if (activity.entityType === "financial-year") return "Open FY";
+    if (activity.entityType === "annual-return") return "Open Annual Return";
+    if (activity.entityType === "invoice") return "Open Invoice Tracking";
+    if (activity.entityType === "upload") return "Open CPCB Upload";
+    if (activity.entityType === "quotation") return "Open Quotation";
+    if (activity.entityType === "document") return "Open Document";
     if (activity.entityType === "email") return "Open Emails";
     if (activity.entityType === "trash") return "Open Recycle Bin";
     return null;
@@ -2162,6 +2184,13 @@ export default function ClientProfilePage() {
     : null;
   const registeredThisFy = registrationSignal ? isDateInFinancialYear(registrationSignal.date, selectedFy) : false;
   const annualReturn = annualReturns.find((record) => record.financialYear === selectedFy) || null;
+  const complianceNavStates = getComplianceNavStates({
+    annualReturn,
+    fyData,
+    invoices,
+    selectedFy,
+    uploadRecords,
+  });
   const annualReturnStatus = annualReturn?.status === "Pending" || !annualReturn?.status
     ? "Not Started"
     : annualReturn.status;
@@ -2313,7 +2342,7 @@ export default function ClientProfilePage() {
       label: "Invoice Tracking",
       description: `${invoices.length} entr${invoices.length === 1 ? "y" : "ies"}`,
       icon: <FileText className="w-4 h-4" />,
-      onClick: openInvoiceModal,
+      onClick: () => openInvoiceModal(),
       tone: "neutral",
     },
     {
@@ -2432,7 +2461,7 @@ export default function ClientProfilePage() {
         { label: "Paid", value: formatCurrency(billing?.totalPaid || 0) },
       ],
       onClick: () => billing
-        ? navigateToClientSection({ primary: "financial", secondary: "outstanding" })
+        ? navigateToClientSection({ primary: "financial", secondary: "billing" })
         : openBillingModalForRecord(),
     },
     {
@@ -2448,7 +2477,7 @@ export default function ClientProfilePage() {
         { label: "Last Payment", value: latestPayment ? `${formatCurrency(latestPayment.amountPaid)} on ${formatDate(latestPayment.paymentDate)}` : "Not recorded" },
       ],
       onClick: () => latestPayment
-        ? navigateToClientSection({ primary: "financial", secondary: "paymentHistory" })
+        ? navigateToClientSection({ primary: "financial", secondary: "ledger" })
         : openPaymentModalForRecord(),
     },
     {
@@ -2532,7 +2561,7 @@ export default function ClientProfilePage() {
       actionLabel: "Open",
       onAction: () => navigateToClientSection({
         primary: "financial",
-        secondary: client.category === "PWP" ? "bills" : "quotations",
+        secondary: client.category === "PWP" ? "billing" : "quotations",
       }),
     } : null,
     registeredThisFy && annualReturnStatus === "Not Required This FY" ? {
@@ -2598,24 +2627,24 @@ export default function ClientProfilePage() {
         client={client}
         customFieldDefinitions={customFieldDefinitions}
         isPWP={isPWP}
-        legalName={legalName}
+        onEdit={openBasicEdit}
         registrationSignal={registrationSignal}
       />
     ),
     status: (
       <ComplianceStatusPanel
         annualReturn={annualReturn}
-        billing={billing}
         fyData={fyData}
         invoices={invoices}
         isPWP={isPWP}
+        onSectionChange={setActiveComplianceSection}
         selectedFy={selectedFy}
         uploadRecords={uploadRecords}
       />
     ),
   };
 
-  const renderBillingPayments = (view: "all" | "billing" | "payments" = "all") => (
+  const renderBillingPayments = (view: "all" | "billing" | "payments" | "ledger" = "all") => (
     <ClientProfileBillingPayments
       selectedFy={selectedFy}
       billing={billing}
@@ -2633,99 +2662,40 @@ export default function ClientProfilePage() {
     />
   );
 
-  const quotationStatusPanel = (
-    <section className="client-profile-card">
-      <div className="client-profile-card-header">
-        <div>
-          <p className="client-profile-kicker">Linked Quotations</p>
-          <h2>Linked quotations only</h2>
-        </div>
-        <button type="button" className="client-profile-secondary-button" onClick={() => router.push(`/dashboard/quotations?clientId=${encodeURIComponent(client.clientId)}&financialYear=${encodeURIComponent(selectedFy)}`)}>
-          <Receipt className="h-4 w-4" />
-          <span>Open Quotations</span>
-        </button>
-      </div>
-      <div className="client-profile-status-checks">
-        {linkedQuotations.length === 0 ? (
-          <div data-done="false">
-            <span><AlertCircle className="h-4 w-4" /></span>
-            <div>
-              <p>No linked quotation</p>
-              <small>Standalone quotations stay separate until they are explicitly linked to this client ID.</small>
-            </div>
-          </div>
-        ) : linkedQuotations.slice(0, 6).map((quotation) => (
-          <div key={quotation._id} data-done={quotation.status === "Accepted" ? "true" : "false"}>
-            <span>{quotation.status === "Accepted" ? <CheckCircle2 className="h-4 w-4" /> : <Receipt className="h-4 w-4" />}</span>
-            <div>
-              <p>{quotation.quotationNumber || quotation.clientName}</p>
-              <small>{quotation.status} - {formatCurrency(quotation.grandTotal || 0)}</small>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-
-  const outstandingPanel = (
-    <section className="client-profile-card">
-      <div className="client-profile-card-header">
-        <div>
-          <p className="client-profile-kicker">Outstanding</p>
-          <h2>Payment readiness for FY {selectedFy}</h2>
-        </div>
-        {billing && billing.pendingAmount > 0 && (
-          <button type="button" className="client-profile-primary-button" onClick={() => openReminderModal(billing)}>
-            <Send className="h-4 w-4" />
-            <span>Send Reminder</span>
-          </button>
-        )}
-      </div>
-      <div className="client-profile-invoice-summary-row">
-        <div>
-          <span>{formatCurrency(billing?.totalAmount || 0)}</span>
-          <p>Total billed</p>
-          <small>{billing ? billing.paymentStatus : "No billing created"}</small>
-        </div>
-        <div>
-          <span>{formatCurrency(billing?.totalPaid || 0)}</span>
-          <p>Paid</p>
-          <small>{payments.length} payment record{payments.length === 1 ? "" : "s"}</small>
-        </div>
-        <div>
-          <span>{formatCurrency(billing?.pendingAmount || 0)}</span>
-          <p>Outstanding</p>
-          <small>{billing?.pendingAmount ? "Action required" : "No pending amount"}</small>
-        </div>
-      </div>
-    </section>
-  );
-
   const financialSections: Record<FinancialSectionId, React.ReactNode> = {
+    overview: (
+      <FinancialOverviewPanel
+        acceptedQuotationCount={acceptedQuotations.length}
+        billing={billing}
+        isPWP={isPWP}
+        onAddPayment={() => openPaymentModalForRecord()}
+        onCreateBilling={() => openBillingModalForRecord()}
+        onOpenSection={setActiveFinancialSection}
+        onSendReminder={() => openReminderModal(billing || undefined)}
+        payments={payments}
+        selectedFy={selectedFy}
+      />
+    ),
     quotations: (
-      <>
-        <BillingWorkflowPanel
-          acceptedQuotations={acceptedQuotations}
-          billing={billing}
-          clientCategory={client.category}
-          onCreateDirectBill={() => openBillingModalForRecord()}
-          onCreateFromQuotation={(quotation) => void openBillingFromQuotation(quotation)}
-          onOpenQuotations={() => router.push(`/dashboard/quotations?clientId=${encodeURIComponent(client.clientId)}&financialYear=${encodeURIComponent(selectedFy)}`)}
-          selectedFy={selectedFy}
-        />
-        {quotationStatusPanel}
-      </>
+      <BillingWorkflowPanel
+        acceptedQuotations={acceptedQuotations}
+        billing={billing}
+        clientCategory={client.category}
+        linkedQuotations={fyLinkedQuotations}
+        onCreateDirectBill={() => openBillingModalForRecord()}
+        onCreateFromQuotation={(quotation) => void openBillingFromQuotation(quotation)}
+        onOpenQuotation={(quotation) => router.push(`/dashboard/quotations/${quotation._id}`)}
+        onOpenQuotations={() => router.push(`/dashboard/quotations?clientId=${encodeURIComponent(client.clientId)}&financialYear=${encodeURIComponent(selectedFy)}`)}
+        selectedFy={selectedFy}
+      />
     ),
-    bills: (
-      <>
-        {renderFySummary()}
-        {renderBillingPayments("billing")}
-      </>
-    ),
+    billing: renderBillingPayments("billing"),
     payments: renderBillingPayments("payments"),
-    outstanding: outstandingPanel,
-    paymentHistory: renderBillingPayments("payments"),
+    ledger: renderBillingPayments("ledger"),
   };
+  const financialNavItems = isPWP
+    ? FINANCIAL_NAV.filter((item) => item.id !== "quotations")
+    : FINANCIAL_NAV;
 
   const matchesDocument = (document: Document, pattern: RegExp) => pattern.test(document.documentName);
   const complianceDocumentPattern = /(annual|return|cpcb|compliance|registration|approval|certificate|epr|portal)/i;
@@ -2754,7 +2724,7 @@ export default function ClientProfilePage() {
       onToggle={() => toggleSection("documents")}
       onAdd={openCreateDocument}
       onEdit={openEditDocument}
-      onDelete={deleteDocument}
+      onDelete={setDocumentPendingDelete}
       onLinkContact={openBasicEdit}
     />
   );
@@ -2769,9 +2739,6 @@ export default function ClientProfilePage() {
 
   const renderTimelinePanel = () => (
     <ClientProfileActivityTimeline
-      selectedFy={selectedFy}
-      open={sectionOpen.recentActivity}
-      onToggle={() => toggleSection("recentActivity")}
       activityWindowHelpText={activityWindowHelpText}
       activityEmptyText={activityEmptyText}
       activitiesTotal={activitiesTotal}
@@ -2784,8 +2751,7 @@ export default function ClientProfilePage() {
       activityLoadingMore={activityLoadingMore}
       activityHasMore={activityHasMore}
       filteredActivities={filteredActivities}
-      listRef={activityTimelineListRef}
-      handleActivityScroll={handleActivityScroll}
+      loadMoreActivities={loadMoreActivities}
       getActivityFyChip={getActivityFyChip}
       getActivityActionLabel={getActivityActionLabel}
       handleActivityAction={handleActivityAction}
@@ -2795,13 +2761,17 @@ export default function ClientProfilePage() {
     all: renderTimelinePanel(),
     compliance: renderTimelinePanel(),
     financial: renderTimelinePanel(),
+    communications: renderTimelinePanel(),
     documents: renderTimelinePanel(),
-    notes: renderTimelinePanel(),
+    system: renderTimelinePanel(),
   };
   const timelineFilterMap: Partial<Record<TimelineSectionId, ActivityFilter>> = {
     all: "all",
-    compliance: "financial-year",
-    financial: "billing",
+    compliance: "compliance",
+    financial: "financial",
+    communications: "communications",
+    documents: "documents",
+    system: "system",
   };
   const handleTimelineSectionChange = (section: TimelineSectionId) => {
     setActiveTimelineSection(section);
@@ -2994,6 +2964,8 @@ export default function ClientProfilePage() {
               <ComplianceWorkspace
                 activeSection={activeComplianceSection}
                 collapsed={secondaryNavCollapsed}
+                isPWP={isPWP}
+                navStates={complianceNavStates}
                 onCollapsedChange={setSecondaryNavCollapsed}
                 onSectionChange={setActiveComplianceSection}
                 sections={complianceSections}
@@ -3007,7 +2979,7 @@ export default function ClientProfilePage() {
               <ClientProfileSecondaryWorkspace
                 activeSection={activeFinancialSection}
                 collapsed={secondaryNavCollapsed}
-                navItems={FINANCIAL_NAV}
+                navItems={financialNavItems}
                 onCollapsedChange={setSecondaryNavCollapsed}
                 onSectionChange={setActiveFinancialSection}
                 sections={financialSections}
@@ -3055,6 +3027,44 @@ export default function ClientProfilePage() {
       </div>
 
       <FloatingActionBar actions={quickActions} />
+      <Modal
+        open={Boolean(documentPendingDelete)}
+        onClose={() => {
+          if (!busyAction?.startsWith("document-")) setDocumentPendingDelete(null);
+        }}
+        title="Move document to recycle bin?"
+        subtitle={documentPendingDelete?.documentName}
+        size="sm"
+      >
+        <div className="client-profile-delete-confirmation">
+          <span className="client-profile-delete-confirmation-icon">
+            <Trash2 className="h-5 w-5" />
+          </span>
+          <div>
+            <p>This document link will be removed from the client profile.</p>
+            <span>You can restore it later from the recycle bin.</span>
+          </div>
+        </div>
+        <div className="mt-5 flex gap-2 border-t border-base pt-4">
+          <button
+            type="button"
+            className="btn-secondary flex-1 justify-center"
+            disabled={Boolean(busyAction?.startsWith("document-"))}
+            onClick={() => setDocumentPendingDelete(null)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="client-profile-delete-confirmation-button flex-1"
+            disabled={Boolean(busyAction?.startsWith("document-"))}
+            onClick={() => void deleteDocument()}
+          >
+            <Trash2 className="h-4 w-4" />
+            <span>{busyAction?.startsWith("document-") ? "Moving..." : "Move to Bin"}</span>
+          </button>
+        </div>
+      </Modal>
       <Modal open={invoiceModal} onClose={closeInvoiceModal} title="Add Invoice Tracking">
         <form onSubmit={saveInvoiceTracking} className="space-y-4">
           <div>

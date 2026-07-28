@@ -321,7 +321,7 @@ type DocumentsSectionProps = {
   onToggle: () => void;
   onAdd: () => void;
   onEdit: (document: Document) => void;
-  onDelete: (id: string) => void;
+  onDelete: (document: Document) => void;
   onLinkContact: () => void;
 };
 
@@ -1409,7 +1409,7 @@ export function DocumentsSection({
                       <button
                         type="button"
                         disabled={busyAction === `document-${document._id}`}
-                        onClick={() => onDelete(document._id)}
+                        onClick={() => onDelete(document)}
                         className="client-profile-icon-button client-profile-danger-icon"
                         aria-label={`Delete ${document.documentName}`}
                       >

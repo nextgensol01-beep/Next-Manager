@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useMemo } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   AlertCircle,
   Bell,
@@ -19,6 +20,7 @@ import {
   Lock,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Receipt,
   ShieldCheck,
   Target,
@@ -32,12 +34,13 @@ import {
   getFinancialYearMonths,
 } from "@/lib/invoiceCoverage";
 import type { ClientCustomFieldDefinition } from "@/lib/clientCustomFields";
-import type {
-  Billing,
-  Client,
-  FYRecord,
-  InvoiceTrackingRecord,
-  UploadRecord,
+import {
+  formatDateTime,
+  type Billing,
+  type Client,
+  type FYRecord,
+  type InvoiceTrackingRecord,
+  type UploadRecord,
 } from "./ClientProfileSupport";
 
 export type ClientProfileTabId = "overview" | "compliance" | "financial" | "documents" | "timeline" | "notes";
@@ -48,9 +51,9 @@ export type ComplianceSectionId =
   | "targetsCredits"
   | "registration"
   | "status";
-export type FinancialSectionId = "quotations" | "bills" | "payments" | "outstanding" | "paymentHistory";
+export type FinancialSectionId = "overview" | "quotations" | "billing" | "payments" | "ledger";
 export type DocumentsSectionId = "all" | "compliance" | "financial" | "invoices" | "certificates" | "other";
-export type TimelineSectionId = "all" | "compliance" | "financial" | "documents" | "notes";
+export type TimelineSectionId = "all" | "compliance" | "financial" | "communications" | "documents" | "system";
 export type NotesTasksSectionId = "notes" | "tasks" | "reminders" | "followUps" | "callsMeetings";
 export type InvoiceMonthStatus = "Pending" | "Received" | "Partial / Issue" | "Nil / No Invoice";
 export type InvoiceReceivedVia = "hardcopy" | "mail" | "whatsapp" | "excel" | "other";
@@ -61,6 +64,8 @@ export type ClientProfileSecondaryNavItem<T extends string> = {
   short: string;
   icon: React.ReactNode;
 };
+
+export type ComplianceNavState = "complete" | "in-progress" | "action" | "recorded";
 
 export type AnnualReturnProgressStep = {
   id: string;
@@ -119,20 +124,20 @@ const PRIMARY_TABS: Array<{ id: ClientProfileTabId; label: string; icon: React.R
 ];
 
 const COMPLIANCE_NAV: Array<ClientProfileSecondaryNavItem<ComplianceSectionId>> = [
+  { id: "status", label: "Compliance Overview", short: "Overview", icon: <ClipboardCheck className="h-4 w-4" /> },
   { id: "annualReturn", label: "Annual Return Tracker", short: "Annual Return", icon: <CalendarCheck className="h-4 w-4" /> },
   { id: "invoiceTracking", label: "Invoice Tracking", short: "Invoice Tracking", icon: <FileText className="h-4 w-4" /> },
   { id: "cpcbUpload", label: "CPCB Upload Data", short: "CPCB Upload", icon: <Upload className="h-4 w-4" /> },
   { id: "targetsCredits", label: "FY Targets / Credits", short: "Targets", icon: <Target className="h-4 w-4" /> },
   { id: "registration", label: "Registration Details", short: "Registration", icon: <ShieldCheck className="h-4 w-4" /> },
-  { id: "status", label: "Compliance Status", short: "Status", icon: <ClipboardCheck className="h-4 w-4" /> },
 ];
 
 export const FINANCIAL_NAV: Array<ClientProfileSecondaryNavItem<FinancialSectionId>> = [
+  { id: "overview", label: "Financial Overview", short: "Overview", icon: <LayoutDashboard className="h-4 w-4" /> },
   { id: "quotations", label: "Quotations", short: "Quotations", icon: <Receipt className="h-4 w-4" /> },
-  { id: "bills", label: "Bills", short: "Bills", icon: <IndianRupee className="h-4 w-4" /> },
-  { id: "payments", label: "Payments", short: "Payments", icon: <Wallet className="h-4 w-4" /> },
-  { id: "outstanding", label: "Outstanding", short: "Outstanding", icon: <AlertCircle className="h-4 w-4" /> },
-  { id: "paymentHistory", label: "Payment History", short: "History", icon: <History className="h-4 w-4" /> },
+  { id: "billing", label: "Billing", short: "Billing", icon: <IndianRupee className="h-4 w-4" /> },
+  { id: "payments", label: "Payments & Advances", short: "Payments", icon: <Wallet className="h-4 w-4" /> },
+  { id: "ledger", label: "Ledger", short: "Ledger", icon: <History className="h-4 w-4" /> },
 ];
 
 export const DOCUMENTS_NAV: Array<ClientProfileSecondaryNavItem<DocumentsSectionId>> = [
@@ -148,8 +153,9 @@ export const TIMELINE_NAV: Array<ClientProfileSecondaryNavItem<TimelineSectionId
   { id: "all", label: "All Activity", short: "All", icon: <History className="h-4 w-4" /> },
   { id: "compliance", label: "Compliance", short: "Compliance", icon: <ClipboardCheck className="h-4 w-4" /> },
   { id: "financial", label: "Financial", short: "Financial", icon: <Wallet className="h-4 w-4" /> },
+  { id: "communications", label: "Communications", short: "Messages", icon: <Bell className="h-4 w-4" /> },
   { id: "documents", label: "Documents", short: "Documents", icon: <FolderOpen className="h-4 w-4" /> },
-  { id: "notes", label: "Notes", short: "Notes", icon: <ListChecks className="h-4 w-4" /> },
+  { id: "system", label: "System Activity", short: "System", icon: <History className="h-4 w-4" /> },
 ];
 
 export const NOTES_TASKS_NAV: Array<ClientProfileSecondaryNavItem<NotesTasksSectionId>> = [
@@ -196,6 +202,55 @@ const uploadTotal = (record: UploadRecord) =>
   (Number(record.cat3) || 0) +
   (Number(record.cat4) || 0);
 
+const hasMeaningfulFyRecord = (fyData?: FYRecord) => {
+  if (!fyData) return false;
+  const values = [
+    fyData.totalTarget,
+    fyData.totalAchieved,
+    fyData.totalGenerated,
+    fyData.totalSold,
+    fyData.targetAmount,
+    fyData.achievedAmount,
+    fyData.totalCredits,
+    fyData.totalUsed,
+  ];
+  return values.some((value) => Number(value) !== 0)
+    || Boolean(fyData.targets?.length || fyData.generated?.length);
+};
+
+export function getComplianceNavStates({
+  annualReturn,
+  fyData,
+  invoices,
+  selectedFy,
+  uploadRecords,
+}: {
+  annualReturn: AnnualReturnRecord | null;
+  fyData?: FYRecord;
+  invoices: InvoiceTrackingRecord[];
+  selectedFy: string;
+  uploadRecords: UploadRecord[];
+}): Partial<Record<ComplianceSectionId, ComplianceNavState>> {
+  const coverage = buildInvoiceCoverageSummary(invoices, selectedFy);
+  const coveredMonths = coverage.sale.doneCount + coverage.purchase.doneCount;
+  const annualStatus = annualReturnLabel(annualReturn?.status);
+  const annualComplete = annualReturn?.status === "Filed"
+    || annualReturn?.status === "Verified"
+    || annualReturn?.status === "Not Required This FY";
+
+  return {
+    status: "recorded",
+    annualReturn: annualComplete
+      ? "complete"
+      : annualStatus === "In Progress" || annualStatus === "Ready to File"
+        ? "in-progress"
+        : "action",
+    invoiceTracking: coveredMonths === 24 ? "complete" : coveredMonths > 0 ? "in-progress" : "action",
+    cpcbUpload: uploadRecords.length > 0 ? "recorded" : "action",
+    targetsCredits: hasMeaningfulFyRecord(fyData) ? "recorded" : "action",
+  };
+}
+
 const latestTimestamp = (record: Pick<InvoiceTrackingRecord, "createdAt"> & { updatedAt?: string }) => {
   const date = new Date(record.updatedAt || record.createdAt || 0);
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
@@ -216,7 +271,7 @@ export function getInvoiceMonthStates(
     {
       ...month,
       status: "Pending" as InvoiceMonthStatus,
-      receivedVia: undefined as string | undefined,
+      receivedVia: undefined as InvoiceReceivedVia | undefined,
       remarks: "",
       timestamp: 0,
     },
@@ -318,6 +373,7 @@ export function ClientProfileSecondaryWorkspace<T extends string>({
   activeSection,
   collapsed,
   navItems,
+  navStates,
   onCollapsedChange,
   onSectionChange,
   sections,
@@ -326,13 +382,21 @@ export function ClientProfileSecondaryWorkspace<T extends string>({
   activeSection: T;
   collapsed: boolean;
   navItems: Array<ClientProfileSecondaryNavItem<T>>;
+  navStates?: Partial<Record<T, ComplianceNavState>>;
   onCollapsedChange: (collapsed: boolean) => void;
   onSectionChange: (section: T) => void;
   sections: Record<T, React.ReactNode>;
   title: string;
 }) {
+  const prefersReducedMotion = useReducedMotion();
+  const expandedWidth = 238;
+  const collapsedWidth = 68;
+
   return (
-    <section className="client-profile-compliance-workspace">
+    <section
+      className="client-profile-compliance-workspace"
+      data-workspace={title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}
+    >
       <div className="client-profile-secondary-mobile" aria-label={`${title} sections`}>
         {navItems.map((item) => (
           <button
@@ -343,6 +407,7 @@ export function ClientProfileSecondaryWorkspace<T extends string>({
             onClick={() => onSectionChange(item.id)}
           >
             {item.short}
+            {navStates?.[item.id] && <i data-state={navStates[item.id]} aria-hidden="true" />}
           </button>
         ))}
       </div>
@@ -350,8 +415,21 @@ export function ClientProfileSecondaryWorkspace<T extends string>({
       <motion.aside
         className="client-profile-secondary-nav"
         data-collapsed={collapsed ? "true" : "false"}
-        animate={{ width: collapsed ? 68 : 238 }}
-        transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+        initial={prefersReducedMotion ? false : {
+          width: collapsedWidth,
+          opacity: collapsed ? 1 : 0.78,
+          x: collapsed ? 0 : -6,
+        }}
+        animate={{
+          width: collapsed ? collapsedWidth : expandedWidth,
+          opacity: 1,
+          x: 0,
+        }}
+        transition={prefersReducedMotion ? { duration: 0 } : {
+          width: { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
+          opacity: { duration: 0.2, ease: "easeOut" },
+          x: { duration: 0.28, ease: [0.22, 1, 0.36, 1] },
+        }}
       >
         <div className="client-profile-secondary-nav-header">
           {!collapsed && <span>{title}</span>}
@@ -376,6 +454,7 @@ export function ClientProfileSecondaryWorkspace<T extends string>({
           >
             <span className="client-profile-secondary-icon">{item.icon}</span>
             {!collapsed && <span className="truncate">{item.label}</span>}
+            {navStates?.[item.id] && <i data-state={navStates[item.id]} aria-hidden="true" />}
           </button>
         ))}
       </motion.aside>
@@ -400,21 +479,34 @@ export function ClientProfileSecondaryWorkspace<T extends string>({
 export function ComplianceWorkspace({
   activeSection,
   collapsed,
+  isPWP,
+  navStates,
   onCollapsedChange,
   onSectionChange,
   sections,
 }: {
   activeSection: ComplianceSectionId;
   collapsed: boolean;
+  isPWP: boolean;
+  navStates: Partial<Record<ComplianceSectionId, ComplianceNavState>>;
   onCollapsedChange: (collapsed: boolean) => void;
   onSectionChange: (section: ComplianceSectionId) => void;
   sections: Record<ComplianceSectionId, React.ReactNode>;
 }) {
+  const navItems = isPWP
+    ? COMPLIANCE_NAV.filter((item) => item.id !== "registration")
+    : COMPLIANCE_NAV;
+
+  useEffect(() => {
+    if (isPWP && activeSection === "registration") onSectionChange("status");
+  }, [activeSection, isPWP, onSectionChange]);
+
   return (
     <ClientProfileSecondaryWorkspace
       activeSection={activeSection}
       collapsed={collapsed}
-      navItems={COMPLIANCE_NAV}
+      navItems={navItems}
+      navStates={navStates}
       onCollapsedChange={onCollapsedChange}
       onSectionChange={onSectionChange}
       sections={sections}
@@ -600,8 +692,17 @@ export function InvoiceTrackingWorkspace({
 }: {
   selectedFy: string;
   invoices: InvoiceTrackingRecord[];
-  onAddInvoice: () => void;
+  onAddInvoice: (context?: {
+    invoiceType: "sale" | "purchase";
+    monthKey: string;
+    status: InvoiceMonthStatus;
+    receivedVia?: InvoiceReceivedVia;
+    remarks?: string;
+  }) => void;
 }) {
+  const [selectedMonth, setSelectedMonth] = useState<(ReturnType<typeof getInvoiceMonthStates>[number] & {
+    invoiceType: "sale" | "purchase";
+  }) | null>(null);
   const saleMonths = useMemo(() => getInvoiceMonthStates(invoices, selectedFy, "sale"), [invoices, selectedFy]);
   const purchaseMonths = useMemo(() => getInvoiceMonthStates(invoices, selectedFy, "purchase"), [invoices, selectedFy]);
 
@@ -616,7 +717,15 @@ export function InvoiceTrackingWorkspace({
   const saleCovered = saleCounts.received + saleCounts.nil;
   const purchaseCovered = purchaseCounts.received + purchaseCounts.nil;
 
-  const renderMonthGrid = (label: string, months: typeof saleMonths) => (
+  useEffect(() => {
+    setSelectedMonth(null);
+  }, [selectedFy]);
+
+  const renderMonthGrid = (
+    label: string,
+    invoiceType: "sale" | "purchase",
+    months: typeof saleMonths,
+  ) => (
     <div className="client-profile-invoice-month-card">
       <div className="flex items-center justify-between gap-3">
         <h4>{label}</h4>
@@ -628,22 +737,34 @@ export function InvoiceTrackingWorkspace({
       </div>
       <div className="client-profile-month-mini-grid">
         {months.map((month) => (
-          <span key={`${label}-${month.key}`} data-status={month.status} title={`${month.label}: ${month.status}`}>
-            {month.label}
-          </span>
+          <button
+            key={`${label}-${month.key}`}
+            type="button"
+            data-status={month.status}
+            data-selected={selectedMonth?.key === month.key && selectedMonth.invoiceType === invoiceType ? "true" : "false"}
+            title={`${month.label}: ${month.status}`}
+            onClick={() => setSelectedMonth((current) => (
+              current?.key === month.key && current.invoiceType === invoiceType
+                ? null
+                : { ...month, invoiceType }
+            ))}
+          >
+            <span>{month.label}</span>
+            <small>{month.status === "Nil / No Invoice" ? "Nil" : month.status}</small>
+          </button>
         ))}
       </div>
     </div>
   );
 
   return (
-    <section className="client-profile-card">
+    <section className="client-profile-card client-profile-invoice-section">
       <div className="client-profile-card-header">
         <div>
           <p className="client-profile-kicker">Invoice Tracking</p>
           <h2>FY {selectedFy} month coverage</h2>
         </div>
-        <button type="button" className="client-profile-primary-button" onClick={onAddInvoice}>
+        <button type="button" className="client-profile-primary-button" onClick={() => onAddInvoice()}>
           <FileText className="h-4 w-4" />
           <span>Update Months</span>
         </button>
@@ -662,10 +783,62 @@ export function InvoiceTrackingWorkspace({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {renderMonthGrid("Sale Invoices", saleMonths)}
-        {renderMonthGrid("Purchase Invoices", purchaseMonths)}
+      <div className="client-profile-invoice-legend" aria-label="Invoice status legend">
+        {[
+          ["Received", "Invoice information received"],
+          ["Pending", "Still awaited"],
+          ["Partial / Issue", "Incomplete or needs attention"],
+          ["Nil / No Invoice", "Confirmed no invoice"],
+        ].map(([label, detail]) => (
+          <span key={label} data-status={label}>
+            <i />
+            <span><strong>{label}</strong><small>{detail}</small></span>
+          </span>
+        ))}
       </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        {renderMonthGrid("Sale Invoices", "sale", saleMonths)}
+        {renderMonthGrid("Purchase Invoices", "purchase", purchaseMonths)}
+      </div>
+
+      <AnimatePresence initial={false}>
+        {selectedMonth && (
+          <motion.div
+            className="client-profile-invoice-detail"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+          >
+            <div>
+              <span className="client-profile-status-pill" data-status={selectedMonth.status}>{selectedMonth.status}</span>
+              <h3>{selectedMonth.invoiceType === "sale" ? "Sale" : "Purchase"} · {selectedMonth.label}</h3>
+              <p>
+                {selectedMonth.receivedVia
+                  ? `Received via ${selectedMonth.receivedVia}.`
+                  : selectedMonth.status === "Pending"
+                    ? "No receipt source has been recorded."
+                    : "Receipt source not recorded."}
+                {selectedMonth.remarks ? ` ${selectedMonth.remarks}` : ""}
+              </p>
+              {selectedMonth.timestamp > 0 && <small>Updated {formatDateTime(new Date(selectedMonth.timestamp).toISOString())}</small>}
+            </div>
+            <button
+              type="button"
+              className="client-profile-secondary-button"
+              onClick={() => onAddInvoice({
+                invoiceType: selectedMonth.invoiceType,
+                monthKey: selectedMonth.key,
+                status: selectedMonth.status,
+                receivedVia: selectedMonth.receivedVia,
+                remarks: selectedMonth.remarks,
+              })}
+            >
+              Update this month
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </section>
   );
 }
@@ -699,7 +872,7 @@ export function CpcbUploadSummary({
     .slice(0, 6);
 
   return (
-    <section className="client-profile-card">
+    <section className="client-profile-card client-profile-cpcb-section">
       <div className="client-profile-card-header">
         <div>
           <p className="client-profile-kicker">CPCB Upload Data</p>
@@ -713,9 +886,10 @@ export function CpcbUploadSummary({
 
       <div className="client-profile-upload-metrics">
         <div className="client-profile-upload-total">
+          <span className="client-profile-upload-icon"><Upload className="h-5 w-5" /></span>
           <span>{numberText(totals.total, " MT")}</span>
-          <p>Total Uploaded</p>
-          <small>{numberText(totals.invoiceCount)} invoices uploaded</small>
+          <p>Total quantity recorded</p>
+          <small>{numberText(totals.invoiceCount)} invoices in CPCB upload records</small>
         </div>
         {[
           ["CAT-I", totals.cat1],
@@ -730,11 +904,21 @@ export function CpcbUploadSummary({
         ))}
       </div>
 
-      <div className="mt-5 rounded-2xl border border-base overflow-hidden">
+      <div className="client-profile-upload-history">
+        <div className="client-profile-upload-history-head">
+          <div><p>Recent records</p><span>Recorded independently from invoice tracking and FY targets.</span></div>
+          {latestUploads.length > 0 && <span>{latestUploads.length} shown</span>}
+        </div>
         {latestUploads.length === 0 ? (
-          <div className="client-profile-empty-inline">
-            <Upload className="h-4 w-4" />
-            <p>No CPCB upload quantities recorded for this FY.</p>
+          <div className="client-profile-upload-empty">
+            <span><Upload className="h-5 w-5" /></span>
+            <div>
+              <p>No upload records for FY {selectedFy}</p>
+              <small>Record the first CPCB upload when portal quantities are available.</small>
+            </div>
+            <button type="button" className="client-profile-secondary-button" onClick={onAddUpload}>
+              Add first upload
+            </button>
           </div>
         ) : (
           latestUploads.map((record) => (
@@ -770,7 +954,27 @@ export function AnnualReturnTracker({
 }) {
   const status = annualReturnLabel(annualReturn?.status);
   const nextFy = selectedFy.replace(/^(\d{4})-(\d{2})$/, (_, start: string) => `${Number(start) + 1}-${String(Number(start) + 2).slice(-2)}`);
-  const statusOptions: Array<AnnualReturnRecord["status"]> = ["Not Started", "In Progress", "Ready to File", "Filed"];
+  const statusOptions: Array<AnnualReturnRecord["status"]> = ["Not Started", "In Progress", "Ready to File", "Filed", "Verified"];
+  const [filingDate, setFilingDate] = useState(annualReturn?.filingDate?.slice(0, 10) || "");
+  const [acknowledgement, setAcknowledgement] = useState(annualReturn?.acknowledgeNumber || "");
+  const [filingEditorStatus, setFilingEditorStatus] = useState<"Filed" | "Verified" | null>(null);
+
+  useEffect(() => {
+    setFilingDate(annualReturn?.filingDate?.slice(0, 10) || "");
+    setAcknowledgement(annualReturn?.acknowledgeNumber || "");
+  }, [annualReturn?.acknowledgeNumber, annualReturn?.filingDate, selectedFy]);
+
+  const statusReason = status === "Verified"
+    ? "The filed return has been reviewed and verified."
+    : status === "Filed"
+      ? "The annual return has been filed; verification is the next stage."
+      : status === "Ready to File"
+        ? "Preparation is complete and the return can proceed to filing."
+        : status === "In Progress"
+          ? "Activity has started for this financial year."
+          : status === "Not Required This FY"
+            ? `No filing is required for this FY. Continue the cycle in FY ${nextFy}.`
+            : "No annual return activity has been recorded for this FY.";
 
   return (
     <section className="client-profile-card">
@@ -811,48 +1015,134 @@ export function AnnualReturnTracker({
         </div>
       )}
 
-      <div className="client-profile-return-status-grid">
-        {statusOptions.map((option) => (
-          <button
-            key={option}
-            type="button"
-            data-active={annualReturnLabel(option) === status ? "true" : "false"}
-            onClick={() => onSaveStatus(option)}
-          >
-            {option === "Filed" ? <CheckCircle2 className="h-4 w-4" /> : <ClockIcon status={option} />}
-            <span>{annualReturnLabel(option)}</span>
+      <div className="client-profile-return-current">
+        <span><CalendarCheck className="h-5 w-5" /></span>
+        <div>
+          <small>Current stage</small>
+          <h3>{status}</h3>
+          <p>{statusReason}</p>
+        </div>
+      </div>
+
+      <div className="client-profile-return-timeline" aria-label="Annual return stages">
+        {statusOptions.map((option, index) => {
+          const activeIndex = statusOptions.indexOf(status as AnnualReturnRecord["status"]);
+          const done = activeIndex >= 0 && index < activeIndex;
+          const active = option === status;
+          return (
+            <button
+              key={option}
+              type="button"
+              data-active={active ? "true" : "false"}
+              data-done={done ? "true" : "false"}
+              onClick={() => {
+                if (option === "Filed" || option === "Verified") {
+                  setFilingEditorStatus(option);
+                  return;
+                }
+                onSaveStatus(option);
+              }}
+            >
+              <span>{done || active && (option === "Filed" || option === "Verified") ? <CheckCircle2 className="h-4 w-4" /> : <ClockIcon status={option} />}</span>
+              <small>Step {index + 1}</small>
+              <strong>{option}</strong>
+            </button>
+          );
+        })}
+      </div>
+
+      {(status === "Filed" || status === "Verified") && (
+        <div className="client-profile-filing-summary">
+          <div>
+            <p>Filing details</p>
+            <span>{annualReturn?.filingDate ? formatDate(annualReturn.filingDate) : "Filing date not recorded"}</span>
+          </div>
+          <div>
+            <p>Acknowledgement</p>
+            <span>{annualReturn?.acknowledgeNumber || "Not recorded"}</span>
+          </div>
+          <button type="button" className="client-profile-secondary-button" onClick={() => setFilingEditorStatus(status as "Filed" | "Verified")}>
+            Edit details
           </button>
-        ))}
+        </div>
+      )}
+
+      <div className="client-profile-return-footer">
         <button
           type="button"
           data-active={status === "Not Required This FY" ? "true" : "false"}
           onClick={() => onSaveStatus("Not Required This FY", { remarks: "Registered in current FY. Reminder: file Annual Return next FY." })}
         >
           <ShieldCheck className="h-4 w-4" />
-          <span>Not Required This FY</span>
+          <span><strong>Not Required This FY</strong><small>Use only when filing is not applicable for this cycle.</small></span>
         </button>
-      </div>
-
-      <div className="client-profile-return-meta">
         <div>
-          <p>Filing Date</p>
-          <span>{annualReturn?.filingDate ? formatDate(annualReturn.filingDate) : "Not filed"}</span>
-        </div>
-        <div>
-          <p>Acknowledgement</p>
-          <span>{annualReturn?.acknowledgeNumber || "Not recorded"}</span>
-        </div>
-        <div>
-          <p>Next FY Reminder</p>
-          <span>{status === "Not Required This FY" ? `File Annual Return next FY ${nextFy}` : "Follow standard FY cycle"}</span>
+          <span>{annualReturn?.updatedAt ? `Updated ${formatDateTime(annualReturn.updatedAt)}` : "No status update recorded"}</span>
+          {annualReturn?.remarks && <p>{annualReturn.remarks}</p>}
         </div>
       </div>
 
-      {annualReturn?.remarks && (
-        <div className="client-profile-note-body mt-4">
-          <Bell className="mt-0.5 h-4 w-4 text-faint" />
-          <p>{annualReturn.remarks}</p>
-        </div>
+      {typeof document !== "undefined" && createPortal(
+        <AnimatePresence>
+          {filingEditorStatus && (
+            <motion.div
+              className="client-profile-action-sheet-root"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              role="dialog"
+              aria-modal="true"
+              aria-label={`${filingEditorStatus} annual return`}
+            >
+              <button
+                type="button"
+                className="client-profile-action-sheet-backdrop"
+                onClick={() => setFilingEditorStatus(null)}
+                aria-label="Close filing details"
+              />
+              <motion.form
+                className="client-profile-filing-sheet"
+                initial={{ y: "105%", scale: 0.97 }}
+                animate={{ y: 0, scale: 1 }}
+                exit={{ y: "105%", scale: 0.98 }}
+                transition={{ type: "spring", stiffness: 420, damping: 38, mass: 0.9 }}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  onSaveStatus(filingEditorStatus, {
+                    filingDate: filingDate || null,
+                    acknowledgeNumber: acknowledgement.trim(),
+                  });
+                  setFilingEditorStatus(null);
+                }}
+              >
+                <div className="client-profile-filing-sheet-handle" />
+                <div className="client-profile-filing-sheet-header">
+                  <div>
+                    <small>Annual Return · FY {selectedFy}</small>
+                    <h3>Mark as {filingEditorStatus}</h3>
+                    <p>Confirm the filing reference before updating this stage.</p>
+                  </div>
+                  <span><CalendarCheck className="h-5 w-5" /></span>
+                </div>
+                <div className="client-profile-filing-sheet-fields">
+                  <label>
+                    <span>Filing date</span>
+                    <input type="date" value={filingDate} onChange={(event) => setFilingDate(event.target.value)} required={filingEditorStatus === "Filed"} />
+                  </label>
+                  <label>
+                    <span>Acknowledgement number</span>
+                    <input value={acknowledgement} onChange={(event) => setAcknowledgement(event.target.value)} placeholder="Enter acknowledgement" />
+                  </label>
+                </div>
+                <div className="client-profile-filing-sheet-actions">
+                  <button type="button" className="client-profile-secondary-button" onClick={() => setFilingEditorStatus(null)}>Cancel</button>
+                  <button type="submit" className="client-profile-primary-button">Save as {filingEditorStatus}</button>
+                </div>
+              </motion.form>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body,
       )}
     </section>
   );
@@ -867,13 +1157,13 @@ export function RegistrationDetails({
   client,
   customFieldDefinitions,
   isPWP,
-  legalName,
+  onEdit,
   registrationSignal,
 }: {
   client: Client;
   customFieldDefinitions: ClientCustomFieldDefinition[];
   isPWP: boolean;
-  legalName: string;
+  onEdit: () => void;
   registrationSignal: RegistrationSignal;
 }) {
   const registrationFieldLabels = new Set([
@@ -889,81 +1179,169 @@ export function RegistrationDetails({
     .filter((field) => field.value.trim());
 
   const fields = [
-    { label: "Company Name", value: client.companyName },
-    !isPWP && legalName ? { label: "Legal Name", value: legalName } : null,
-    { label: "Client Type", value: client.category },
-    client.gstNumber ? { label: "GST", value: client.gstNumber } : null,
-    !isPWP && client.registrationNumber ? { label: "Registration Number", value: client.registrationNumber } : null,
-    client.state ? { label: "State", value: client.state } : null,
-    client.address ? { label: "Address", value: client.address } : null,
+    !isPWP && client.registrationNumber ? { label: "CPCB Registration Number", value: client.registrationNumber } : null,
     registrationSignal ? { label: registrationSignal.label, value: formatDate(registrationSignal.date.toISOString()) } : null,
     ...relevantCustomFields,
   ].filter(Boolean) as Array<{ label: string; value: string }>;
 
   return (
-    <section className="client-profile-card">
+    <section className="client-profile-card client-profile-registration-section">
       <div className="client-profile-card-header">
         <div>
           <p className="client-profile-kicker">Registration Details</p>
-          <h2>{isPWP ? "PWP profile fields" : "PIBO portal identity"}</h2>
+          <h2>{isPWP ? "PWP registration record" : "CPCB registration record"}</h2>
+          <span>Permanent registration information and recorded approval details.</span>
         </div>
+        <button type="button" className="client-profile-secondary-button" onClick={onEdit}>
+          <Pencil className="h-4 w-4" />
+          <span>Edit registration</span>
+        </button>
       </div>
-      <div className="client-profile-registration-grid">
-        {fields.map((field) => (
-          <div key={`${field.label}-${field.value}`}>
-            <p>{field.label}</p>
-            <span>{field.value}</span>
+      {fields.length > 0 ? (
+        <div className="client-profile-registration-record">
+          <div className="client-profile-registration-emblem"><ShieldCheck className="h-6 w-6" /></div>
+          <div className="client-profile-registration-grid">
+            {fields.map((field, index) => (
+              <div key={`${field.label}-${field.value}`} data-primary={index === 0 ? "true" : "false"}>
+                <p>{field.label}</p>
+                <span>{field.value}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="client-profile-registration-empty">
+          <ShieldCheck className="h-5 w-5" />
+          <div>
+            <p>No registration details recorded</p>
+            <span>Add the CPCB registration number and relevant registration dates.</span>
+          </div>
+          <button type="button" className="client-profile-primary-button" onClick={onEdit}>Add details</button>
+        </div>
+      )}
     </section>
   );
 }
 
 export function ComplianceStatusPanel({
   annualReturn,
-  billing,
   fyData,
   invoices,
   isPWP,
+  onSectionChange,
   selectedFy,
   uploadRecords,
 }: {
   annualReturn: AnnualReturnRecord | null;
-  billing: Billing | null;
   fyData?: FYRecord;
   invoices: InvoiceTrackingRecord[];
   isPWP: boolean;
+  onSectionChange: (section: ComplianceSectionId) => void;
   selectedFy: string;
   uploadRecords: UploadRecord[];
 }) {
   const coverage = buildInvoiceCoverageSummary(invoices, selectedFy);
   const uploadedTotal = uploadRecords.reduce((sum, record) => sum + uploadTotal(record), 0);
+  const coveredMonths = coverage.sale.doneCount + coverage.purchase.doneCount;
+  const hasMeaningfulFyData = hasMeaningfulFyRecord(fyData);
   const checks = [
-    { label: "Annual Return", value: annualReturnLabel(annualReturn?.status), done: annualReturn?.status === "Filed" || annualReturn?.status === "Verified" || annualReturn?.status === "Not Required This FY" },
-    { label: "Invoice Coverage", value: `${coverage.sale.doneCount + coverage.purchase.doneCount}/24 months`, done: coverage.sale.doneCount + coverage.purchase.doneCount >= 12 },
-    { label: "CPCB Upload Quantity", value: `${numberText(uploadedTotal)} MT`, done: uploadedTotal > 0 },
-    { label: isPWP ? "FY Credits" : "FY Targets", value: fyData ? "Recorded" : "Missing", done: Boolean(fyData) },
-    { label: "Billing", value: billing ? billing.paymentStatus : "Not generated", done: Boolean(billing) },
+    {
+      id: "annualReturn" as const,
+      label: "Annual Return",
+      value: annualReturnLabel(annualReturn?.status),
+      detail: annualReturn?.status === "Verified" ? "Filing cycle complete" : "Open the tracker to continue the filing workflow",
+      done: annualReturn?.status === "Filed" || annualReturn?.status === "Verified" || annualReturn?.status === "Not Required This FY",
+      tone: annualReturn?.status === "Verified" ? "green" : "blue",
+      state: annualReturn?.status === "Filed" || annualReturn?.status === "Verified" || annualReturn?.status === "Not Required This FY"
+        ? "complete"
+        : annualReturn?.status === "In Progress" || annualReturn?.status === "Ready to File"
+          ? "in-progress"
+          : "action",
+      stateLabel: annualReturn?.status === "Filed" || annualReturn?.status === "Verified" || annualReturn?.status === "Not Required This FY"
+        ? "Complete"
+        : annualReturnLabel(annualReturn?.status),
+    },
+    {
+      id: "invoiceTracking" as const,
+      label: "Invoice Coverage",
+      value: `${coveredMonths}/24 months`,
+      detail: `${coverage.sale.doneCount}/12 sale · ${coverage.purchase.doneCount}/12 purchase`,
+      done: coveredMonths === 24,
+      tone: "amber",
+      state: coveredMonths === 24 ? "complete" : coveredMonths > 0 ? "in-progress" : "action",
+      stateLabel: coveredMonths === 24 ? "Complete" : coveredMonths > 0 ? "In progress" : "Action needed",
+    },
+    {
+      id: "cpcbUpload" as const,
+      label: "CPCB Upload Data",
+      value: uploadRecords.length ? `${uploadRecords.length} record${uploadRecords.length === 1 ? "" : "s"}` : "Not recorded",
+      detail: uploadRecords.length ? `${numberText(uploadedTotal)} MT recorded independently` : "No CPCB upload entry for this FY",
+      done: uploadRecords.length > 0,
+      tone: "purple",
+      state: uploadRecords.length > 0 ? "recorded" : "action",
+      stateLabel: uploadRecords.length > 0 ? "Recorded" : "Action needed",
+    },
+    {
+      id: "targetsCredits" as const,
+      label: isPWP ? "FY Credits" : "FY Targets",
+      value: hasMeaningfulFyData ? "Recorded" : "Not recorded",
+      detail: isPWP ? "Generated, sold and remaining credits" : "Target, achieved and remaining values",
+      done: hasMeaningfulFyData,
+      tone: "teal",
+      state: hasMeaningfulFyData ? "recorded" : "action",
+      stateLabel: hasMeaningfulFyData ? "Recorded" : "Action needed",
+    },
   ];
+  const completeCount = checks.filter((check) => check.done).length;
+  const readiness = Math.round((completeCount / checks.length) * 100);
+  const nextAction = checks.find((check) => !check.done);
 
   return (
-    <section className="client-profile-card">
-      <div className="client-profile-card-header">
+    <section className="client-profile-card client-profile-compliance-overview">
+      <div className="client-profile-overview-hero">
         <div>
-          <p className="client-profile-kicker">Compliance Status</p>
-          <h2>Action readiness for FY {selectedFy}</h2>
+          <p className="client-profile-kicker">Compliance Overview</p>
+          <h2>FY {selectedFy} readiness</h2>
+          <span>{completeCount} of {checks.length} areas have recorded or completed data.</span>
+          {nextAction ? (
+            <button type="button" onClick={() => onSectionChange(nextAction.id)}>
+              <span>Recommended next</span>
+              <strong>{nextAction.label}</strong>
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          ) : (
+            <p className="client-profile-overview-complete"><CheckCircle2 className="h-4 w-4" /> All compliance areas are ready.</p>
+          )}
+        </div>
+        <div
+          className="client-profile-overview-ring"
+          style={{ background: `conic-gradient(#007aff ${readiness * 3.6}deg, rgba(120,120,128,0.14) 0)` }}
+          role="img"
+          aria-label={`${readiness}% readiness`}
+        >
+          <div><strong>{readiness}%</strong><span>ready</span></div>
         </div>
       </div>
-      <div className="client-profile-status-checks">
+
+      <div className="client-profile-overview-checks">
         {checks.map((check) => (
-          <div key={check.label} data-done={check.done ? "true" : "false"}>
+          <button
+            key={check.label}
+            type="button"
+            data-done={check.done ? "true" : "false"}
+            data-state={check.state}
+            data-tone={check.tone}
+            onClick={() => onSectionChange(check.id)}
+          >
             <span>{check.done ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}</span>
             <div>
               <p>{check.label}</p>
-              <small>{check.value}</small>
+              <strong>{check.value}</strong>
+              <small>{check.detail}</small>
             </div>
-          </div>
+            <em>{check.stateLabel}</em>
+            <ChevronRight className="h-4 w-4" />
+          </button>
         ))}
       </div>
     </section>
@@ -972,18 +1350,22 @@ export function ComplianceStatusPanel({
 
 export function BillingWorkflowPanel({
   acceptedQuotations,
+  linkedQuotations,
   billing,
   clientCategory,
   onCreateDirectBill,
   onCreateFromQuotation,
+  onOpenQuotation,
   onOpenQuotations,
   selectedFy,
 }: {
   acceptedQuotations: QuotationSummary[];
+  linkedQuotations: QuotationSummary[];
   billing: Billing | null;
   clientCategory: string;
   onCreateDirectBill: () => void;
   onCreateFromQuotation: (quotation: QuotationSummary) => void;
+  onOpenQuotation: (quotation: QuotationSummary) => void;
   onOpenQuotations: () => void;
   selectedFy: string;
 }) {
@@ -1054,6 +1436,49 @@ export function BillingWorkflowPanel({
             <ChevronLeft className="h-4 w-4 rotate-180" />
             <span>Open Quotations</span>
           </button>
+        )}
+      </div>
+
+      <div className="client-profile-financial-quotation-list">
+        <div className="client-profile-financial-subhead">
+          <div>
+            <p>Linked quotations</p>
+            <span>Only quotations explicitly linked to this client and financial year appear here.</span>
+          </div>
+          <button
+            type="button"
+            className="client-profile-secondary-button"
+            onClick={() => linkedQuotations.length === 1 ? onOpenQuotation(linkedQuotations[0]) : onOpenQuotations()}
+          >
+            <Receipt className="h-4 w-4" />
+            <span>
+              {linkedQuotations.length === 0
+                ? "Add Quotation"
+                : linkedQuotations.length === 1
+                ? `Open ${linkedQuotations[0].quotationNumber || "Quotation"}`
+                : "View Linked Quotations"}
+            </span>
+          </button>
+        </div>
+        {linkedQuotations.length === 0 ? (
+          <div className="client-profile-financial-empty-row">
+            <AlertCircle className="h-4 w-4" />
+            <span>No linked quotation for FY {selectedFy}</span>
+          </div>
+        ) : (
+          <div className="client-profile-financial-linked-list">
+            {linkedQuotations.slice(0, 6).map((quotation) => (
+              <button key={quotation._id} type="button" onClick={() => onOpenQuotation(quotation)}>
+                <span className="client-profile-financial-neutral-icon"><Receipt className="h-4 w-4" /></span>
+                <div>
+                  <strong>{quotation.quotationNumber || quotation.clientName}</strong>
+                  <small>{quotation.status}</small>
+                </div>
+                <b>{formatCurrency(quotation.grandTotal || 0)}</b>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            ))}
+          </div>
         )}
       </div>
     </section>

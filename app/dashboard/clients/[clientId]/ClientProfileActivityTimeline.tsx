@@ -1,15 +1,13 @@
 "use client";
 
-import React from "react";
-import { Activity } from "lucide-react";
+import React, { useMemo } from "react";
+import { Activity, ChevronRight, Clock3 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import {
   ACTIVITY_FILTERS,
   ACTIVITY_RANGES,
-  activityColors,
   activityIcon,
-  CollapsibleSectionHeader,
   FilterRail,
   type ActivityFilter,
   type ActivityItem,
@@ -17,9 +15,6 @@ import {
 } from "./ClientProfileSupport";
 
 type ClientProfileActivityTimelineProps = {
-  selectedFy: string;
-  open: boolean;
-  onToggle: () => void;
   activityWindowHelpText: string;
   activityEmptyText: string;
   activitiesTotal: number;
@@ -32,17 +27,13 @@ type ClientProfileActivityTimelineProps = {
   activityLoadingMore: boolean;
   activityHasMore: boolean;
   filteredActivities: ActivityItem[];
-  listRef: React.RefObject<HTMLDivElement | null>;
-  handleActivityScroll: (event: React.UIEvent<HTMLDivElement>) => void;
+  loadMoreActivities: () => void;
   getActivityFyChip: (activity: ActivityItem) => { label: string; className: string };
   getActivityActionLabel: (activity: ActivityItem) => string | null;
   handleActivityAction: (activity: ActivityItem) => void;
 };
 
 export default function ClientProfileActivityTimeline({
-  selectedFy,
-  open,
-  onToggle,
   activityWindowHelpText,
   activityEmptyText,
   activitiesTotal,
@@ -55,44 +46,73 @@ export default function ClientProfileActivityTimeline({
   activityLoadingMore,
   activityHasMore,
   filteredActivities,
-  listRef,
-  handleActivityScroll,
+  loadMoreActivities,
   getActivityFyChip,
   getActivityActionLabel,
   handleActivityAction,
 }: ClientProfileActivityTimelineProps) {
+  const groupedActivities = useMemo(() => {
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const dateKey = (value: Date) => `${value.getFullYear()}-${value.getMonth()}-${value.getDate()}`;
+    const todayKey = dateKey(today);
+    const yesterdayKey = dateKey(yesterday);
+    const groups = new Map<string, { label: string; events: ActivityItem[] }>();
+
+    filteredActivities.forEach((event) => {
+      const date = new Date(event.date);
+      const key = dateKey(date);
+      const label = key === todayKey
+        ? "Today"
+        : key === yesterdayKey
+          ? "Yesterday"
+          : new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(date);
+      const group = groups.get(key) || { label, events: [] };
+      group.events.push(event);
+      groups.set(key, group);
+    });
+
+    return Array.from(groups.values());
+  }, [filteredActivities]);
+  const formatActivityTime = (value: string) => new Intl.DateTimeFormat("en-IN", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+
   return (
-    <div className="client-profile-card overflow-hidden !p-0">
-      <div className="px-5 py-4 border-b border-base space-y-3">
-        <CollapsibleSectionHeader
-          title="Activity Timeline"
-          subtitle={`${activityWindowHelpText} FY-tagged events are highlighted and global events stay neutral.`}
-          open={open}
-          onToggle={onToggle}
-          trailing={<span className="text-xs bg-surface text-muted px-2 py-0.5 rounded-full">{activitiesTotal.toLocaleString("en-IN")} events</span>}
-        />
-        {open && (
-          <div className="space-y-3">
+    <div className="client-profile-card client-profile-activity-card overflow-hidden !p-0">
+      <div className="client-profile-activity-header">
+        <div className="client-profile-activity-heading">
+          <span><Clock3 className="h-4 w-4" /></span>
+          <div>
+            <p className="client-profile-kicker">Client History</p>
+            <h2>Activity Timeline</h2>
+            <small>{activityWindowHelpText}</small>
+          </div>
+          <em>{activitiesTotal.toLocaleString("en-IN")} events</em>
+        </div>
+        <div className="client-profile-activity-filters">
             <FilterRail
               label="Window"
               value={activityRange}
               options={ACTIVITY_RANGES}
               onChange={setActivityRange}
               tone="neutral"
+              dense
             />
             <FilterRail
               label="Type"
               value={activityFilter}
               options={ACTIVITY_FILTERS}
               onChange={setActivityFilter}
-              tone="brand"
+              tone="neutral"
+              dense
             />
-          </div>
-        )}
+        </div>
       </div>
 
-      {open && (
-        <>
+      <>
           {activityError ? (
             <div className="px-5 py-4">
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
@@ -110,53 +130,56 @@ export default function ClientProfileActivityTimeline({
               <p className="text-sm text-muted">{activityEmptyText}.</p>
             </div>
           ) : (
-            <div ref={listRef} onScroll={handleActivityScroll} className="max-h-[440px] overflow-y-auto">
-              <div className="divide-y divide-soft">
-                {filteredActivities.map((event) => (
-                  <div
-                    key={event.id}
-                    className={`flex items-start gap-3 px-5 py-3.5 transition-colors ${
-                      event.financialYear === selectedFy
-                        ? "bg-brand-50/35 dark:bg-neutral-800/45"
-                        : "hover:bg-surface bg-surface/40"
-                    }`}
-                  >
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${activityColors[event.color] || "bg-surface text-muted"}`}>{activityIcon(event.type)}</div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-medium text-default leading-snug truncate">{event.label}</p>
-                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0 ${getActivityFyChip(event).className}`}>{getActivityFyChip(event).label}</span>
-                          {event.badge && <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0 ${event.badgeColor || "bg-surface text-muted"}`}>{event.badge}</span>}
-                        </div>
-                      </div>
-                      <p className="text-xs text-muted mt-0.5 truncate">{event.detail}</p>
-                      <div className="flex flex-wrap items-center justify-between gap-2 mt-0.5">
-                        <p className="text-xs text-faint">{formatDate(event.date)}</p>
-                        {getActivityActionLabel(event) && (
-                          <button type="button" onClick={() => handleActivityAction(event)} className="text-[11px] font-medium text-brand-600 hover:text-brand-700">
-                            {getActivityActionLabel(event)}
-                          </button>
-                        )}
-                      </div>
-                    </div>
+            <div className="client-profile-activity-groups">
+              {groupedActivities.map((group, groupIndex) => (
+                <section key={group.label} className="client-profile-activity-group" data-current={groupIndex === 0 && group.label === "Today" ? "true" : undefined}>
+                  <h3>{group.label}<span>{group.events.length}</span></h3>
+                  <div className="client-profile-activity-list">
+                    {group.events.map((event, eventIndex) => {
+                      const actionLabel = getActivityActionLabel(event);
+                      const fyChip = getActivityFyChip(event);
+                      const showStatusBadge = Boolean(event.badge && event.badge !== "Document");
+                      const content = (
+                        <>
+                          <span className="client-profile-activity-icon" data-color={event.color}>{activityIcon(event.type)}</span>
+                          <div className="client-profile-activity-copy">
+                            <div>
+                              <strong>{event.label}</strong>
+                              <time dateTime={event.date}>{formatActivityTime(event.date)}</time>
+                            </div>
+                            <p>{event.detail}</p>
+                            <div className="client-profile-activity-meta">
+                              <span className="client-profile-activity-badges">
+                                {event.financialYear && <i className={fyChip.className}>{fyChip.label}</i>}
+                                {showStatusBadge && <i className={event.badgeColor || "bg-surface text-muted"}>{event.badge}</i>}
+                              </span>
+                            <small>{formatDate(event.date)}{actionLabel ? ` · ${actionLabel}` : ""}</small>
+                            </div>
+                          </div>
+                          {actionLabel && <ChevronRight className="client-profile-activity-chevron h-4 w-4" />}
+                        </>
+                      );
+                      return actionLabel ? (
+                        <button key={event.id} type="button" style={{ "--activity-index": eventIndex } as React.CSSProperties} onClick={() => handleActivityAction(event)}>{content}</button>
+                      ) : (
+                        <div key={event.id} style={{ "--activity-index": eventIndex } as React.CSSProperties}>{content}</div>
+                      );
+                    })}
                   </div>
-                ))}
-                {activityLoadingMore && (
-                  <div className="py-3 flex items-center justify-center">
-                    <LoadingSpinner />
-                  </div>
-                )}
-                {!activityLoadingMore && !activityHasMore && filteredActivities.length > 0 && (
-                  <div className="px-5 py-3 text-center">
-                    <span className="text-xs text-muted">You&apos;ve reached the end of this activity list.</span>
-                  </div>
+                </section>
+              ))}
+              <div className="client-profile-activity-footer">
+                {activityLoadingMore ? (
+                  <LoadingSpinner />
+                ) : activityHasMore ? (
+                  <button type="button" className="client-profile-secondary-button" onClick={loadMoreActivities}>Load more activity</button>
+                ) : (
+                  <span>You&apos;ve reached the end of this activity history.</span>
                 )}
               </div>
             </div>
           )}
-        </>
-      )}
+      </>
     </div>
   );
 }

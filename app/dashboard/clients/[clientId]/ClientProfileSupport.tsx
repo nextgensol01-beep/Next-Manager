@@ -7,7 +7,10 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ClipboardCheck,
   Copy,
+  FileText,
+  FolderOpen,
   Mail,
   MailCheck,
   Pencil,
@@ -17,6 +20,7 @@ import {
   Send,
   Target,
   Trash2,
+  Upload,
   Wallet,
   X,
   Zap,
@@ -79,12 +83,14 @@ export interface FYRecord {
 export interface Billing {
   _id: string; clientId: string; financialYear: string; totalAmount: number;
   govtCharges: number; consultancyCharges: number; targetCharges: number; otherCharges: number;
-  notes?: string; totalPaid: number; pendingAmount: number; paymentStatus: string;
+  notes?: string; dueDate?: string; invoiceNumber?: string; invoiceDate?: string; invoiceAmount?: number;
+  totalPaid: number; pendingAmount: number; paymentStatus: string;
   updatedAt?: string; createdAt?: string;
 }
 
 export interface Payment {
   _id: string; clientId: string; amountPaid: number; paymentType?: "billing" | "advance";
+  source?: "direct" | "advance_application";
   paymentDate: string; paymentMode: string; referenceNumber: string; notes?: string; financialYear?: string;
 }
 
@@ -122,7 +128,7 @@ export interface Document {
   uploadedDate: string;
 }
 
-export type ActivityCategory = "credits" | "financial-year" | "billing" | "payments" | "emails" | "recycle-bin";
+export type ActivityCategory = "compliance" | "financial" | "communications" | "documents" | "system";
 export type ActivityRange = "7d" | "30d" | "year";
 
 export interface ActivityItem {
@@ -137,7 +143,7 @@ export interface ActivityItem {
   badge?: string;
   badgeColor?: string;
   entityId?: string;
-  entityType?: "billing" | "payment" | "financial-year" | "email" | "trash";
+  entityType?: "billing" | "payment" | "financial-year" | "annual-return" | "invoice" | "upload" | "quotation" | "document" | "email" | "trash";
   recordType?: string;
   actionSearch?: string;
 }
@@ -177,12 +183,11 @@ export const CAT_IDS = ["1", "2", "3", "4"] as const;
 export const CREDIT_TYPES = ["RECYCLING", "EOL"] as const;
 export const ACTIVITY_FILTERS = [
   { id: "all", label: "All" },
-  { id: "credits", label: "Credits" },
-  { id: "financial-year", label: "FY" },
-  { id: "billing", label: "Billing" },
-  { id: "payments", label: "Payments" },
-  { id: "emails", label: "Emails" },
-  { id: "recycle-bin", label: "Recycle Bin" },
+  { id: "compliance", label: "Compliance" },
+  { id: "financial", label: "Financial" },
+  { id: "communications", label: "Communications" },
+  { id: "documents", label: "Documents" },
+  { id: "system", label: "System" },
 ] as const;
 export type ActivityFilter = typeof ACTIVITY_FILTERS[number]["id"];
 export const ACTIVITY_RANGES = [
@@ -347,6 +352,11 @@ export const activityIcon = (type: string) => {
   if (type === "target_set") return <Target className="w-3.5 h-3.5" />;
   if (type === "credits_set") return <Zap className="w-3.5 h-3.5" />;
   if (type === "billing_created") return <Receipt className="w-3.5 h-3.5" />;
+  if (type === "quotation_updated") return <Receipt className="w-3.5 h-3.5" />;
+  if (type === "annual_return_updated") return <ClipboardCheck className="w-3.5 h-3.5" />;
+  if (type === "invoice_tracking_updated") return <FileText className="w-3.5 h-3.5" />;
+  if (type === "cpcb_upload_recorded") return <Upload className="w-3.5 h-3.5" />;
+  if (type === "document_linked") return <FolderOpen className="w-3.5 h-3.5" />;
   if (type === "payment_received" || type === "advance_payment_received") return <Wallet className="w-3.5 h-3.5" />;
   if (type === "email_draft") return <MailCheck className="w-3.5 h-3.5" />;
   if (type === "email_sent") return <Send className="w-3.5 h-3.5" />;
@@ -655,18 +665,7 @@ export function FilterRail<T extends string>({
                         : "glass-pill-active"
                       : ""
                   }`}
-                  style={
-                    active && neutralActive
-                      ? {
-                          background: "rgba(15,23,42,0.88)",
-                          borderColor: "rgba(100,116,139,0.50)",
-                          color: "#ffffff",
-                          boxShadow: "0 0 0 1px rgba(15,23,42,0.30), 0 4px 16px rgba(15,23,42,0.28)",
-                        }
-                      : dense
-                        ? { minHeight: "1.75rem", paddingInline: "0.625rem" }
-                        : undefined
-                  }
+                  style={dense ? { minHeight: "1.75rem", paddingInline: "0.625rem" } : undefined}
                 >
                   {option.label}
                 </button>
