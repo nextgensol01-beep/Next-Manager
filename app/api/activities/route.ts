@@ -14,6 +14,7 @@ import Invoice from "@/models/Invoice";
 import UploadRecord from "@/models/UploadRecord";
 import Quotation from "@/models/Quotation";
 import DocumentRecord from "@/models/Document";
+import ActivityEvent from "@/models/ActivityEvent";
 
 type ActivityRecord = {
   id: string;
@@ -165,7 +166,7 @@ export async function GET(req: NextRequest) {
       .lean() as { companyName?: string } | null;
     const clientName = typeof client?.companyName === "string" ? client.companyName.trim() : "";
 
-    const [transactions, fyRecords, annualReturns, invoices, uploads, quotations, documents, billings, payments, emailLogs, deletedRecords] = await Promise.all([
+    const [transactions, fyRecords, annualReturns, invoices, uploads, quotations, documents, billings, payments, emailLogs, deletedRecords, persistedEvents] = await Promise.all([
       CreditTransaction.find({
         $or: [{ fromClientId: clientId }, { toClientId: clientId }],
       }).lean(),
@@ -198,9 +199,41 @@ export async function GET(req: NextRequest) {
           { recordType: "creditTransaction", "data.toClientId": clientId },
         ],
       }).lean(),
+      ActivityEvent.find({ clientId }).sort({ occurredAt: -1 }).lean(),
     ]);
 
     const activities: ActivityRecord[] = [];
+    const persistedRelatedIds = new Set(
+      persistedEvents.flatMap((event) => (
+        Array.isArray(event.relatedEntityIds) ? event.relatedEntityIds.map(String) : []
+      ))
+    );
+    const persistedDocumentOriginIds = new Set(
+      persistedEvents
+        .filter((event) => ["document_uploaded", "document_linked", "document_migrated", "document_restored"].includes(event.type))
+        .flatMap((event) => (
+          Array.isArray(event.relatedEntityIds) ? event.relatedEntityIds.map(String) : []
+        ))
+    );
+
+    persistedEvents.forEach((event) => {
+      activities.push({
+        id: `event-${String(event._id)}`,
+        category: event.category,
+        type: event.type,
+        label: event.label,
+        detail: event.detail,
+        date: readDate(event.occurredAt),
+        color: event.color || "blue",
+        financialYear: event.financialYear || undefined,
+        badge: event.badge || undefined,
+        badgeColor: event.badgeColor || undefined,
+        entityId: event.entityId || undefined,
+        entityType: event.entityType as ActivityRecord["entityType"] | undefined,
+        recordType: event.recordType || undefined,
+        actionSearch: event.actionSearch || undefined,
+      });
+    });
 
     transactions.forEach((tx) => {
       const txRecord = tx as unknown as Record<string, unknown>;
@@ -378,11 +411,18 @@ export async function GET(req: NextRequest) {
 
     documents.forEach((record) => {
       const item = record as unknown as Record<string, unknown>;
+      if (persistedDocumentOriginIds.has(String(item._id || ""))) return;
+      const documentSource = typeof item.source === "string" ? item.source : "manual-link";
+      const documentLabel = documentSource === "website-upload"
+        ? "Document Uploaded"
+        : documentSource === "migration"
+          ? "Document Migrated"
+          : "Document Linked";
       activities.push({
         id: `document-${String(item._id || Math.random())}`,
         category: "documents",
-        type: "document_linked",
-        label: "Document Linked",
+        type: documentSource === "website-upload" ? "document_uploaded" : documentSource === "migration" ? "document_migrated" : "document_linked",
+        label: documentLabel,
         detail: typeof item.documentName === "string" ? item.documentName : "Client document",
         date: readDate(item.updatedAt || item.uploadedDate || item.createdAt),
         color: "blue",
@@ -466,9 +506,33 @@ export async function GET(req: NextRequest) {
     deletedRecords.forEach((record) => {
       const deletedRecord = record as unknown as Record<string, unknown>;
       const recordType = typeof deletedRecord.recordType === "string" ? deletedRecord.recordType : "unknown";
+      if (
+        recordType === "document" &&
+        (
+          persistedRelatedIds.has(String(deletedRecord._id || "")) ||
+          persistedRelatedIds.has(String(deletedRecord.recordId || ""))
+        )
+      ) return;
       const rawData = deletedRecord.data && typeof deletedRecord.data === "object"
         ? deletedRecord.data as Record<string, unknown>
         : {};
+      if (recordType === "document") {
+        const source = rawData.source === "website-upload" ? "website-upload" : "manual-link";
+        const originalDate = readDate(rawData.uploadedDate || rawData.createdAt);
+        if (originalDate) {
+          activities.push({
+            id: `legacy-document-origin-${String(deletedRecord.recordId || deletedRecord._id || Math.random())}`,
+            category: "documents",
+            type: source === "website-upload" ? "document_uploaded" : "document_linked",
+            label: source === "website-upload" ? "Document Uploaded" : "Document Linked",
+            detail: typeof rawData.documentName === "string" ? rawData.documentName : "Client document",
+            date: originalDate,
+            color: source === "website-upload" ? "emerald" : "blue",
+            badge: "Historical",
+            badgeColor: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+          });
+        }
+      }
       const financialYear = extractFinancialYear(rawData.financialYear);
       const label = recycleBinLabels[recordType] || "Record moved to recycle bin";
       const detailParts = [
@@ -478,7 +542,7 @@ export async function GET(req: NextRequest) {
 
       activities.push({
         id: `trash-${String(deletedRecord._id || Math.random())}`,
-        category: "system",
+        category: recordType === "document" ? "documents" : "system",
         type: `deleted_${recordType}`,
         label,
         detail: detailParts.join(" · "),

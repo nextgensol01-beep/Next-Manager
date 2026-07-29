@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useMotionValue, useReducedMotion, useScroll, useSpring } from "framer-motion";
 import { FINANCIAL_YEARS, formatCurrency, formatDate, PAYMENT_MODES } from "@/lib/utils";
 import { buildInvoiceCoverageSummary } from "@/lib/invoiceCoverage";
@@ -19,6 +20,7 @@ import ClientProfileActivityTimeline from "./ClientProfileActivityTimeline";
 import ClientProfileBillingPayments, { FinancialOverviewPanel } from "./ClientProfileBillingPayments";
 import ClientProfileFinancialSummary from "./ClientProfileFinancialSummary";
 import ClientProfileModals from "./ClientProfileModals";
+import DocumentUploadModal from "./DocumentUploadModal";
 import {
   ClientProfileHeader,
   CompanyOverview,
@@ -98,6 +100,7 @@ import {
   type Billing,
   type Client,
   type Document,
+  type DocumentCategory,
   type EmailOption,
   type FYRecord,
   type InvoiceTrackingRecord,
@@ -138,6 +141,8 @@ const CUSTOM_FIELD_ICON_COMPONENTS = {
 } as const;
 
 export default function ClientProfilePage() {
+  const { data: session } = useSession();
+  const canManageDocuments = (session?.user as { role?: string } | undefined)?.role === "admin";
   const { clientId } = useParams<{ clientId: string }>();
   const router = useRouter();
   const profileScrollY = useMotionValue(0);
@@ -203,7 +208,8 @@ export default function ClientProfilePage() {
   const [secondaryNavCollapsed, setSecondaryNavCollapsed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [docModal, setDocModal] = useState(false);
-  const [docForm, setDocForm] = useState({ documentName: "", driveLink: "" });
+  const [docForm, setDocForm] = useState({ documentName: "", driveLink: "", category: "other" as DocumentCategory });
+  const [documentUploadOpen, setDocumentUploadOpen] = useState(false);
   const [docModalMode, setDocModalMode] = useState<"create" | "edit">("create");
   const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null);
   const [documentPendingDelete, setDocumentPendingDelete] = useState<Document | null>(null);
@@ -539,6 +545,30 @@ export default function ClientProfilePage() {
         setActivityLoadingMore(false);
       });
   }, [activityHasMore, activityLoading, activityLoadingMore, activityOffset, fetchActivitiesPage]);
+
+  const refreshActivities = useCallback(async () => {
+    const requestId = activityRequestIdRef.current + 1;
+    activityRequestIdRef.current = requestId;
+    try {
+      await fetchActivitiesPage({ offset: 0, replace: true, requestId });
+    } catch (error) {
+      if (requestId !== activityRequestIdRef.current) return;
+      setActivityError(error instanceof Error ? error.message : "Unable to refresh recent activity.");
+    }
+  }, [fetchActivitiesPage]);
+
+  const activityRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleActivityRefresh = useCallback(() => {
+    if (activityRefreshTimerRef.current) clearTimeout(activityRefreshTimerRef.current);
+    activityRefreshTimerRef.current = setTimeout(() => {
+      activityRefreshTimerRef.current = null;
+      void refreshActivities();
+    }, 250);
+  }, [refreshActivities]);
+
+  useEffect(() => () => {
+    if (activityRefreshTimerRef.current) clearTimeout(activityRefreshTimerRef.current);
+  }, []);
 
   const billing  = allBillings.find((b) => b.financialYear === selectedFy) || null;
   const payments = allPayments.filter((p) => p.financialYear === selectedFy);
@@ -1030,20 +1060,20 @@ export default function ClientProfilePage() {
     setDocModal(false);
     setDocModalMode("create");
     setEditingDocumentId(null);
-    setDocForm({ documentName: "", driveLink: "" });
+    setDocForm({ documentName: "", driveLink: "", category: "other" });
   };
 
   const openCreateDocument = () => {
     setDocModalMode("create");
     setEditingDocumentId(null);
-    setDocForm({ documentName: "", driveLink: "" });
+    setDocForm({ documentName: "", driveLink: "", category: "other" });
     setDocModal(true);
   };
 
   const openEditDocument = (document: Document) => {
     setDocModalMode("edit");
     setEditingDocumentId(document._id);
-    setDocForm({ documentName: document.documentName, driveLink: document.driveLink });
+    setDocForm({ documentName: document.documentName, driveLink: document.driveLink, category: document.category || "other" });
     setDocModal(true);
   };
 
@@ -1081,6 +1111,7 @@ export default function ClientProfilePage() {
         return [...prev, saved];
       });
       closeDocumentModal();
+      scheduleActivityRefresh();
       toast.success(editingDocumentId ? "Document updated!" : "Document added!");
       navigateToClientSection({ primary: "documents", secondary: "all" });
     } finally {
@@ -1101,7 +1132,30 @@ export default function ClientProfilePage() {
       setDocuments((prev) => prev.filter((d) => d._id !== documentToDelete._id));
       setDocumentPendingDelete(null);
       invalidate("/api/trash", "/api/documents");
+      scheduleActivityRefresh();
       toast.success("Document moved to recycle bin");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const migrateDocument = async (document: Document) => {
+    setBusyAction(`document-migrate-${document._id}`);
+    try {
+      const response = await fetch(`/api/documents/${document._id}/migrate`, { method: "POST" });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        toast.error(data?.error || "Could not migrate this Drive link.");
+        return;
+      }
+      const migrated = Array.isArray(data?.documents) ? data.documents as Document[] : [];
+      setDocuments((current) => [
+        ...migrated,
+        ...current.filter((entry) => entry._id !== document._id),
+      ]);
+      invalidate("/api/documents", "/api/activities");
+      scheduleActivityRefresh();
+      toast.success(migrated.length > 1 ? `${migrated.length} files migrated to managed Drive storage.` : "Document migrated to managed Drive storage.");
     } finally {
       setBusyAction(null);
     }
@@ -2070,12 +2124,14 @@ export default function ClientProfilePage() {
     return null;
   };
   const selectedActivityRangeLabel = ACTIVITY_RANGES.find((range) => range.id === activityRange)?.label || "Last Month";
-  const activityWindowHelpText = activityRange === "year"
-    ? `Showing the full activity history available for FY ${selectedFy}.`
-    : `Showing activity from the ${selectedActivityRangeLabel.toLowerCase()} within FY ${selectedFy}.`;
-  const activityEmptyText = activityRange === "year"
-    ? `No activity recorded for this filter in FY ${selectedFy}`
-    : `No activity recorded in the ${selectedActivityRangeLabel.toLowerCase()} for this filter`;
+  const activityWindowHelpText = activityFilter === "documents"
+    ? `${selectedActivityRangeLabel}: uploads, links, edits, migrations, deletions, and restores across this client.`
+    : activityRange === "year"
+      ? `All available FY ${selectedFy} activity plus client-wide events.`
+      : `${selectedActivityRangeLabel} for FY ${selectedFy}, including client-wide events.`;
+  const activityEmptyText = activityFilter === "documents"
+    ? `No document events recorded for ${selectedActivityRangeLabel.toLowerCase()}`
+    : `No ${activityFilter === "all" ? "" : `${activityFilter} `}activity recorded for ${selectedActivityRangeLabel.toLowerCase()}`;
   const getActivityFyChip = (activity: ActivityItem) => {
     if (activity.financialYear === selectedFy) {
       return {
@@ -2697,34 +2753,39 @@ export default function ClientProfilePage() {
     ? FINANCIAL_NAV.filter((item) => item.id !== "quotations")
     : FINANCIAL_NAV;
 
-  const matchesDocument = (document: Document, pattern: RegExp) => pattern.test(document.documentName);
+  const matchesDocument = (document: Document, category: DocumentCategory, pattern: RegExp) => (
+    document.category ? document.category === category : pattern.test(document.documentName)
+  );
   const complianceDocumentPattern = /(annual|return|cpcb|compliance|registration|approval|certificate|epr|portal)/i;
   const financialDocumentPattern = /(bill|billing|payment|receipt|quotation|quote|financial|ledger)/i;
   const invoiceDocumentPattern = /(invoice|sale|purchase)/i;
   const certificateDocumentPattern = /(certificate|certification|approval|registration)/i;
   const documentGroups: Record<DocumentsSectionId, Document[]> = {
     all: documents,
-    compliance: documents.filter((document) => matchesDocument(document, complianceDocumentPattern)),
-    financial: documents.filter((document) => matchesDocument(document, financialDocumentPattern)),
-    invoices: documents.filter((document) => matchesDocument(document, invoiceDocumentPattern)),
-    certificates: documents.filter((document) => matchesDocument(document, certificateDocumentPattern)),
+    compliance: documents.filter((document) => matchesDocument(document, "compliance", complianceDocumentPattern)),
+    financial: documents.filter((document) => matchesDocument(document, "financial", financialDocumentPattern)),
+    invoices: documents.filter((document) => matchesDocument(document, "invoices", invoiceDocumentPattern)),
+    certificates: documents.filter((document) => matchesDocument(document, "certificates", certificateDocumentPattern)),
     other: documents.filter((document) => ![
-      complianceDocumentPattern,
-      financialDocumentPattern,
-      invoiceDocumentPattern,
-      certificateDocumentPattern,
-    ].some((pattern) => matchesDocument(document, pattern))),
+      matchesDocument(document, "compliance", complianceDocumentPattern),
+      matchesDocument(document, "financial", financialDocumentPattern),
+      matchesDocument(document, "invoices", invoiceDocumentPattern),
+      matchesDocument(document, "certificates", certificateDocumentPattern),
+    ].some(Boolean)),
   };
   const renderDocumentsPanel = (documentsForSection: Document[]) => (
     <DocumentsSection
       documents={documentsForSection}
+      canManageDocuments={canManageDocuments}
       open={sectionOpen.documents}
       busyAction={busyAction}
       hasLinkedContacts={hasLinkedContacts}
       onToggle={() => toggleSection("documents")}
       onAdd={openCreateDocument}
+      onUpload={() => setDocumentUploadOpen(true)}
       onEdit={openEditDocument}
       onDelete={setDocumentPendingDelete}
+      onMigrate={(document) => void migrateDocument(document)}
       onLinkContact={openBasicEdit}
     />
   );
@@ -2745,7 +2806,10 @@ export default function ClientProfilePage() {
       activityRange={activityRange}
       setActivityRange={setActivityRange}
       activityFilter={activityFilter}
-      setActivityFilter={setActivityFilter}
+      setActivityFilter={(filter) => {
+        setActivityFilter(filter);
+        setActiveTimelineSection(filter === "all" ? "all" : filter);
+      }}
       activityError={activityError}
       activityLoading={activityLoading}
       activityLoadingMore={activityLoadingMore}
@@ -3027,6 +3091,18 @@ export default function ClientProfilePage() {
       </div>
 
       <FloatingActionBar actions={quickActions} />
+      {canManageDocuments && (
+        <DocumentUploadModal
+          open={documentUploadOpen}
+          clientId={clientId}
+          onClose={() => setDocumentUploadOpen(false)}
+          onUploaded={(uploaded) => {
+            setDocuments((current) => [...uploaded, ...current]);
+            invalidate("/api/documents", "/api/activities");
+            scheduleActivityRefresh();
+          }}
+        />
+      )}
       <Modal
         open={Boolean(documentPendingDelete)}
         onClose={() => {

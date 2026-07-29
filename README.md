@@ -44,6 +44,13 @@ ADMIN_PASSWORD_HASH="\$2a\$12\$..."
 GOOGLE_CLIENT_ID=<your-client-id>.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=<your-client-secret>
 
+# Managed client document storage in Google Drive
+# Optional: defaults to GMAIL_OAUTH_CLIENT_ID / GMAIL_OAUTH_CLIENT_SECRET
+GOOGLE_DRIVE_CLIENT_ID=<drive-oauth-client-id>
+GOOGLE_DRIVE_CLIENT_SECRET=<drive-oauth-client-secret>
+GOOGLE_DRIVE_REFRESH_TOKEN=<drive-refresh-token>
+GOOGLE_DRIVE_ROOT_FOLDER_ID=<id-of-Nextgen-Client-Documents-folder>
+
 # Gmail API / Nodemailer email sender
 GMAIL_CLIENT_ID=<gmail-oauth-client-id>
 GMAIL_CLIENT_SECRET=<gmail-oauth-client-secret>

@@ -24,11 +24,13 @@ import {
   Pencil,
   Phone,
   Plus,
+  RefreshCw,
   Search,
   Shield,
   Smartphone,
   StickyNote,
   Trash2,
+  UploadCloud,
   User,
 } from "lucide-react";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
@@ -318,10 +320,13 @@ type DocumentsSectionProps = {
   open: boolean;
   busyAction: string | null;
   hasLinkedContacts: boolean;
+  canManageDocuments: boolean;
   onToggle: () => void;
   onAdd: () => void;
+  onUpload: () => void;
   onEdit: (document: Document) => void;
   onDelete: (document: Document) => void;
+  onMigrate: (document: Document) => void;
   onLinkContact: () => void;
 };
 
@@ -1310,10 +1315,13 @@ export function DocumentsSection({
   open,
   busyAction,
   hasLinkedContacts,
+  canManageDocuments,
   onToggle,
   onAdd,
+  onUpload,
   onEdit,
   onDelete,
+  onMigrate,
   onLinkContact,
 }: DocumentsSectionProps) {
   const [search, setSearch] = useState("");
@@ -1331,10 +1339,18 @@ export function DocumentsSection({
           <h2>{documents.length} linked document{documents.length === 1 ? "" : "s"}</h2>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={onAdd} className="client-profile-primary-button">
-            <Plus className="h-4 w-4" />
-            <span>Add</span>
-          </button>
+          {canManageDocuments && (
+            <>
+              <button type="button" onClick={onAdd} className="client-profile-primary-button">
+                <Plus className="h-4 w-4" />
+                <span>Add link</span>
+              </button>
+              <button type="button" onClick={onUpload} className="client-profile-primary-button">
+                <UploadCloud className="h-4 w-4" />
+                <span>Upload</span>
+              </button>
+            </>
+          )}
           <button type="button" onClick={onToggle} className="client-profile-icon-button" aria-label={open ? "Collapse documents" : "Expand documents"}>
             <motion.span animate={{ rotate: open ? 0 : -90 }} transition={{ duration: 0.16 }}>
               <ChevronDown className="h-4 w-4" />
@@ -1370,10 +1386,18 @@ export function DocumentsSection({
                 </span>
                 <p className="font-semibold text-default">No documents yet</p>
                 <div className="flex flex-wrap justify-center gap-2">
+                  {canManageDocuments && (
+                    <>
                   <button type="button" className="client-profile-primary-button" onClick={onAdd}>
                     <Plus className="h-4 w-4" />
-                    <span>Add Document</span>
+                    <span>Add Drive link</span>
                   </button>
+                  <button type="button" className="client-profile-primary-button" onClick={onUpload}>
+                    <UploadCloud className="h-4 w-4" />
+                    <span>Upload files</span>
+                  </button>
+                    </>
+                  )}
                   {!hasLinkedContacts && (
                     <button type="button" className="client-profile-secondary-button" onClick={onLinkContact}>
                       <User className="h-4 w-4" />
@@ -1391,9 +1415,28 @@ export function DocumentsSection({
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-default">{document.documentName}</p>
-                      <p className="text-xs text-faint">{formatDate(document.uploadedDate)}</p>
+                      <div className="client-profile-document-meta">
+                        <span>{document.category || "Other"}</span>
+                        {document.fileSize ? <span>{document.fileSize < 1048576 ? `${Math.round(document.fileSize / 1024)} KB` : `${(document.fileSize / 1048576).toFixed(1)} MB`}</span> : null}
+                        <span>{formatDate(document.uploadedDate)}</span>
+                      </div>
+                      {document.driveRelativePath && document.driveRelativePath !== document.documentName && (
+                        <p className="client-profile-document-path" title={document.driveRelativePath}>{document.driveRelativePath}</p>
+                      )}
                     </div>
                     <div className="client-profile-document-actions">
+                      {canManageDocuments && document.storageType !== "google-drive" && (
+                        <button
+                          type="button"
+                          disabled={busyAction === `document-migrate-${document._id}`}
+                          onClick={() => onMigrate(document)}
+                          className="client-profile-icon-button"
+                          title="Copy into managed Drive storage"
+                          aria-label={`Migrate ${document.documentName}`}
+                        >
+                          <RefreshCw className={`h-4 w-4 ${busyAction === `document-migrate-${document._id}` ? "animate-spin" : ""}`} />
+                        </button>
+                      )}
                       <a
                         href={document.driveLink}
                         target="_blank"
@@ -1403,18 +1446,22 @@ export function DocumentsSection({
                       >
                         <ExternalLink className="h-4 w-4" />
                       </a>
-                      <button type="button" onClick={() => onEdit(document)} className="client-profile-icon-button" aria-label={`Edit ${document.documentName}`}>
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busyAction === `document-${document._id}`}
-                        onClick={() => onDelete(document)}
-                        className="client-profile-icon-button client-profile-danger-icon"
-                        aria-label={`Delete ${document.documentName}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {canManageDocuments && (
+                        <>
+                          <button type="button" onClick={() => onEdit(document)} className="client-profile-icon-button" aria-label={`Edit ${document.documentName}`}>
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyAction === `document-${document._id}`}
+                            onClick={() => onDelete(document)}
+                            className="client-profile-icon-button client-profile-danger-icon"
+                            aria-label={`Delete ${document.documentName}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </article>
                 ))}

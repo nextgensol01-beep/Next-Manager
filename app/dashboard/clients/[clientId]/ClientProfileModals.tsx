@@ -10,6 +10,7 @@ import {
   CATS,
   CREDIT_TYPES,
   type Client,
+  type DocumentCategory,
   type EmailOption,
   type FYEntryForm,
   type FYRecord,
@@ -17,7 +18,7 @@ import {
 
 type SetState<T> = React.Dispatch<React.SetStateAction<T>>;
 
-type DocForm = { documentName: string; driveLink: string };
+type DocForm = { documentName: string; driveLink: string; category: DocumentCategory };
 type BillingForm = {
   financialYear: string;
   govtCharges: string;
@@ -158,6 +159,16 @@ export default function ClientProfileModals({
       <Modal open={docModal} onClose={closeDocumentModal} title={docModalMode === "edit" ? "Edit Document" : "Add Document"}>
         <form onSubmit={saveDocument} className="space-y-4">
           <div><label className="label">Document Name *</label><input className="input-field" value={docForm.documentName} onChange={(e) => setDocForm({ ...docForm, documentName: e.target.value })} required placeholder="e.g. Registration Certificate" /></div>
+          <div>
+            <label className="label">Website Category *</label>
+            <select className="input-field" value={docForm.category} onChange={(e) => setDocForm({ ...docForm, category: e.target.value as DocumentCategory })}>
+              <option value="compliance">Compliance</option>
+              <option value="financial">Financial</option>
+              <option value="invoices">Invoices</option>
+              <option value="certificates">Certificates</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
           <div><label className="label">Google Drive Link *</label><input className="input-field" type="url" value={docForm.driveLink} onChange={(e) => setDocForm({ ...docForm, driveLink: e.target.value })} required placeholder="https://drive.google.com/..." /></div>
           <div className="flex gap-2 pt-2">
             <button type="submit" className="btn-primary flex-1 justify-center" disabled={inlineSaving}>{inlineSaving ? "Saving..." : docModalMode === "edit" ? "Save Changes" : "Add Document"}</button>

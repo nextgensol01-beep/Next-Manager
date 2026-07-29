@@ -19,6 +19,8 @@ import {
   restoreLegacyContactRecord,
 } from "@/lib/server/client-contact-service";
 import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
+import { recordActivityEvent } from "@/lib/server/activity-events";
+import ActivityEvent from "@/models/ActivityEvent";
 
 type RestorableModel = mongoose.Model<Record<string, unknown>>;
 
@@ -38,7 +40,27 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await connectDB();
   const { id } = await params;
+  const trashRecord = await DeletedRecord.findById(id);
+  if (!trashRecord) return NextResponse.json({ error: "Not found" }, { status: 404 });
   await DeletedRecord.findByIdAndDelete(id);
+  if (trashRecord.recordType === "document") {
+    const data = trashRecord.data as Record<string, unknown>;
+    await recordActivityEvent({
+      clientId: String(data.clientId || ""),
+      category: "documents",
+      type: "document_permanently_deleted",
+      label: "Document Permanently Deleted",
+      detail: String(data.documentName || trashRecord.label),
+      color: "rose",
+      badge: "Permanent",
+      badgeColor: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
+      relatedEntityIds: [String(trashRecord.recordId), String(trashRecord._id)],
+    }, session);
+    await ActivityEvent.updateMany(
+      { clientId: String(data.clientId || ""), entityId: String(trashRecord._id), type: "document_deleted" },
+      { $unset: { entityId: 1, entityType: 1 } }
+    );
+  }
   return NextResponse.json({ success: true });
 }
 
@@ -83,7 +105,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Strip internal trash metadata; restore original data
     const { _id, __v, ...data } = rawData;
     void _id; void __v;
-    await Model.create(data);
+    const restored = await Model.create(data);
     if (
       (trashRecord.recordType === "billing" ||
         trashRecord.recordType === "invoice" ||
@@ -94,6 +116,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       await syncAnnualReturnStatus(data.clientId, data.financialYear);
     }
     await DeletedRecord.findByIdAndDelete(id);
+    if (trashRecord.recordType === "document") {
+      await recordActivityEvent({
+        clientId: String(data.clientId || ""),
+        category: "documents",
+        type: "document_restored",
+        label: "Document Restored",
+        detail: String(data.documentName || trashRecord.label),
+        color: "emerald",
+        badge: "Restored",
+        badgeColor: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
+        entityId: String(restored._id),
+        entityType: "document",
+        relatedEntityIds: [String(trashRecord.recordId), String(trashRecord._id), String(restored._id)],
+      }, session);
+      await ActivityEvent.updateMany(
+        { clientId: String(data.clientId || ""), entityId: String(trashRecord._id), type: "document_deleted" },
+        { $set: { entityId: String(restored._id), entityType: "document" } }
+      );
+    }
     return NextResponse.json({ success: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Restore failed";

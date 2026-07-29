@@ -125,8 +125,19 @@ export interface Document {
   _id: string;
   documentName: string;
   driveLink: string;
+  category?: DocumentCategory;
+  storageType?: "legacy-link" | "google-drive";
+  driveFileId?: string;
+  driveRelativePath?: string;
+  originalDriveLink?: string;
+  mimeType?: string;
+  fileSize?: number;
+  source?: "manual-link" | "website-upload" | "migration";
+  migrationStatus?: "legacy" | "pending" | "migrated" | "permission-required" | "unsupported" | "failed";
   uploadedDate: string;
 }
+
+export type DocumentCategory = "compliance" | "financial" | "invoices" | "certificates" | "other";
 
 export type ActivityCategory = "compliance" | "financial" | "communications" | "documents" | "system";
 export type ActivityRange = "7d" | "30d" | "year";
@@ -193,7 +204,7 @@ export type ActivityFilter = typeof ACTIVITY_FILTERS[number]["id"];
 export const ACTIVITY_RANGES = [
   { id: "7d", label: "Last 7 Days" },
   { id: "30d", label: "Last Month" },
-  { id: "year", label: "Whole Year" },
+  { id: "year", label: "All Time" },
 ] as const;
 export const ACTIVITY_PAGE_SIZE = 10;
 export const ACTIVITY_SCROLL_THRESHOLD = 120;
@@ -357,6 +368,10 @@ export const activityIcon = (type: string) => {
   if (type === "invoice_tracking_updated") return <FileText className="w-3.5 h-3.5" />;
   if (type === "cpcb_upload_recorded") return <Upload className="w-3.5 h-3.5" />;
   if (type === "document_linked") return <FolderOpen className="w-3.5 h-3.5" />;
+  if (type === "document_uploaded") return <Upload className="w-3.5 h-3.5" />;
+  if (type === "document_migrated" || type === "document_restored") return <FolderOpen className="w-3.5 h-3.5" />;
+  if (type === "document_updated") return <Pencil className="w-3.5 h-3.5" />;
+  if (type === "document_deleted" || type === "document_permanently_deleted") return <Trash2 className="w-3.5 h-3.5" />;
   if (type === "payment_received" || type === "advance_payment_received") return <Wallet className="w-3.5 h-3.5" />;
   if (type === "email_draft") return <MailCheck className="w-3.5 h-3.5" />;
   if (type === "email_sent") return <Send className="w-3.5 h-3.5" />;
