@@ -4,10 +4,12 @@ import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import Quotation from "@/models/Quotation";
 import QuotationRevision from "@/models/QuotationRevision";
+import Client from "@/models/Client";
 import { calculateQuotationGrandTotal, calculateQuotationItems } from "@/lib/quotationRules";
 import { quotationCreateSchema, quotationListQuerySchema, validationErrorMessage } from "@/lib/quotationValidation";
 import { expireStaleQuotations } from "@/lib/quotationWorkflow";
 import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
+import { findClientIdsByContactName } from "@/lib/server/client-contact-service";
 
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -40,11 +42,25 @@ export async function GET(req: NextRequest) {
   if (clientId) filter.clientId = clientId;
   if (search) {
     const safeSearch = escapeRegex(search);
+    const contactClientIds = await findClientIdsByContactName(search);
+    const contactClients = contactClientIds.length > 0
+      ? await Client.find({ clientId: { $in: contactClientIds } })
+          .select("companyName")
+          .lean() as Array<{ companyName?: string }>
+      : [];
+    const legacyClientNameMatches = contactClients
+      .map((client) => client.companyName?.trim())
+      .filter((companyName): companyName is string => Boolean(companyName))
+      .map((companyName) => ({
+        clientName: { $regex: escapeRegex(companyName), $options: "i" },
+      }));
     filter.$or = [
       { clientName: { $regex: safeSearch, $options: "i" } },
       { quotationNumber: { $regex: safeSearch, $options: "i" } },
       { financialYear: { $regex: safeSearch, $options: "i" } },
       { status: { $regex: safeSearch, $options: "i" } },
+      ...(contactClientIds.length > 0 ? [{ clientId: { $in: contactClientIds } }] : []),
+      ...legacyClientNameMatches,
     ];
   }
 

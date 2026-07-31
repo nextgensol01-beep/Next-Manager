@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   Plus, Search, Filter, FileText, MoreHorizontal,
@@ -38,13 +38,19 @@ const QUICK_FILTERS = [
 
 export default function QuotationsPage() {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const initialSearch = searchParams.get("search") || "";
+  const initialStatus = searchParams.get("status") || "all";
+  const initialFinancialYear = searchParams.get("financialYear") || "all";
+  const listReturnTo = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
   const { effectiveFinancialYear, isLoaded: financialYearLoaded } = useFinancialYearPreference();
   const [quotations, setQuotations] = useState<QuotationRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [fyFilter, setFyFilter] = useState("all");
+  const [search, setSearch] = useState(initialSearch);
+  const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
+  const [statusFilter, setStatusFilter] = useState(initialStatus);
+  const [fyFilter, setFyFilter] = useState(initialFinancialYear);
   const [creating, setCreating] = useState(false);
   const [newClientName, setNewClientName] = useState("");
   const [newFy, setNewFy] = useState(effectiveFinancialYear);
@@ -65,6 +71,25 @@ export default function QuotationsPage() {
     const timer = setTimeout(() => setDebouncedSearch(search), 350);
     return () => clearTimeout(timer);
   }, [search]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (debouncedSearch) params.set("search", debouncedSearch); else params.delete("search");
+    if (statusFilter !== "all") params.set("status", statusFilter); else params.delete("status");
+    if (fyFilter !== "all") params.set("financialYear", fyFilter); else params.delete("financialYear");
+    const nextQuery = params.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+    }
+  }, [debouncedSearch, fyFilter, pathname, router, searchParams, statusFilter]);
+
+  const quotationHref = useCallback((quotationId: string, action?: "print" | "email") => {
+    const params = new URLSearchParams();
+    if (action) params.set("action", action);
+    params.set("returnTo", listReturnTo);
+    return `/dashboard/quotations/${quotationId}?${params.toString()}`;
+  }, [listReturnTo]);
 
   // Client suggestions fetch
   useEffect(() => {
@@ -143,7 +168,7 @@ export default function QuotationsPage() {
         throw new Error(data?.error || `Failed to create quotation (${res.status})`);
       }
       const data = await res.json();
-      router.push(`/dashboard/quotations/${data._id}`);
+      router.push(quotationHref(data._id));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to create quotation");
     } finally {
@@ -157,7 +182,7 @@ export default function QuotationsPage() {
     if (res.ok) {
       const data = await res.json();
       toast.success("Quotation duplicated");
-      router.push(`/dashboard/quotations/${data._id}`);
+      router.push(quotationHref(data._id));
     } else {
       toast.error("Failed to duplicate quotation");
     }
@@ -168,7 +193,7 @@ export default function QuotationsPage() {
     const res = await fetch(`/api/quotations/${id}/create-revision`, { method: "POST" });
     if (res.ok) {
       toast.success("New revision created");
-      router.push(`/dashboard/quotations/${id}`);
+      router.push(quotationHref(id));
     } else {
       toast.error("Failed to create revision");
     }
@@ -356,7 +381,8 @@ export default function QuotationsPage() {
             <input
               className="input-field h-11 w-full text-sm sm:h-9"
               style={{ paddingLeft: "2.25rem" }}
-              placeholder="Search client, quote no., FY, status..."
+              placeholder="Search client, authorized person, quote no..."
+              aria-label="Search quotations by client, authorized person, quotation number, financial year, or status"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
@@ -410,7 +436,7 @@ export default function QuotationsPage() {
               {quotations.map(q => (
                 <article
                   key={q._id}
-                  onClick={() => router.push(`/dashboard/quotations/${q._id}`)}
+                  onClick={() => router.push(quotationHref(q._id))}
                   className="rounded-[20px] border border-base bg-[#f7f7f9] p-3.5 shadow-sm transition duration-200 active:scale-[0.99] dark:bg-white/[0.035]"
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -483,7 +509,7 @@ export default function QuotationsPage() {
                 {quotations.map(q => (
                   <tr
                     key={q._id}
-                    onClick={() => router.push(`/dashboard/quotations/${q._id}`)}
+                    onClick={() => router.push(quotationHref(q._id))}
                     className="hover:bg-surface cursor-pointer transition-colors group"
                   >
                     <td className="px-5 py-4">
@@ -527,7 +553,7 @@ export default function QuotationsPage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            router.push(`/dashboard/quotations/${q._id}`);
+                            router.push(quotationHref(q._id));
                           }}
                           className="p-1.5 rounded-lg hover:bg-surface transition-colors text-muted hover:text-default"
                           title="Open Editor"
@@ -596,7 +622,7 @@ export default function QuotationsPage() {
             <div className="grid grid-cols-1 gap-2">
               <button
                 onClick={() => {
-                  router.push(`/dashboard/quotations/${selectedQuotation._id}`);
+                  router.push(quotationHref(selectedQuotation._id));
                   setSelectedQuotation(null);
                 }}
                 className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-base hover:bg-surface text-sm font-medium transition-colors text-default"
@@ -638,7 +664,7 @@ export default function QuotationsPage() {
 
               <button
                 onClick={() => {
-                  router.push(`/dashboard/quotations/${selectedQuotation._id}?action=print`);
+                  router.push(quotationHref(selectedQuotation._id, "print"));
                   setSelectedQuotation(null);
                 }}
                 className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-base hover:bg-surface text-sm font-medium transition-colors text-default"
@@ -652,7 +678,7 @@ export default function QuotationsPage() {
               {canCreateQuotationEmailDraft(selectedQuotation.status) && (
                 <button
                   onClick={() => {
-                    router.push(`/dashboard/quotations/${selectedQuotation._id}?action=email`);
+                    router.push(quotationHref(selectedQuotation._id, "email"));
                     setSelectedQuotation(null);
                   }}
                   className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-base hover:bg-surface text-sm font-medium transition-colors text-default"

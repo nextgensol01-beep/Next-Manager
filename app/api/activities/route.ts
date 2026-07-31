@@ -135,6 +135,24 @@ const applyActivityFilters = (
   return applyDateRange(nextItems, range);
 };
 
+const withRecentRange = (
+  query: Record<string, unknown>,
+  cutoff: Date | null,
+  dateFields: string[]
+) => {
+  if (!cutoff) return query;
+  return {
+    $and: [
+      query,
+      {
+        $or: dateFields.map((field) => ({
+          [field]: { $gte: cutoff },
+        })),
+      },
+    ],
+  };
+};
+
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -160,46 +178,54 @@ export async function GET(req: NextRequest) {
     const category = rawCategory && ACTIVITY_CATEGORIES.has(rawCategory as ActivityRecord["category"])
       ? rawCategory as ActivityRecord["category"]
       : undefined;
+    const cutoff = range === "year"
+      ? null
+      : new Date(Date.now() - ((range === "7d" ? 7 : 30) * 24 * 60 * 60 * 1000));
 
     const client = await Client.findOne({ clientId })
       .select("companyName")
       .lean() as { companyName?: string } | null;
     const clientName = typeof client?.companyName === "string" ? client.companyName.trim() : "";
 
-    const [transactions, fyRecords, annualReturns, invoices, uploads, quotations, documents, billings, payments, emailLogs, deletedRecords, persistedEvents] = await Promise.all([
-      CreditTransaction.find({
-        $or: [{ fromClientId: clientId }, { toClientId: clientId }],
-      }).lean(),
-      FinancialYear.find({ clientId }).lean(),
-      AnnualReturn.find({ clientId }).lean(),
-      Invoice.find({ clientId }).lean(),
-      UploadRecord.find({ clientId }).lean(),
-      Quotation.find({ clientId }).lean(),
-      DocumentRecord.find({ clientId }).lean(),
-      Billing.find({ clientId }).lean(),
-      Payment.find({ clientId }).lean(),
-      EmailLog.find(clientName
-        ? {
-            $or: [
-              { clientId },
-              { clientName },
-            ],
-          }
-        : { clientId }
-      ).lean(),
-      DeletedRecord.find({
-        $or: [
-          {
-            recordType: {
-              $in: ["financialYear", "billing", "payment", "annualReturn", "uploadRecord", "invoice", "document"],
-            },
-            "data.clientId": clientId,
+    const emailQuery = clientName
+      ? {
+          $or: [
+            { clientId },
+            { clientName },
+          ],
+        }
+      : { clientId };
+    const deletedQuery = {
+      $or: [
+        {
+          recordType: {
+            $in: ["financialYear", "billing", "payment", "annualReturn", "uploadRecord", "invoice", "document"],
           },
-          { recordType: "creditTransaction", "data.fromClientId": clientId },
-          { recordType: "creditTransaction", "data.toClientId": clientId },
-        ],
-      }).lean(),
-      ActivityEvent.find({ clientId }).sort({ occurredAt: -1 }).lean(),
+          "data.clientId": clientId,
+        },
+        { recordType: "creditTransaction", "data.fromClientId": clientId },
+        { recordType: "creditTransaction", "data.toClientId": clientId },
+      ],
+    };
+
+    const [transactions, fyRecords, annualReturns, invoices, uploads, quotations, documents, billings, payments, emailLogs, latestEmailLog, deletedRecords, persistedEvents] = await Promise.all([
+      CreditTransaction.find(withRecentRange({
+        $or: [{ fromClientId: clientId }, { toClientId: clientId }],
+      }, cutoff, ["date", "createdAt"])).lean(),
+      FinancialYear.find(withRecentRange({ clientId }, cutoff, ["updatedAt", "createdAt"])).lean(),
+      AnnualReturn.find(withRecentRange({ clientId }, cutoff, ["updatedAt", "createdAt"])).lean(),
+      Invoice.find(withRecentRange({ clientId }, cutoff, ["updatedAt", "createdAt"])).lean(),
+      UploadRecord.find(withRecentRange({ clientId }, cutoff, ["updatedAt", "createdAt"])).lean(),
+      Quotation.find(withRecentRange({ clientId }, cutoff, ["updatedAt", "createdAt"])).lean(),
+      DocumentRecord.find(withRecentRange({ clientId }, cutoff, ["updatedAt", "uploadedDate", "createdAt"])).lean(),
+      Billing.find(withRecentRange({ clientId }, cutoff, ["updatedAt", "createdAt"])).lean(),
+      Payment.find(withRecentRange({ clientId }, cutoff, ["paymentDate", "updatedAt", "createdAt"])).lean(),
+      EmailLog.find(withRecentRange(emailQuery, cutoff, ["sentAt", "createdAt"])).lean(),
+      EmailLog.findOne(emailQuery).sort({ sentAt: -1, createdAt: -1 }).lean(),
+      DeletedRecord.find(withRecentRange(deletedQuery, cutoff, ["deletedAt"])).lean(),
+      ActivityEvent.find(withRecentRange({ clientId }, cutoff, ["occurredAt"]))
+        .sort({ occurredAt: -1 })
+        .lean(),
     ]);
 
     const activities: ActivityRecord[] = [];
@@ -477,7 +503,14 @@ export async function GET(req: NextRequest) {
       });
     });
 
-    emailLogs.forEach((emailLog) => {
+    const latestEmailRecord = Array.isArray(latestEmailLog) ? latestEmailLog[0] : latestEmailLog;
+    const timelineEmailLogs = latestEmailRecord && !emailLogs.some(
+      (emailLog) => String(emailLog._id) === String(latestEmailRecord._id)
+    )
+      ? [...emailLogs, latestEmailRecord]
+      : emailLogs;
+
+    timelineEmailLogs.forEach((emailLog) => {
       const emailRecord = emailLog as unknown as Record<string, unknown>;
       const emailType = typeof emailRecord.type === "string" ? emailRecord.type : "custom";
       const badge = emailTypeLabel[emailType] || emailTypeLabel.custom;

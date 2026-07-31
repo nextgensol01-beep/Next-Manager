@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import useSWR from "swr";
 import { useMotionValue, useReducedMotion, useScroll, useSpring } from "framer-motion";
 import { FINANCIAL_YEARS, formatCurrency, formatDate, PAYMENT_MODES } from "@/lib/utils";
 import { buildInvoiceCoverageSummary } from "@/lib/invoiceCoverage";
@@ -13,6 +14,10 @@ import { invalidate, useCache } from "@/lib/useCache";
 import ClientFormModal from "@/components/clients/ClientFormModal";
 import type { ClientFormData } from "@/components/clients/ClientFormModal";
 import { usePendingList } from "@/lib/usePendingList";
+import {
+  clientWorkspaceKey,
+  fetchClientWorkspace,
+} from "@/lib/clientWorkspaceCache";
 import type { ClientCustomFieldDefinition } from "@/lib/clientCustomFields";
 import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearState } from "@/app/providers";
@@ -120,6 +125,19 @@ type InvoiceType = (typeof INVOICE_TYPE_OPTIONS)[number]["id"];
 type ReceivedVia = InvoiceReceivedVia;
 type InvoiceStatus = InvoiceMonthStatus;
 
+type ClientWorkspacePayload = {
+  client: Client;
+  financialYears: FYRecord[];
+  documents: Document[];
+  billings: Billing[];
+  payments: Payment[];
+  invoices: InvoiceTrackingRecord[];
+  uploadRecords: UploadRecord[];
+  annualReturns: AnnualReturnRecord[];
+  failedSections: string[];
+  fetchedAt: string;
+};
+
 type ClientSectionDestination =
   | { primary: "overview" }
   | { primary: "compliance"; secondary: ComplianceSectionId }
@@ -141,7 +159,7 @@ const CUSTOM_FIELD_ICON_COMPONENTS = {
 } as const;
 
 export default function ClientProfilePage() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const canManageDocuments = (session?.user as { role?: string } | undefined)?.role === "admin";
   const { clientId } = useParams<{ clientId: string }>();
   const router = useRouter();
@@ -194,6 +212,28 @@ export default function ClientProfilePage() {
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const clientRef = useRef<Client | null>(null);
   const activityRequestIdRef = useRef(0);
+  const sessionScope = String(
+    session?.user?.email ||
+    (session?.user as { id?: string } | undefined)?.id ||
+    ""
+  );
+  const workspaceKey = clientWorkspaceKey(clientId, sessionScope);
+  const {
+    data: workspaceData,
+    error: workspaceError,
+    isLoading: workspaceLoading,
+    mutate: mutateWorkspace,
+  } = useSWR<ClientWorkspacePayload>(
+    sessionStatus === "authenticated" ? workspaceKey : null,
+    fetchClientWorkspace,
+    {
+      dedupingInterval: 10_000,
+      keepPreviousData: false,
+      revalidateIfStale: true,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+    }
+  );
 
   // UI state
   const [activePrimaryTab, setActivePrimaryTab] = useState<ClientProfileTabId>("overview");
@@ -337,107 +377,79 @@ export default function ClientProfilePage() {
     return fallback;
   }, []);
 
-  const fetchJson = useCallback(async <T,>(url: string, label: string) => {
-    const response = await fetch(url);
-    if (!response.ok) {
-      const message = await readErrorMessage(response, `Unable to load ${label}.`);
-      throw new Error(message);
-    }
-    return response.json() as Promise<T>;
-  }, [readErrorMessage]);
-
   const loadData = useCallback(async () => {
-
-    const fetchClientProfile = async () => {
-      const response = await fetch(`/api/clients/${clientId}`);
-      if (response.status === 404) return null;
-      if (!response.ok) {
-        const message = await readErrorMessage(response, "Unable to load client profile.");
-        throw new Error(message);
-      }
-      return response.json() as Promise<Client>;
-    };
-
     setLoading(true);
     setLoadError(null);
     setLoadWarning(null);
-
-    const results = await Promise.allSettled([
-      fetchClientProfile(),
-      fetchJson<FYRecord[]>(`/api/financial-year?clientId=${clientId}`, "financial years"),
-      fetchJson<Document[]>(`/api/documents?clientId=${clientId}`, "documents"),
-      fetchJson<Billing[]>(`/api/billing?clientId=${clientId}`, "billing"),
-      fetchJson<Payment[]>(`/api/payments?clientId=${clientId}`, "payments"),
-      fetchJson<InvoiceTrackingRecord[]>(`/api/invoices?clientId=${clientId}`, "invoice tracking"),
-      fetchJson<UploadRecord[]>(`/api/upload-records?clientId=${clientId}`, "uploaded records"),
-      fetchJson<AnnualReturnRecord[]>(`/api/annual-return?clientId=${clientId}`, "annual returns"),
-    ]);
-
-    const [clientResult, fyResult, docsResult, billingResult, paymentsResult, invoicesResult, uploadsResult, annualReturnResult] = results;
-    const failedSections: string[] = [];
-
-    if (clientResult.status === "fulfilled") {
-      setClient(clientResult.value);
-    } else {
-      failedSections.push("client profile");
+    try {
+      await mutateWorkspace();
+    } catch {
+      // The SWR error effect below preserves cached data and presents the error.
     }
+  }, [mutateWorkspace]);
 
-    if (fyResult.status === "fulfilled") {
-      setFyRecords(Array.isArray(fyResult.value) ? fyResult.value : []);
-    } else {
-      failedSections.push("financial years");
+  const refreshWorkspaceSilently = useCallback(() => {
+    void mutateWorkspace().catch(() => undefined);
+  }, [mutateWorkspace]);
+
+  useEffect(() => {
+    if (!workspaceData) return;
+
+    const failed = new Set(workspaceData.failedSections);
+    setClient(workspaceData.client || null);
+    if (!failed.has("financial years")) {
+      setFyRecords(Array.isArray(workspaceData.financialYears) ? workspaceData.financialYears : []);
     }
-
-    if (docsResult.status === "fulfilled") {
-      setDocuments(Array.isArray(docsResult.value) ? docsResult.value : []);
-    } else {
-      failedSections.push("documents");
+    if (!failed.has("documents")) {
+      setDocuments(Array.isArray(workspaceData.documents) ? workspaceData.documents : []);
     }
-
-    if (billingResult.status === "fulfilled") {
-      setAllBillings(Array.isArray(billingResult.value) ? billingResult.value : []);
-    } else {
-      failedSections.push("billing");
+    if (!failed.has("billing")) {
+      setAllBillings(Array.isArray(workspaceData.billings) ? workspaceData.billings : []);
     }
-
-    if (paymentsResult.status === "fulfilled") {
-      setAllPayments(Array.isArray(paymentsResult.value) ? paymentsResult.value : []);
-    } else {
-      failedSections.push("payments");
+    if (!failed.has("payments")) {
+      setAllPayments(Array.isArray(workspaceData.payments) ? workspaceData.payments : []);
     }
-
-    if (invoicesResult.status === "fulfilled") {
-      setAllInvoices(Array.isArray(invoicesResult.value) ? invoicesResult.value : []);
-    } else {
-      failedSections.push("invoice tracking");
+    if (!failed.has("invoice tracking")) {
+      setAllInvoices(Array.isArray(workspaceData.invoices) ? workspaceData.invoices : []);
     }
-
-    if (uploadsResult.status === "fulfilled") {
-      setAllUploadRecords(Array.isArray(uploadsResult.value) ? uploadsResult.value : []);
-    } else {
-      failedSections.push("uploaded records");
+    if (!failed.has("uploaded records")) {
+      setAllUploadRecords(Array.isArray(workspaceData.uploadRecords) ? workspaceData.uploadRecords : []);
     }
-
-    if (annualReturnResult.status === "fulfilled") {
-      setAnnualReturns(Array.isArray(annualReturnResult.value) ? annualReturnResult.value : []);
-    } else {
-      failedSections.push("annual returns");
+    if (!failed.has("annual returns")) {
+      setAnnualReturns(Array.isArray(workspaceData.annualReturns) ? workspaceData.annualReturns : []);
     }
-
-    if (clientResult.status === "rejected") {
-      if (!clientRef.current) {
-        setLoadError("Couldn't load this client profile right now. Please try again.");
-      } else {
-        setLoadWarning("The profile could not be refreshed completely. Showing the last loaded data.");
-      }
-    } else if (failedSections.length > 0) {
-      setLoadWarning(`Some sections could not be loaded: ${failedSections.filter((section) => section !== "client profile").join(", ")}. Showing available data.`);
-    }
-
+    setLoadError(null);
+    setLoadWarning(
+      workspaceData.failedSections.length > 0
+        ? `Some sections could not be loaded: ${workspaceData.failedSections.join(", ")}. Showing available data.`
+        : null
+    );
     setLoading(false);
-  }, [clientId, fetchJson, readErrorMessage, setAllBillings, setAllInvoices, setAllPayments, setAllUploadRecords]);
+  }, [
+    setAllBillings,
+    setAllInvoices,
+    setAllPayments,
+    setAllUploadRecords,
+    workspaceData,
+  ]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    if (!workspaceError) return;
+    if (!clientRef.current) {
+      setLoadError(
+        workspaceError instanceof Error
+          ? workspaceError.message
+          : "Couldn't load this client profile right now. Please try again."
+      );
+    } else {
+      setLoadWarning("The profile could not be refreshed completely. Showing the last loaded data.");
+    }
+    setLoading(false);
+  }, [workspaceError]);
+
+  useEffect(() => {
+    if (workspaceLoading && !workspaceData) setLoading(true);
+  }, [workspaceData, workspaceLoading]);
 
   useEffect(() => {
     if (!client) return;
@@ -878,29 +890,6 @@ export default function ClientProfilePage() {
     };
   }, [headerProgressTarget, profileScrollY]);
 
-  useEffect(() => {
-    if (!client) return;
-
-    const publishContextTitle = (progress: number) => {
-      const normalizedProgress = Math.max(0, Math.min(1, progress));
-      window.dispatchEvent(new CustomEvent("dashboard:context-title", {
-        detail: {
-          title: client.companyName,
-          subtitle: `${client.clientId} - ${client.category}`,
-          progress: normalizedProgress,
-        },
-      }));
-    };
-
-    publishContextTitle(headerProgress.get());
-    const unsubscribe = headerProgress.on("change", publishContextTitle);
-
-    return () => {
-      unsubscribe();
-      window.dispatchEvent(new CustomEvent("dashboard:context-title", { detail: null }));
-    };
-  }, [client, headerProgress]);
-
   const enterWorkspaceMode = useCallback((
     destination: ClientSectionDestination,
     options: { restoreTabPosition?: boolean } = {}
@@ -1110,6 +1099,7 @@ export default function ClientProfilePage() {
         }
         return [...prev, saved];
       });
+      refreshWorkspaceSilently();
       closeDocumentModal();
       scheduleActivityRefresh();
       toast.success(editingDocumentId ? "Document updated!" : "Document added!");
@@ -1132,6 +1122,7 @@ export default function ClientProfilePage() {
       setDocuments((prev) => prev.filter((d) => d._id !== documentToDelete._id));
       setDocumentPendingDelete(null);
       invalidate("/api/trash", "/api/documents");
+      refreshWorkspaceSilently();
       scheduleActivityRefresh();
       toast.success("Document moved to recycle bin");
     } finally {
@@ -1154,6 +1145,7 @@ export default function ClientProfilePage() {
         ...current.filter((entry) => entry._id !== document._id),
       ]);
       invalidate("/api/documents", "/api/activities");
+      refreshWorkspaceSilently();
       scheduleActivityRefresh();
       toast.success(migrated.length > 1 ? `${migrated.length} files migrated to managed Drive storage.` : "Document migrated to managed Drive storage.");
     } finally {
@@ -1274,6 +1266,7 @@ export default function ClientProfilePage() {
       savedRecords.forEach((saved, index) => optimisticOps[index]?.commit(saved));
       invalidate("/api/invoices");
       await refreshAnnualReturnForFy(invoiceForm.financialYear);
+      refreshWorkspaceSilently();
       toast.success(`${savedRecords.length} month${savedRecords.length === 1 ? "" : "s"} updated.`);
       navigateToClientSection({ primary: "compliance", secondary: "invoiceTracking" });
     } catch {
@@ -1346,6 +1339,7 @@ export default function ClientProfilePage() {
       commit(saved);
       invalidate("/api/upload-records");
       await refreshAnnualReturnForFy(payload.financialYear);
+      refreshWorkspaceSilently();
       toast.success("Upload record added!");
       navigateToClientSection({ primary: "compliance", secondary: "cpcbUpload" });
     } catch {
@@ -1533,6 +1527,7 @@ export default function ClientProfilePage() {
       };
       ops?.commit?.(safeCommit);
       await refreshAnnualReturnForFy(payload.financialYear);
+      refreshWorkspaceSilently();
       toast.success(editingBillingId ? "Billing updated!" : "Billing saved!");
       navigateToClientSection({ primary: "financial", secondary: "billing" });
     } catch {
@@ -1554,6 +1549,7 @@ export default function ClientProfilePage() {
         return;
       }
       commit();
+      refreshWorkspaceSilently();
       toast.success("Billing moved to recycle bin");
     } catch {
       rollback();
@@ -1653,6 +1649,7 @@ export default function ClientProfilePage() {
 
       const saved = await response.json();
       ops?.commit?.(saved);
+      refreshWorkspaceSilently();
       toast.success(editingPaymentId ? "Payment updated!" : "Payment recorded!");
       navigateToClientSection({ primary: "financial", secondary: "payments" });
     } catch {
@@ -1674,6 +1671,7 @@ export default function ClientProfilePage() {
         return;
       }
       commit();
+      refreshWorkspaceSilently();
       toast.success("Payment moved to recycle bin");
     } catch {
       rollback();
@@ -1749,6 +1747,7 @@ export default function ClientProfilePage() {
       closeFyModal();
       setSelectedFy(payload.financialYear);
       invalidate("/api/financial-year", "/api/dashboard", "/api/activities");
+      refreshWorkspaceSilently();
       toast.success(isPWP ? "Credit data saved!" : "FY data saved!");
       navigateToClientSection({ primary: "compliance", secondary: "targetsCredits" });
     } finally {
@@ -1790,6 +1789,7 @@ export default function ClientProfilePage() {
           : [...current, saved];
       });
       invalidate("/api/annual-return", "/api/dashboard", "/api/activities");
+      refreshWorkspaceSilently();
       const displayedStatus = saved.status === "Pending" ? "Not Started" : saved.status;
       toast.success(
         displayedStatus === status
@@ -2052,8 +2052,13 @@ export default function ClientProfilePage() {
         body: JSON.stringify({ ...data, persons: validPersons, removedPersonIds: removedIds }),
       });
       if (!r.ok) { toast.error("Failed to save"); return; }
-      const refreshed = await fetch(`/api/clients/${clientId}`).then((x) => x.json());
+      const refreshed = await r.json() as Client;
       setClient(refreshed);
+      await mutateWorkspace(
+        (current) => current ? { ...current, client: refreshed } : current,
+        { revalidate: false }
+      );
+      refreshWorkspaceSilently();
       invalidate("/api/clients");
       setEditModal(false);
       toast.success("Client updated!");
@@ -2754,7 +2759,7 @@ export default function ClientProfilePage() {
     : FINANCIAL_NAV;
 
   const matchesDocument = (document: Document, category: DocumentCategory, pattern: RegExp) => (
-    document.category ? document.category === category : pattern.test(document.documentName)
+    document.category === category || pattern.test(document.documentName)
   );
   const complianceDocumentPattern = /(annual|return|cpcb|compliance|registration|approval|certificate|epr|portal)/i;
   const financialDocumentPattern = /(bill|billing|payment|receipt|quotation|quote|financial|ledger)/i;
@@ -3099,6 +3104,7 @@ export default function ClientProfilePage() {
           onUploaded={(uploaded) => {
             setDocuments((current) => [...uploaded, ...current]);
             invalidate("/api/documents", "/api/activities");
+            refreshWorkspaceSilently();
             scheduleActivityRefresh();
           }}
         />

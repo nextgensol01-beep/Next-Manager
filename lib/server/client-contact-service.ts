@@ -57,6 +57,13 @@ export type ClientSummary = {
   state: string;
 };
 
+type ClientDocumentSummary = {
+  count: number;
+  latestName: string;
+  latestDate?: unknown;
+  categories: string[];
+};
+
 type ClientCustomFieldRecord = ClientCustomFieldDefinition & {
   _id?: MaybeId;
 };
@@ -167,6 +174,30 @@ async function getActiveClientCustomFields() {
   return (await ClientCustomField.find({ active: true })
     .sort({ order: 1, label: 1 })
     .lean()) as unknown as ClientCustomFieldRecord[];
+}
+
+async function getClientDocumentSummaryMap(clientIds: string[]) {
+  if (clientIds.length === 0) return new Map<string, ClientDocumentSummary>();
+  const rows = await AppDocument.aggregate([
+    { $match: { clientId: { $in: clientIds } } },
+    { $sort: { uploadedDate: -1, createdAt: -1 } },
+    {
+      $group: {
+        _id: "$clientId",
+        count: { $sum: 1 },
+        latestName: { $first: "$documentName" },
+        latestDate: { $first: "$uploadedDate" },
+        categories: { $addToSet: { $ifNull: ["$category", "other"] } },
+      },
+    },
+  ]) as Array<{ _id: string; count: number; latestName?: string; latestDate?: unknown; categories?: string[] }>;
+
+  return new Map(rows.map((row) => [row._id, {
+    count: row.count,
+    latestName: row.latestName || "",
+    latestDate: row.latestDate,
+    categories: row.categories || [],
+  }]));
 }
 
 async function getSearchableCustomFieldConditions(search: string) {
@@ -702,6 +733,25 @@ export async function findClientIdsByContactSearch(search: string) {
   return ClientContact.find({ personId: { $in: persons.map((person) => toIdString(person._id)) } }).distinct("clientId");
 }
 
+export async function findClientIdsByContactName(search: string) {
+  const term = search.trim();
+  if (!term) return [];
+
+  const persons = (await Person.find({
+    $or: buildSearchFieldConditions(["name"], term),
+  })
+    .select("_id")
+    .lean()) as Array<{ _id: MaybeId }>;
+
+  if (persons.length === 0) {
+    return [];
+  }
+
+  return ClientContact.find({
+    personId: { $in: persons.map((person) => toIdString(person._id)) },
+  }).distinct("clientId");
+}
+
 async function buildClientListQuery(options: {
   category?: string | null;
   state?: string | null;
@@ -792,10 +842,19 @@ export async function listClientsWithContactsPage(options: {
       .lean(),
     Client.countDocuments(query),
   ]);
-  const contactsMap = await getClientContactsMap(clients.map((client) => client.clientId));
+  const clientIds = clients.map((client) => client.clientId);
+  const [contactsMap, documentSummaryMap] = await Promise.all([
+    getClientContactsMap(clientIds),
+    getClientDocumentSummaryMap(clientIds),
+  ]);
   const items = clients.map((client) => ({
     ...client,
     contacts: contactsMap.get(client.clientId) || [],
+    documentSummary: documentSummaryMap.get(client.clientId) || {
+      count: 0,
+      latestName: "",
+      categories: [],
+    },
   }));
   const nextOffset = offset + items.length;
 

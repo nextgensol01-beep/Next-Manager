@@ -2,7 +2,9 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
+import useSWRInfinite from "swr/infinite";
 import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
@@ -16,11 +18,11 @@ import {
   CircleAlert,
   Eye,
   Filter,
-  Mail,
+  FileCheck2,
+  FileX2,
   MapPin,
   MoreHorizontal,
   Pencil,
-  Phone,
   Plus,
   RefreshCw,
   Search,
@@ -29,6 +31,8 @@ import {
   X,
 } from "lucide-react";
 import { invalidate, useCache } from "@/lib/useCache";
+import { fetchClientDirectoryPage } from "@/lib/clientDirectoryCache";
+import { prefetchClientWorkspace } from "@/lib/clientWorkspaceCache";
 import { useFinancialYearState } from "@/app/providers";
 import {
   normalizeEmailList,
@@ -79,6 +83,12 @@ interface Client {
   customFields?: ClientCustomFieldValues;
   createdAt: string;
   contacts?: LinkedPerson[];
+  documentSummary?: {
+    count: number;
+    latestName?: string;
+    latestDate?: string;
+    categories?: string[];
+  };
 }
 
 interface ClientsPageResponse {
@@ -701,24 +711,26 @@ const ClientsDesktopTable = React.memo(function ClientsDesktopTable({
   clients,
   onDelete,
   onEdit,
+  onPrefetch,
   onView,
 }: {
   clients: Client[];
   onDelete: (client: Client) => void;
   onEdit: (client: Client) => void;
+  onPrefetch: (clientId: string) => void;
   onView: (clientId: string) => void;
 }) {
   return (
     <div className="clients-table-wrap">
       <div className="clients-scan-table" role="table" aria-label="Clients">
         <div className="clients-table-head" role="row">
-          <span>Client ID</span>
+          <span className="clients-col-id">Client ID</span>
           <span>Company</span>
           <span>Category</span>
-          <span>State</span>
+          <span className="clients-col-state">State</span>
           <span>Primary contact</span>
-          <span>Phone / Email</span>
-          <span>Created</span>
+          <span>Documents</span>
+          <span className="clients-col-created">Created</span>
           <span>Actions</span>
         </div>
 
@@ -728,6 +740,11 @@ const ClientsDesktopTable = React.memo(function ClientsDesktopTable({
             const primaryPhone = getPrimaryPhone(primaryContact);
             const primaryEmail = getPrimaryEmail(primaryContact);
             const contactLine = primaryPhone || primaryEmail || "No contact detail";
+            const documentSummary = client.documentSummary;
+            const documentCount = Number(documentSummary?.count || 0);
+            const documentCategories = (documentSummary?.categories || [])
+              .map((category) => category.charAt(0).toUpperCase() + category.slice(1))
+              .join(", ");
 
             return (
               <div
@@ -736,6 +753,8 @@ const ClientsDesktopTable = React.memo(function ClientsDesktopTable({
                 tabIndex={0}
                 className="clients-table-row"
                 style={{ animationDelay: `${Math.min(index, 12) * 18}ms` }}
+                onMouseEnter={() => onPrefetch(client.clientId)}
+                onFocus={() => onPrefetch(client.clientId)}
                 onClick={() => onView(client.clientId)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
@@ -744,26 +763,28 @@ const ClientsDesktopTable = React.memo(function ClientsDesktopTable({
                   }
                 }}
               >
-                <span className="clients-id-cell" title={client.clientId}>{client.clientId}</span>
+                <span className="clients-id-cell clients-col-id" title={client.clientId}>{client.clientId}</span>
                 <span className="clients-company-cell">
                   <span className="clients-company-avatar">
                     <Building2 className="h-[17px] w-[17px]" />
                   </span>
                   <span className="min-w-0">
                     <strong title={client.companyName}>{client.companyName}</strong>
-                    <small title={client.legalName || `${(client.contacts || []).length} linked contacts`}>
-                      {client.legalName || `${(client.contacts || []).length} linked contacts`}
+                    <small title={`${client.clientId} · ${client.legalName || `${(client.contacts || []).length} linked contacts`}`}>
+                      {client.clientId} · {client.legalName || `${(client.contacts || []).length} linked contacts`}
                     </small>
                   </span>
                 </span>
                 <span><CategoryBadge category={client.category} /></span>
-                <span className="clients-state-cell" title={client.state || "-"}>{client.state || "-"}</span>
+                <span className="clients-state-cell clients-col-state" title={client.state || "-"}>{client.state || "-"}</span>
                 <span className="clients-contact-cell">
                   {primaryContact ? (
                     <>
                       <strong title={primaryContact.name}>{primaryContact.name}</strong>
-                      <small title={primaryContact.designation || "Primary contact"}>
-                        {primaryContact.designation || "Primary contact"}
+                      <small className="clients-contact-detail" title={`${primaryContact.designation || "Primary contact"} · ${contactLine}`}>
+                        <span>{primaryContact.designation || "Primary contact"}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{contactLine}</span>
                       </small>
                     </>
                   ) : (
@@ -773,11 +794,29 @@ const ClientsDesktopTable = React.memo(function ClientsDesktopTable({
                     </span>
                   )}
                 </span>
-                <span className="clients-contact-line" title={contactLine}>
-                  {primaryPhone ? <Phone className="h-3.5 w-3.5" /> : <Mail className="h-3.5 w-3.5" />}
-                  <span>{contactLine}</span>
+                <span className="clients-document-cell">
+                  <span
+                    className={`clients-document-indicator ${documentCount > 0 ? "has-documents" : "has-no-documents"}`}
+                    tabIndex={0}
+                    aria-label={documentCount > 0 ? `${documentCount} linked documents` : "No linked documents"}
+                  >
+                    {documentCount > 0 ? <FileCheck2 className="h-4 w-4" /> : <FileX2 className="h-4 w-4" />}
+                    <span>{documentCount > 0 ? `${documentCount} linked` : "None"}</span>
+                    <span className="clients-document-popover" role="tooltip">
+                      <strong>{documentCount > 0 ? `${documentCount} linked document${documentCount === 1 ? "" : "s"}` : "No documents linked"}</strong>
+                      {documentCount > 0 ? (
+                        <>
+                          <small>Latest: {documentSummary?.latestName || "Document"}</small>
+                          {documentSummary?.latestDate && <small>Added {formatDate(documentSummary.latestDate)}</small>}
+                          {documentCategories && <small>{documentCategories}</small>}
+                        </>
+                      ) : (
+                        <small>Open the client profile to add a document.</small>
+                      )}
+                    </span>
+                  </span>
                 </span>
-                <span className="clients-date-cell">{formatDate(client.createdAt)}</span>
+                <span className="clients-date-cell clients-col-created">{formatDate(client.createdAt)}</span>
                 <span className="clients-row-actions">
                   <ClientControlButton
                     type="button"
@@ -836,11 +875,13 @@ const ClientsMobileList = React.memo(function ClientsMobileList({
   activeClientId,
   clients,
   onMore,
+  onPrefetch,
   onView,
 }: {
   activeClientId?: string;
   clients: Client[];
   onMore: (client: Client) => void;
+  onPrefetch: (clientId: string) => void;
   onView: (clientId: string) => void;
 }) {
   return (
@@ -855,6 +896,8 @@ const ClientsMobileList = React.memo(function ClientsMobileList({
             <button
               type="button"
               className="clients-mobile-card-main"
+              onPointerDown={() => onPrefetch(client.clientId)}
+              onFocus={() => onPrefetch(client.clientId)}
               onClick={() => onView(client.clientId)}
             >
               <span className="clients-mobile-card-top">
@@ -902,43 +945,40 @@ const syncEntrySelections = (entry: PersonEntry): PersonEntry => {
 
 export default function ClientsPage() {
   const router = useRouter();
+  const { data: session, status: sessionStatus } = useSession();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const initialSearch = searchParams.get("search") || "";
+  const initialCategory = searchParams.get("category") || "all";
+  const initialState = searchParams.get("state") || "all";
+  const initialRegisteredThisFy = searchParams.get("registeredThisFy") === "1";
   const [financialYear] = useFinancialYearState();
   const [modalOpen, setModalOpen] = useState(false);
   const [editClient, setEditClient] = useState<Client | null>(null);
 
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState(initialSearch);
+  const [search, setSearch] = useState(initialSearch);
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput), 300);
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [stateFilter, setStateFilter] = useState("all");
-  const [registeredThisFyFilter, setRegisteredThisFyFilter] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState(initialCategory);
+  const [stateFilter, setStateFilter] = useState(initialState);
+  const [registeredThisFyFilter, setRegisteredThisFyFilter] = useState(initialRegisteredThisFy);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [draftCategoryFilter, setDraftCategoryFilter] = useState("all");
-  const [draftStateFilter, setDraftStateFilter] = useState("all");
-  const [draftRegisteredThisFyFilter, setDraftRegisteredThisFyFilter] = useState(false);
+  const [draftCategoryFilter, setDraftCategoryFilter] = useState(initialCategory);
+  const [draftStateFilter, setDraftStateFilter] = useState(initialState);
+  const [draftRegisteredThisFyFilter, setDraftRegisteredThisFyFilter] = useState(initialRegisteredThisFy);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [toolbarCompact, setToolbarCompact] = useState(false);
   const [mobileActionsClient, setMobileActionsClient] = useState<Client | null>(null);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [totalClients, setTotalClients] = useState(0);
-  const [nextOffset, setNextOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleteClient, setDeleteClient] = useState<Client | null>(null);
   const [deleting, setDeleting] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const filterPanelRef = useRef<HTMLDivElement | null>(null);
   const filterPopoverRef = useRef<HTMLDivElement | null>(null);
-  const requestIdRef = useRef(0);
-  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
@@ -1028,6 +1068,21 @@ export default function ClientsPage() {
     return params;
   }, [categoryFilter, financialYear, registeredThisFyFilter, search, stateFilter]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (search) params.set("search", search); else params.delete("search");
+    if (categoryFilter !== "all") params.set("category", categoryFilter); else params.delete("category");
+    if (stateFilter !== "all") params.set("state", stateFilter); else params.delete("state");
+    if (registeredThisFyFilter) params.set("registeredThisFy", "1"); else params.delete("registeredThisFy");
+    params.delete("limit");
+    params.delete("offset");
+    const nextQuery = params.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+    }
+  }, [categoryFilter, pathname, registeredThisFyFilter, router, search, searchParams, stateFilter]);
+
   const readErrorMessage = useCallback(async (response: Response, fallback: string) => {
     try {
       const payload = await response.json();
@@ -1040,66 +1095,90 @@ export default function ClientsPage() {
     return fallback;
   }, []);
 
-  const loadClientsPage = useCallback(async (offset: number, replace: boolean) => {
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-    abortRef.current?.abort();
-
-    const controller = new AbortController();
-    abortRef.current = controller;
+  const directorySessionScope = String(
+    session?.user?.email ||
+    (session?.user as { id?: string } | undefined)?.id ||
+    ""
+  );
+  const getClientPageKey = useCallback((
+    pageIndex: number,
+    previousPageData: ClientsPageResponse | null
+  ) => {
+    if (sessionStatus !== "authenticated" || !directorySessionScope) return null;
+    if (previousPageData && !previousPageData.hasMore) return null;
 
     const params = new URLSearchParams(queryParams);
     params.set("limit", String(CLIENT_PAGE_SIZE));
-    params.set("offset", String(offset));
-
-    if (replace) {
-      setLoading(true);
-      setLoadError(null);
-      setLoadMoreError(null);
-    } else {
-      setLoadingMore(true);
-      setLoadMoreError(null);
+    params.set(
+      "offset",
+      String(pageIndex === 0 ? 0 : Number(previousPageData?.nextOffset) || pageIndex * CLIENT_PAGE_SIZE)
+    );
+    return [`/api/clients?${params.toString()}`, directorySessionScope] as const;
+  }, [directorySessionScope, queryParams, sessionStatus]);
+  const {
+    data: clientPages,
+    error: clientPagesError,
+    isLoading: firstPageLoading,
+    size: clientPageCount,
+    setSize: setClientPageCount,
+    mutate: mutateClientPages,
+  } = useSWRInfinite<ClientsPageResponse>(
+    getClientPageKey,
+    fetchClientDirectoryPage,
+    {
+      dedupingInterval: 10_000,
+      persistSize: false,
+      revalidateAll: false,
+      revalidateFirstPage: true,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
     }
-
-    try {
-      const response = await fetch(`/api/clients?${params.toString()}`, { signal: controller.signal });
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, replace ? "Unable to load clients." : "Unable to load more clients."));
-      }
-
-      const payload = await response.json() as ClientsPageResponse;
-      if (requestId !== requestIdRef.current) return;
-
-      setClients((current) => {
-        if (replace) return payload.items || [];
-        const seen = new Set(current.map((client) => client.clientId));
-        return [...current, ...(payload.items || []).filter((client) => !seen.has(client.clientId))];
-      });
-      setTotalClients(Number(payload.total) || 0);
-      setNextOffset(Number(payload.nextOffset) || 0);
-      setHasMore(Boolean(payload.hasMore));
-      setLoadError(null);
-      setLoadMoreError(null);
-    } catch (error) {
-      if (controller.signal.aborted || requestId !== requestIdRef.current) return;
-      const message = error instanceof Error ? error.message : "Unable to load clients.";
-      if (replace) setLoadError(message);
-      else setLoadMoreError(message);
-    } finally {
-      if (requestId !== requestIdRef.current) return;
-      if (replace) setLoading(false);
-      else setLoadingMore(false);
-    }
-  }, [queryParams, readErrorMessage]);
+  );
+  const clients = useMemo(() => {
+    const seen = new Set<string>();
+    return (clientPages || []).flatMap((page) => page.items || []).filter((client) => {
+      if (seen.has(client.clientId)) return false;
+      seen.add(client.clientId);
+      return true;
+    });
+  }, [clientPages]);
+  const lastClientPage = clientPages?.[clientPages.length - 1];
+  const totalClients = Number(clientPages?.[0]?.total) || 0;
+  const nextOffset = Number(lastClientPage?.nextOffset) || clients.length;
+  const hasMore = Boolean(lastClientPage?.hasMore);
+  const loading = (sessionStatus === "loading" || firstPageLoading) && !clientPages?.length;
+  const loadingMore = Boolean(clientPages && clientPageCount > clientPages.length);
+  const clientPageErrorMessage = clientPagesError instanceof Error
+    ? clientPagesError.message
+    : clientPagesError
+      ? "Unable to load clients."
+      : null;
+  const loadError = clients.length === 0 ? clientPageErrorMessage : null;
+  const loadMoreError = clients.length > 0 ? clientPageErrorMessage : null;
 
   const refreshClients = useCallback(() => {
-    void loadClientsPage(0, true);
-  }, [loadClientsPage]);
+    void mutateClientPages().catch(() => undefined);
+  }, [mutateClientPages]);
 
-  useEffect(() => {
-    refreshClients();
-    return () => abortRef.current?.abort();
-  }, [refreshClients]);
+  const loadClientsPage = useCallback((_offset: number, replace: boolean) => {
+    if (replace) {
+      refreshClients();
+      return;
+    }
+    if (clientPagesError) {
+      void setClientPageCount(clientPageCount);
+      return;
+    }
+    if (loadingMore || !hasMore) return;
+    void setClientPageCount((current) => current + 1);
+  }, [
+    clientPageCount,
+    clientPagesError,
+    hasMore,
+    loadingMore,
+    refreshClients,
+    setClientPageCount,
+  ]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -1179,8 +1258,25 @@ export default function ClientsPage() {
 
   const viewClient = useCallback((clientId: string) => {
     setMobileActionsClient(null);
+    const sessionScope = String(
+      session?.user?.email ||
+      (session?.user as { id?: string } | undefined)?.id ||
+      ""
+    );
+    router.prefetch(`/dashboard/clients/${clientId}`);
+    prefetchClientWorkspace(clientId, sessionScope);
     router.push(`/dashboard/clients/${clientId}`);
-  }, [router]);
+  }, [router, session]);
+
+  const prefetchClient = useCallback((clientId: string) => {
+    const sessionScope = String(
+      session?.user?.email ||
+      (session?.user as { id?: string } | undefined)?.id ||
+      ""
+    );
+    router.prefetch(`/dashboard/clients/${clientId}`);
+    prefetchClientWorkspace(clientId, sessionScope);
+  }, [router, session]);
 
   const requestDeleteClient = useCallback((client: Client) => {
     setDeleteClient(client);
@@ -1239,7 +1335,45 @@ export default function ClientsPage() {
         toast.error(await readErrorMessage(response, "Something went wrong"));
         return;
       }
-      const savedClient = await response.json();
+      const savedClient = await response.json() as Client;
+      await mutateClientPages((pages) => {
+        if (!pages?.length) return pages;
+        const exists = pages.some((page) => (
+          (page.items || []).some((client) => client.clientId === savedClient.clientId)
+        ));
+        const canInsertIntoCurrentView = (
+          !search &&
+          categoryFilter === "all" &&
+          stateFilter === "all" &&
+          !registeredThisFyFilter
+        );
+        const normalizedSavedClient: Client = {
+          ...savedClient,
+          contacts: savedClient.contacts || [],
+          documentSummary: savedClient.documentSummary || {
+            count: 0,
+            latestName: "",
+            categories: [],
+          },
+        };
+
+        return pages.map((page, pageIndex) => {
+          const updatedItems = (page.items || []).map((client) => (
+            client.clientId === savedClient.clientId
+              ? { ...client, ...normalizedSavedClient }
+              : client
+          ));
+          if (!exists && canInsertIntoCurrentView && pageIndex === 0) {
+            updatedItems.unshift(normalizedSavedClient);
+            if (updatedItems.length > CLIENT_PAGE_SIZE) updatedItems.pop();
+          }
+          return {
+            ...page,
+            items: updatedItems,
+            total: !exists && canInsertIntoCurrentView ? page.total + 1 : page.total,
+          };
+        });
+      }, { revalidate: false });
       toast.success(editClient ? "Client updated!" : `Client added! ID: ${savedClient.clientId}`);
       setModalOpen(false);
       invalidate("/api/clients", "/api/dashboard");
@@ -1260,11 +1394,16 @@ export default function ClientsPage() {
       }
 
       const deletedClientId = deleteClient.clientId;
-      setClients((current) => current.filter((client) => client.clientId !== deletedClientId));
-      setTotalClients((current) => Math.max(0, current - 1));
+      await mutateClientPages((pages) => pages?.map((page) => ({
+        ...page,
+        items: (page.items || []).filter((client) => client.clientId !== deletedClientId),
+        total: Math.max(0, page.total - 1),
+        nextOffset: Math.max(0, page.nextOffset - 1),
+      })), { revalidate: false });
       setDeleteClient(null);
       toast.success("Client deleted");
       invalidate("/api/clients", "/api/dashboard");
+      refreshClients();
     } finally {
       setDeleting(false);
     }
@@ -1446,6 +1585,7 @@ export default function ClientsPage() {
                   clients={clients}
                   onDelete={requestDeleteClient}
                   onEdit={openEdit}
+                  onPrefetch={prefetchClient}
                   onView={viewClient}
                 />
               </div>
@@ -1454,6 +1594,7 @@ export default function ClientsPage() {
                   activeClientId={mobileActionsClient?.clientId}
                   clients={clients}
                   onMore={showMobileActions}
+                  onPrefetch={prefetchClient}
                   onView={viewClient}
                 />
               </div>

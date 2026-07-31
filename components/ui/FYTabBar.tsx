@@ -782,6 +782,9 @@ function GhostPill({
       ref={ref}
       type="button"
       data-fy={label}
+      data-active={isActive}
+      data-hovered={hovered}
+      className="fy-ghost-pill"
       onClick={onClick}
       onMouseEnter={() => { setHovered(true);  onHoverChange(true);  }}
       onMouseLeave={handleMouseLeave}
@@ -795,33 +798,7 @@ function GhostPill({
       onTouchEnd={() =>  { setPressed(false); onPressChange(false); }}
       style={{
         scale: isActive ? undefined : scale,
-        position: "relative",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        padding: "5px 12px",
-        fontSize: "11px",
-        fontWeight: isActive ? 600 : 500,
-        letterSpacing: isActive ? "0.005em" : "0.01em",
-        borderRadius: 9999,
-        border: isActive
-          ? "1px solid transparent"
-          : "1px solid var(--glass-pill-inactive-border)",
-        background: isActive
-          ? "transparent"
-          : "var(--glass-pill-inactive-bg)",
-        color: isActive ? "#fff" : "var(--glass-pill-inactive-text)",
         boxShadow: isActive ? "none" : dynamicBoxShadow,
-        backdropFilter: isActive ? "none" : (hovered ? "blur(16px) saturate(160%)" : "blur(12px) saturate(140%)"),
-        WebkitBackdropFilter: isActive ? "none" : (hovered ? "blur(16px) saturate(160%)" : "blur(12px) saturate(140%)"),
-        cursor: "pointer",
-        userSelect: "none",
-        overflow: "hidden",
-        outline: "none",
-        whiteSpace: "nowrap",
-        zIndex: 2,
-        transition: "color 0.22s ease, border-color 0.22s ease, background 0.22s ease, box-shadow 0.22s ease",
       }}
     >
       {/* Glass reflection — all optical layers for inactive buttons */}

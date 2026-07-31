@@ -44,5 +44,7 @@ const DocumentSchema = new Schema<IDocument>(
   { timestamps: true }
 );
 
+DocumentSchema.index({ clientId: 1, uploadedDate: -1 });
+
 export default mongoose.models.Document ||
   mongoose.model<IDocument>("Document", DocumentSchema);

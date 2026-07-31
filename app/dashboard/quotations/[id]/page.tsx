@@ -9,9 +9,11 @@ import {
   Mail, Activity, FileText, Eye, EyeOff, Printer,
   AlertTriangle, IndianRupee, Receipt, Building2,
   Sparkles, MoreHorizontal, Copy, Send, X,
-  Bold, Minus, Save, ChevronDown, Check, UserRound, CalendarDays
+  Bold, Minus, Save, ChevronDown, Check, UserRound, CalendarDays,
+  WalletCards, ArrowRight, ShieldCheck, Search, Link2
 } from "lucide-react";
 import { FINANCIAL_YEARS } from "@/lib/utils";
+import { invalidate } from "@/lib/useCache";
 import { buildQuotationHTML as buildHTML } from "@/utils/quotationTemplate";
 import { escapeHtml, escapeHtmlWithLineBreaks } from "@/utils/sanitizeHtml";
 import Modal from "@/components/ui/Modal";
@@ -64,6 +66,22 @@ interface ClientEmailOption {
   email: string;
   designation?: string;
   isPrimaryContact?: boolean;
+}
+
+interface BillingEligibility {
+  eligible: boolean;
+  accepted: boolean;
+  clientSaved: boolean;
+  alreadyConverted: boolean;
+  billingId?: string | null;
+}
+
+interface SavedClientOption {
+  clientId: string;
+  companyName: string;
+  category?: string;
+  state?: string;
+  gstNumber?: string;
 }
 
 interface EmailMessageTemplate {
@@ -807,7 +825,7 @@ export default function QuotationDetailPage() {
   const [statusDropdown, setStatusDropdown] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [moreMenuAnchor, setMoreMenuAnchor] = useState<"header" | "summary" | null>(null);
-  const [moreMenuPosition, setMoreMenuPosition] = useState({ top: 0, left: 0, maxHeight: 520 });
+  const [moreMenuPosition, setMoreMenuPosition] = useState({ top: 0, left: 0, maxHeight: 520, placement: "below" as "above" | "below" });
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailRecipient, setEmailRecipient] = useState("");
   const [emailCc, setEmailCc] = useState("");
@@ -819,12 +837,23 @@ export default function QuotationDetailPage() {
   const [emailTemplateLoading, setEmailTemplateLoading] = useState(false);
   const [emailTemplateDropdownOpen, setEmailTemplateDropdownOpen] = useState(false);
   const [emailTemplateDropdownPosition, setEmailTemplateDropdownPosition] = useState({ top: 0, left: 0, width: 360 });
+  const [billingEligibility, setBillingEligibility] = useState<BillingEligibility | null>(null);
+  const [billingModalOpen, setBillingModalOpen] = useState(false);
+  const [billingDueDate, setBillingDueDate] = useState("");
+  const [billingCreating, setBillingCreating] = useState(false);
+  const [linkClientModalOpen, setLinkClientModalOpen] = useState(false);
+  const [linkClientSearch, setLinkClientSearch] = useState("");
+  const [linkClientOptions, setLinkClientOptions] = useState<SavedClientOption[]>([]);
+  const [selectedLinkClient, setSelectedLinkClient] = useState<SavedClientOption | null>(null);
+  const [linkClientLoading, setLinkClientLoading] = useState(false);
+  const [linkClientSaving, setLinkClientSaving] = useState(false);
   const [clientEmailOptions, setClientEmailOptions] = useState<ClientEmailOption[]>([]);
   const [selectedToEmails, setSelectedToEmails] = useState<string[]>([]);
   const [selectedCcEmails, setSelectedCcEmails] = useState<string[]>([]);
   const [markSentPrompt, setMarkSentPrompt] = useState<null | "print" | "email">(null);
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listReturnToRef = useRef(searchParams.get("returnTo"));
   const quotationTemplatePromiseRef = useRef<Promise<string> | null>(null);
   const emailPdfPromiseRef = useRef<{ html: string; promise: Promise<string> } | null>(null);
   const emailEditorRef = useRef<HTMLDivElement | null>(null);
@@ -1150,7 +1179,11 @@ export default function QuotationDetailPage() {
     setLoading(true);
     try {
       const res = await fetch(`/api/quotations/${id}`);
-      if (!res.ok) { router.push("/dashboard/quotations"); return; }
+      if (!res.ok) {
+        const returnTo = listReturnToRef.current;
+        router.push(returnTo?.startsWith("/dashboard/quotations") ? returnTo : "/dashboard/quotations");
+        return;
+      }
       const data: Quotation = await res.json();
       if (!isMounted.current) return;
       setQuotation(data);
@@ -1181,6 +1214,55 @@ export default function QuotationDetailPage() {
   }, [id, router]);
 
   useEffect(() => { loadQuotation(); }, [loadQuotation]);
+
+  useEffect(() => {
+    if (!quotation || quotation.status !== "Accepted") {
+      setBillingEligibility(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/quotations/${id}/billing`, { cache: "no-store" })
+      .then(async (response) => {
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.error || "Unable to check billing");
+        if (!cancelled) setBillingEligibility(body);
+      })
+      .catch(() => {
+        if (!cancelled) setBillingEligibility({
+          eligible: false,
+          accepted: true,
+          clientSaved: Boolean(quotation.clientId),
+          alreadyConverted: false,
+        });
+      });
+    return () => { cancelled = true; };
+  }, [id, quotation]);
+
+  useEffect(() => {
+    if (!linkClientModalOpen) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setLinkClientLoading(true);
+      try {
+        const query = linkClientSearch.trim();
+        const response = await fetch(`/api/clients${query ? `?search=${encodeURIComponent(query)}` : ""}`, { cache: "no-store" });
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.error || "Unable to load clients");
+        if (!cancelled) setLinkClientOptions(Array.isArray(body) ? body.slice(0, 12) : []);
+      } catch (error) {
+        if (!cancelled) {
+          setLinkClientOptions([]);
+          toast.error(error instanceof Error ? error.message : "Unable to load clients");
+        }
+      } finally {
+        if (!cancelled) setLinkClientLoading(false);
+      }
+    }, linkClientSearch ? 250 : 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [linkClientModalOpen, linkClientSearch]);
 
   // Client suggestions fetch for autocomplete
   useEffect(() => {
@@ -1235,23 +1317,16 @@ export default function QuotationDetailPage() {
     const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
     const spaceAbove = rect.top - viewportPadding;
     const preferredHeight = Math.min(isDockSheet ? 460 : 520, window.innerHeight - viewportPadding * 2);
-    if (isDockSheet) {
-      setMoreMenuPosition({
-        top: Math.max(viewportPadding, window.innerHeight - preferredHeight - viewportPadding - 8),
-        left: Math.max(viewportPadding, (window.innerWidth - menuWidth) / 2),
-        maxHeight: preferredHeight,
-      });
-      return;
-    }
-    const openAbove = spaceBelow < 360 && spaceAbove > spaceBelow;
+    const openAbove = spaceBelow < Math.min(360, preferredHeight) && spaceAbove > spaceBelow;
     const availableHeight = openAbove ? spaceAbove : spaceBelow;
     const maxHeight = Math.max(120, Math.min(preferredHeight, availableHeight));
     setMoreMenuPosition({
       top: openAbove
-        ? Math.max(viewportPadding, rect.top - maxHeight - 8)
+        ? Math.max(viewportPadding + 8, rect.top - 8)
         : Math.max(viewportPadding, rect.bottom + 8),
       left: Math.min(Math.max(viewportPadding, preferredLeft), maxLeft),
       maxHeight,
+      placement: openAbove ? "above" : "below",
     });
   }, []);
 
@@ -1582,7 +1657,11 @@ export default function QuotationDetailPage() {
       }
       const data = await res.json();
       toast.success("Quotation duplicated");
-      router.push(`/dashboard/quotations/${data._id}`);
+      const params = new URLSearchParams();
+      if (listReturnToRef.current?.startsWith("/dashboard/quotations")) {
+        params.set("returnTo", listReturnToRef.current);
+      }
+      router.push(`/dashboard/quotations/${data._id}${params.toString() ? `?${params.toString()}` : ""}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to duplicate quotation");
     }
@@ -1657,6 +1736,63 @@ export default function QuotationDetailPage() {
     const setOtherSelected = field === "to" ? setSelectedCcEmails : setSelectedToEmails;
     setSelected(current => current.includes(email) ? current.filter(value => value !== email) : [...current, email]);
     setOtherSelected(current => current.filter(value => value !== email));
+  };
+
+  const createBillingFromQuotation = async () => {
+    if (!quotation || !billingEligibility?.eligible) return;
+    setBillingCreating(true);
+    try {
+      const response = await fetch(`/api/quotations/${id}/billing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dueDate: billingDueDate || null }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        if (body?.billingId) {
+          setBillingEligibility((current) => current ? { ...current, eligible: false, alreadyConverted: true, billingId: body.billingId } : current);
+        }
+        throw new Error(body?.error || "Failed to create billing");
+      }
+      setBillingModalOpen(false);
+      setBillingEligibility({
+        eligible: false,
+        accepted: true,
+        clientSaved: true,
+        alreadyConverted: true,
+        billingId: body.billingId,
+      });
+      invalidate("/api/billing", "/api/dashboard");
+      toast.success(body.created ? "Billing created from accepted quotation" : "Quotation added to existing billing");
+      loadQuotation();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create billing");
+    } finally {
+      setBillingCreating(false);
+    }
+  };
+
+  const linkQuotationToClient = async () => {
+    if (!selectedLinkClient || !quotation) return;
+    setLinkClientSaving(true);
+    try {
+      const response = await fetch(`/api/quotations/${id}/link-client`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: selectedLinkClient.clientId }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(body?.error || "Failed to link client");
+      setLinkClientModalOpen(false);
+      setSelectedLinkClient(null);
+      setLinkClientSearch("");
+      toast.success(`Linked to ${body.companyName}`);
+      await loadQuotation();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to link client");
+    } finally {
+      setLinkClientSaving(false);
+    }
   };
 
   const loadEmailMessageTemplates = async () => {
@@ -2008,8 +2144,10 @@ export default function QuotationDetailPage() {
     }
 
     // Clean query params so it doesn't trigger again on component updates or back-navigation
-    const newUrl = window.location.pathname;
-    window.history.replaceState({}, "", newUrl);
+    const cleanParams = new URLSearchParams(window.location.search);
+    cleanParams.delete("action");
+    const cleanQuery = cleanParams.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${cleanQuery ? `?${cleanQuery}` : ""}`);
   }, [loading, quotation, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Viewing a past revision (read-only)
@@ -2151,7 +2289,8 @@ export default function QuotationDetailPage() {
     ...(quotation.validTill ? [{ label: "Valid Till", value: fmtDate(quotation.validTill), mono: false }] : []),
     ...(quotation.sentAt ? [{ label: "Sent", value: fmtDate(quotation.sentAt), mono: false }] : []),
   ];
-  const hasPrimaryDockAction = isEditable || canCreateEmailDraft;
+  const hasBillingAction = quotation?.status === "Accepted";
+  const hasPrimaryDockAction = isEditable || canCreateEmailDraft || hasBillingAction;
   const primaryDockActionDisabled = isEditable ? finalising : emailLoading;
   const handlePrimaryDockAction = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -2201,6 +2340,38 @@ export default function QuotationDetailPage() {
           >
             <Mail className="h-4 w-4" />
             {emailLoading ? "Creating..." : "Email Draft"}
+          </button>
+        ) : hasBillingAction ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (billingEligibility?.alreadyConverted) {
+                router.push(`/dashboard/billing?fy=${encodeURIComponent(quotation.financialYear)}&clientId=${encodeURIComponent(quotation.clientId || "")}`);
+              } else if (billingEligibility?.eligible) {
+                setBillingModalOpen(true);
+              } else if (billingEligibility && !billingEligibility.clientSaved) {
+                setLinkClientModalOpen(true);
+              }
+            }}
+            disabled={!billingEligibility}
+            title={!billingEligibility
+              ? "Checking billing eligibility"
+              : !billingEligibility.clientSaved
+                ? "Link this quotation to a saved client before creating billing"
+                : billingEligibility.alreadyConverted
+                  ? "Open the linked billing record"
+                  : "Create billing from this accepted quotation"}
+            className={`btn-primary w-full justify-center gap-2 rounded-full shadow-sm shadow-brand-600/[0.15] transition duration-200 active:scale-[0.98] ${isDock ? "py-2.5" : "py-3"}`}
+          >
+            <WalletCards className="h-4 w-4" />
+            {!billingEligibility
+              ? "Checking Billing..."
+              : billingEligibility.alreadyConverted
+                ? "View Billing"
+                : billingEligibility.clientSaved
+                  ? "Create Billing"
+                  : "Link Saved Client"}
           </button>
         ) : null}
         <button
@@ -2265,6 +2436,7 @@ export default function QuotationDetailPage() {
         top: moreMenuPosition.top,
         left: moreMenuPosition.left,
         maxHeight: moreMenuPosition.maxHeight,
+        transform: moreMenuPosition.placement === "above" ? "translateY(-100%)" : undefined,
         ...floatingGlassPanelStyle,
       }}
     >
@@ -2464,7 +2636,10 @@ export default function QuotationDetailPage() {
         >
           <motion.div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start" style={quoteHeaderIdentityStyle}>
             <motion.button
-              onClick={() => router.push("/dashboard/quotations")}
+              onClick={() => {
+                const returnTo = listReturnToRef.current;
+                router.push(returnTo?.startsWith("/dashboard/quotations") ? returnTo : "/dashboard/quotations");
+              }}
               className={`shrink-0 rounded-full text-muted transition duration-200 hover:-translate-y-0.5 hover:text-default hover:shadow-sm active:scale-[0.98] ${quoteControlSurface}`}
               title="Back to quotations"
               style={quoteHeaderBackButtonStyle}
@@ -3344,6 +3519,192 @@ export default function QuotationDetailPage() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        open={linkClientModalOpen}
+        onClose={() => !linkClientSaving && setLinkClientModalOpen(false)}
+        title="Link Saved Client"
+        size="lg"
+        hideHeader
+        className="max-h-[calc(100dvh-16px)] rounded-[28px] border-white/70 bg-white/95 shadow-[0_32px_100px_rgba(0,0,0,0.28)] sm:max-h-[88vh] sm:rounded-[36px] dark:border-white/[0.12] dark:bg-[#1c1c1e]/95"
+        backdropFilter="blur(18px) saturate(150%)"
+        backdropColor="rgba(10,10,12,0.48)"
+      >
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-black/[0.06] bg-white/70 px-5 py-5 backdrop-blur-2xl sm:px-7 sm:py-6 dark:border-white/[0.08] dark:bg-white/[0.04]">
+            <div className="flex min-w-0 items-start gap-3.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-lg shadow-brand-600/20">
+                <Link2 className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className={sectionEyebrow}>Accepted quotation</p>
+                <h2 className="mt-1 text-xl font-bold tracking-[-0.025em] text-default sm:text-2xl">Link a saved client</h2>
+                <p className="mt-1 text-sm text-muted">Choose the existing database client that owns this quotation.</p>
+              </div>
+            </div>
+            <button type="button" onClick={() => setLinkClientModalOpen(false)} disabled={linkClientSaving} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-muted transition hover:bg-black/[0.08] active:scale-95 dark:bg-white/[0.08] dark:hover:bg-white/[0.12]">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-6">
+            <div className={`mb-4 rounded-[22px] p-4 ${quoteSubtleSurface}`}>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">Quotation client name</p>
+              <p className="mt-1.5 font-semibold text-default">{quotation?.clientName}</p>
+              <p className="mt-1 text-xs text-muted">{quotation?.quotationNumber} · FY {quotation?.financialYear}</p>
+            </div>
+
+            <label className="relative block">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+              <input
+                autoFocus
+                value={linkClientSearch}
+                onChange={(event) => {
+                  setLinkClientSearch(event.target.value);
+                  setSelectedLinkClient(null);
+                }}
+                className={`${softInput} w-full !pl-11`}
+                placeholder="Search by company name or client ID"
+              />
+            </label>
+
+            <div className="mt-4 space-y-2">
+              {linkClientLoading ? (
+                <div className="rounded-[20px] border border-black/[0.06] bg-[#f5f5f7]/70 px-4 py-6 text-center text-sm text-muted dark:border-white/[0.08] dark:bg-white/[0.04]">Searching saved clients…</div>
+              ) : linkClientOptions.length === 0 ? (
+                <div className="rounded-[20px] border border-black/[0.06] bg-[#f5f5f7]/70 px-4 py-6 text-center dark:border-white/[0.08] dark:bg-white/[0.04]">
+                  <p className="text-sm font-semibold text-default">No saved clients found</p>
+                  <p className="mt-1 text-xs text-muted">Create the client in Clients first, then return here to link it.</p>
+                </div>
+              ) : linkClientOptions.map((client) => {
+                const selected = selectedLinkClient?.clientId === client.clientId;
+                return (
+                  <button
+                    key={client.clientId}
+                    type="button"
+                    onClick={() => setSelectedLinkClient(client)}
+                    className={`flex w-full items-center gap-3 rounded-[20px] border p-3.5 text-left transition active:scale-[0.99] ${selected ? "border-brand-300 bg-brand-50 shadow-sm ring-4 ring-brand-500/10 dark:border-brand-500/40 dark:bg-brand-500/10" : "border-black/[0.06] bg-white hover:bg-[#f7f7f9] dark:border-white/[0.08] dark:bg-white/[0.04] dark:hover:bg-white/[0.07]"}`}
+                  >
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] ${selected ? "bg-brand-600 text-white" : "bg-[#f0f1f4] text-brand-600 dark:bg-white/[0.08]"}`}>
+                      {selected ? <Check className="h-4 w-4" /> : <Building2 className="h-4 w-4" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-default">{client.companyName}</p>
+                      <p className="mt-0.5 truncate text-xs text-muted">{client.clientId}{client.category ? ` · ${client.category}` : ""}{client.state ? ` · ${client.state}` : ""}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {selectedLinkClient && selectedLinkClient.companyName.trim().toLowerCase() !== quotation?.clientName.trim().toLowerCase() && (
+              <div className="mt-4 rounded-[20px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200">
+                The saved company name differs from the quotation name. Confirm that this is the correct client before linking.
+              </div>
+            )}
+          </div>
+
+          <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-black/[0.06] bg-white/80 px-4 py-3 backdrop-blur-2xl sm:flex sm:justify-end sm:px-7 sm:py-4 dark:border-white/[0.08] dark:bg-black/20">
+            <button type="button" className={`${appleButton} w-full border border-black/[0.08] bg-white text-default hover:bg-[#f5f5f7] sm:w-auto dark:border-white/[0.10] dark:bg-white/[0.07]`} onClick={() => setLinkClientModalOpen(false)} disabled={linkClientSaving}>Cancel</button>
+            <button type="button" className={`${appleButton} w-full gap-2 bg-brand-600 text-white shadow-lg shadow-brand-600/20 hover:bg-brand-700 sm:w-auto`} onClick={linkQuotationToClient} disabled={!selectedLinkClient || linkClientSaving}>
+              {linkClientSaving ? "Linking…" : "Link Client"}
+              {!linkClientSaving && <ArrowRight className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={billingModalOpen}
+        onClose={() => !billingCreating && setBillingModalOpen(false)}
+        title="Create Billing"
+        size="lg"
+        hideHeader
+        className="max-h-[calc(100dvh-16px)] rounded-[28px] border-white/70 bg-white/90 shadow-[0_32px_100px_rgba(0,0,0,0.28)] sm:max-h-[90vh] sm:rounded-[36px] dark:border-white/[0.12] dark:bg-[#1c1c1e]/95"
+        backdropFilter="blur(18px) saturate(150%)"
+        backdropColor="rgba(10,10,12,0.48)"
+      >
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-black/[0.06] bg-white/65 px-5 py-5 backdrop-blur-2xl sm:px-7 sm:py-6 dark:border-white/[0.08] dark:bg-white/[0.04]">
+            <div className="flex min-w-0 items-start gap-3.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-lg shadow-brand-600/20 sm:h-12 sm:w-12">
+                <WalletCards className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className={sectionEyebrow}>Accepted quotation</p>
+                <h2 className="mt-1 truncate text-xl font-bold tracking-[-0.025em] text-default sm:text-2xl">Create billing</h2>
+                <p className="mt-1 text-sm text-muted">Review the agreed amounts before adding them to Billing &amp; Payments.</p>
+              </div>
+            </div>
+            <button type="button" onClick={() => setBillingModalOpen(false)} disabled={billingCreating} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-muted transition hover:bg-black/[0.08] active:scale-95 dark:bg-white/[0.08] dark:hover:bg-white/[0.12]">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-6">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+              <div className="space-y-4">
+                <section className={`rounded-[24px] p-4 sm:p-5 ${quoteSubtleSurface}`}>
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-white text-brand-600 shadow-sm dark:bg-white/[0.08]">
+                      <Building2 className="h-4.5 w-4.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-default">{quotation?.clientName}</p>
+                      <p className="mt-0.5 text-xs text-muted">{quotation?.clientId} · FY {quotation?.financialYear}</p>
+                    </div>
+                    <ShieldCheck className="ml-auto h-5 w-5 shrink-0 text-emerald-500" />
+                  </div>
+                </section>
+
+                <section className={`overflow-hidden rounded-[24px] ${quoteNestedSurface}`}>
+                  <div className="border-b border-black/[0.06] px-4 py-3.5 dark:border-white/[0.08]">
+                    <p className="text-sm font-semibold text-default">Billing breakdown</p>
+                    <p className="mt-0.5 text-xs text-muted">Locked to the accepted revision and its agreed rates.</p>
+                  </div>
+                  <div className="divide-y divide-black/[0.06] dark:divide-white/[0.08]">
+                    {[
+                      ["Target charges", Number(emailDraftRevision?.itemsSubtotal || 0) + Number(emailDraftRevision?.itemsGst || 0)],
+                      ["Consultancy charges", Number(emailDraftRevision?.consultationCharges || 0) + Number(emailDraftRevision?.consultationGstAmount || 0)],
+                      ["Government fees", Number(emailDraftRevision?.governmentFees || 0)],
+                    ].map(([label, amount]) => (
+                      <div key={String(label)} className="flex items-center justify-between gap-4 px-4 py-3.5 text-sm">
+                        <span className="text-muted">{label}</span>
+                        <span className="font-mono font-semibold tabular-nums text-default">{money(Number(amount))}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <label className="block">
+                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-muted">Payment due date <span className="normal-case tracking-normal text-faint">(optional)</span></span>
+                  <input type="date" value={billingDueDate} onChange={(event) => setBillingDueDate(event.target.value)} className={`${softInput} w-full`} />
+                </label>
+              </div>
+
+              <aside className="flex flex-col rounded-[26px] border border-black/[0.07] bg-gradient-to-br from-white to-[#f1f3f7] p-5 text-default shadow-[0_22px_55px_rgba(15,23,42,0.10)] sm:p-6 dark:border-white/[0.10] dark:from-[#242426] dark:to-[#303034] dark:text-white dark:shadow-[0_22px_55px_rgba(0,0,0,0.28)]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted dark:text-white/55">Billing total</p>
+                <p className="mt-2 text-3xl font-bold tracking-[-0.04em] text-default sm:text-4xl dark:text-white">{money(emailDraftRevision?.grandTotal || 0)}</p>
+                <div className="my-5 h-px bg-black/[0.08] dark:bg-white/10" />
+                <p className="text-sm leading-relaxed text-muted dark:text-white/65">
+                  {quotation?.quotationNumber} will be stored as the source. Creating it again will be blocked automatically.
+                </p>
+                <div className="mt-5 rounded-[18px] border border-black/[0.05] bg-white/75 p-3.5 text-xs leading-relaxed text-muted shadow-sm dark:border-white/[0.06] dark:bg-white/[0.08] dark:text-white/65 dark:shadow-none">
+                  If this client already has billing for {quotation?.financialYear}, these amounts will be added to that annual record.
+                </div>
+              </aside>
+            </div>
+          </div>
+
+          <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-black/[0.06] bg-white/75 px-4 py-3 backdrop-blur-2xl sm:flex sm:justify-end sm:px-7 sm:py-4 dark:border-white/[0.08] dark:bg-black/20">
+            <button type="button" className={`${appleButton} w-full border border-black/[0.08] bg-white text-default hover:bg-[#f5f5f7] sm:w-auto dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.11]`} onClick={() => setBillingModalOpen(false)} disabled={billingCreating}>Cancel</button>
+            <button type="button" className={`${appleButton} w-full gap-2 bg-brand-600 text-white shadow-lg shadow-brand-600/20 hover:bg-brand-700 sm:w-auto`} onClick={createBillingFromQuotation} disabled={billingCreating || !billingEligibility?.eligible}>
+              {billingCreating ? "Creating..." : "Create Billing"}
+              {!billingCreating && <ArrowRight className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
       </Modal>
 
       <Modal

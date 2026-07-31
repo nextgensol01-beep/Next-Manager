@@ -28,5 +28,7 @@ const PaymentSchema = new Schema<IPayment>(
   { timestamps: true }
 );
 
+PaymentSchema.index({ clientId: 1, financialYear: 1, paymentDate: -1 });
+
 export default mongoose.models.Payment ||
   mongoose.model<IPayment>("Payment", PaymentSchema);

@@ -138,11 +138,100 @@
 
 .client-profile-id-chip {
   font-family: var(--font-mono, "JetBrains Mono", monospace);
+  gap: 0;
+  transition: gap 180ms ease;
+}
+
+.client-profile-header-copy {
+  width: 0 !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateX(-4px) scale(0.86);
+  pointer-events: none;
+  transition:
+    width 180ms ease,
+    opacity 180ms ease,
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+.client-profile-header:hover .client-profile-id-chip,
+.client-profile-header:focus-within .client-profile-id-chip {
+  gap: 6px;
+}
+
+.client-profile-header:hover .client-profile-header-copy,
+.client-profile-header:focus-within .client-profile-header-copy,
+.client-profile-header-copy[data-copied="true"] {
+  width: 24px !important;
+  opacity: 1;
+  overflow: visible;
+  transform: translateX(0) scale(1);
+  pointer-events: auto;
+}
+
+.client-profile-header-copy:hover {
+  background: rgba(0, 0, 0, 0.075);
+  transform: translateX(0) scale(1.08);
+}
+
+.client-profile-header-copy:active {
+  transform: translateX(0) scale(0.9);
+}
+
+.client-profile-header-copy .copy-button-icon {
+  display: grid;
+  place-items: center;
+  animation: client-profile-copy-icon-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.client-profile-header-copy[data-copied="true"] {
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.dark .client-profile-header-copy:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+@keyframes client-profile-copy-icon-in {
+  from {
+    opacity: 0;
+    transform: scale(0.55) rotate(-10deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
 }
 
 .dark .client-profile-id-chip,
 .dark .client-profile-soft-badge {
   background: rgba(255,255,255,0.07);
+}
+
+@media (hover: none) {
+  .client-profile-id-chip {
+    gap: 6px;
+  }
+
+  .client-profile-header-copy {
+    width: 24px !important;
+    opacity: 1;
+    overflow: visible;
+    transform: none;
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .client-profile-header-copy,
+  .client-profile-header-copy .copy-button-icon {
+    animation: none;
+    transition-duration: 0.01ms;
+  }
 }
 
 .client-profile-header-meta {

@@ -1,5 +1,6 @@
 "use client";
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
 import BillingSkeleton from "@/components/ui/BillingSkeleton";
@@ -43,6 +44,8 @@ import {
 // ── Status border accent ───────────────────────────────────────────────────────
 // ── Main component ────────────────────────────────────────────────────────────
 export default function BillingPage() {
+  const searchParams = useSearchParams();
+  const deepLinkApplied = useRef(false);
   const [fy, setFy, financialYearLoaded] = useFinancialYearState();
   const { effectiveFinancialYear } = useFinancialYearPreference();
 
@@ -64,6 +67,17 @@ export default function BillingPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<BillingFilter>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+
+  useEffect(() => {
+    if (deepLinkApplied.current) return;
+    const linkedFinancialYear = searchParams.get("fy");
+    const linkedClientId = searchParams.get("clientId");
+    if (!linkedFinancialYear && !linkedClientId) return;
+    deepLinkApplied.current = true;
+    if (linkedFinancialYear) setFy(linkedFinancialYear);
+    if (linkedClientId) setSearch(linkedClientId);
+    setActiveTab("billing");
+  }, [searchParams, setFy]);
 
   // Confirm modal
   const [confirmState, setConfirmState] = useState<{

@@ -61,6 +61,7 @@ const QuotationSchema = new Schema<IQuotation>(
 QuotationSchema.index({ financialYear: 1, status: 1 });
 QuotationSchema.index({ clientName: 1 });
 QuotationSchema.index({ createdAt: -1 });
+QuotationSchema.index({ clientId: 1, financialYear: 1, updatedAt: -1 });
 QuotationSchema.index(
   { quotationNumber: 1 },
   {

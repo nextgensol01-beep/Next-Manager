@@ -429,11 +429,14 @@ export function CopyButton({
     <button
       type="button"
       onClick={onClick}
+      data-copied={copied ? "true" : "false"}
       className={`inline-flex h-7 w-7 items-center justify-center rounded-lg border border-base bg-surface text-faint transition-colors hover:text-default ${className}`}
       title={`Copy ${label}`}
       aria-label={`Copy ${label}`}
     >
-      {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+      <span className="copy-button-icon" aria-hidden="true">
+        {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+      </span>
     </button>
   );
 }

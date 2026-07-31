@@ -11,6 +11,7 @@ export interface Billing {
   govtCharges: number; consultancyCharges: number; targetCharges: number; otherCharges: number;
   totalAmount: number; dueDate?: string | null; daysOverdue?: number;
   targetBreakdown?: BillingTargetBreakdown[]; notes?: string;
+  sourceQuotationIds?: string[]; sourceQuotationNumbers?: string[];
   totalPaid: number; pendingAmount: number; paymentStatus: string;
   invoiceCreated?: boolean; invoiceNumber?: string;
   invoiceDate?: string | null; invoiceAmount?: number | null;

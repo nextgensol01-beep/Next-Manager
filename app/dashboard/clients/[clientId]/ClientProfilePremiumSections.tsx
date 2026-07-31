@@ -597,7 +597,7 @@ export function ClientProfileHeader({
                   copied={copiedKey === "client-id"}
                   label="client ID"
                   onClick={onCopyClientId}
-                  className="h-6 w-6 border-0 bg-transparent"
+                  className="client-profile-header-copy h-6 w-6 border-0 bg-transparent"
                 />
               </span>
               <CategoryBadge category={client.category} />

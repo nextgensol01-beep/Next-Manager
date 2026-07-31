@@ -26,6 +26,8 @@ export interface IBilling extends Document {
   dueDate?: Date;
   targetBreakdown?: IBillingTargetBreakdownRow[];
   notes?: string;
+  sourceQuotationIds?: string[];
+  sourceQuotationNumbers?: string[];
   // Invoice tracking
   invoiceCreated: boolean;
   invoiceNumber?: string;
@@ -64,6 +66,8 @@ const BillingSchema = new Schema<IBilling>(
     dueDate: { type: Date, default: null },
     targetBreakdown: { type: [BillingTargetBreakdownSchema], default: [] },
     notes: { type: String, default: "" },
+    sourceQuotationIds: { type: [String], default: [] },
+    sourceQuotationNumbers: { type: [String], default: [] },
     // Invoice tracking
     invoiceCreated: { type: Boolean, default: false },
     invoiceNumber: { type: String, trim: true, default: "" },
@@ -83,6 +87,7 @@ BillingSchema.pre("save", function (next) {
 });
 
 BillingSchema.index({ clientId: 1, financialYear: 1 }, { unique: true });
+BillingSchema.index({ sourceQuotationIds: 1 }, { unique: true, sparse: true });
 
 export default mongoose.models.Billing ||
   mongoose.model<IBilling>("Billing", BillingSchema);
