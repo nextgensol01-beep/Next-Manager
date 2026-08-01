@@ -1434,6 +1434,14 @@ function FieldGroupSheet({
   const [syncStatus, setSyncStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const firstRenderRef = useRef(true);
   const autosaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const dragState = useRef({
+    startY: 0,
+    currentY: 0,
+    dragging: false,
+    startTime: 0,
+  });
 
   useEffect(() => setMounted(true), []);
   useEffect(() => {
@@ -1488,14 +1496,98 @@ function FieldGroupSheet({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form]);
 
-  const close = () => {
+  const close = useCallback(() => {
+    if (closing) return;
+    if (sheetRef.current) sheetRef.current.style.animation = "";
     setClosing(true);
     setTimeout(() => {
       setVisible(false);
       setClosing(false);
       onClose();
     }, 290);
-  };
+  }, [closing, onClose]);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (window.innerWidth >= 768 || (event.target as HTMLElement).closest("button")) return;
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragState.current = {
+      startY: event.clientY,
+      currentY: event.clientY,
+      dragging: true,
+      startTime: Date.now(),
+    };
+
+    if (sheetRef.current) {
+      sheetRef.current.style.animation = "none";
+      sheetRef.current.style.transition = "none";
+      sheetRef.current.style.willChange = "transform";
+    }
+    if (backdropRef.current) backdropRef.current.style.transition = "none";
+  }, []);
+
+  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragState.current.dragging) return;
+
+    const delta = Math.max(0, event.clientY - dragState.current.startY);
+    dragState.current.currentY = event.clientY;
+
+    if (sheetRef.current) sheetRef.current.style.transform = `translateY(${delta}px)`;
+    if (backdropRef.current) {
+      const progress = Math.min(1, delta / Math.max(window.innerHeight * 0.8, 600));
+      backdropRef.current.style.opacity = String(1 - progress);
+    }
+  }, []);
+
+  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragState.current.dragging) return;
+    dragState.current.dragging = false;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const delta = Math.max(0, dragState.current.currentY - dragState.current.startY);
+    const elapsed = Date.now() - dragState.current.startTime;
+    const velocity = (delta / Math.max(elapsed, 1)) * 1000;
+
+    if (delta > 120 || velocity > 800) {
+      if (sheetRef.current) {
+        sheetRef.current.style.transition = "transform 280ms cubic-bezier(0.4, 0, 1, 1)";
+        sheetRef.current.style.transform = "translateY(100%)";
+      }
+      if (backdropRef.current) {
+        backdropRef.current.style.transition = "opacity 230ms ease";
+        backdropRef.current.style.opacity = "0";
+      }
+      setClosing(true);
+      setTimeout(() => {
+        setVisible(false);
+        setClosing(false);
+        onClose();
+      }, 290);
+      return;
+    }
+
+    if (sheetRef.current) {
+      sheetRef.current.style.transition = "transform 400ms cubic-bezier(0.34, 1.56, 0.64, 1)";
+      sheetRef.current.style.transform = "translateY(0)";
+    }
+    if (backdropRef.current) {
+      backdropRef.current.style.transition = "opacity 200ms ease";
+      backdropRef.current.style.opacity = "1";
+    }
+    setTimeout(() => {
+      if (sheetRef.current) {
+        sheetRef.current.style.transition = "";
+        sheetRef.current.style.willChange = "";
+        sheetRef.current.style.transform = "";
+      }
+      if (backdropRef.current) {
+        backdropRef.current.style.transition = "";
+        backdropRef.current.style.opacity = "";
+      }
+    }, 420);
+  }, [onClose]);
   const save = async () => {
     if (!form.label.trim() || !form.key.trim()) return;
     setSaving(true);
@@ -1528,9 +1620,15 @@ function FieldGroupSheet({
   if (!mounted || !visible) return null;
   return createPortal(
     <>
-      <div className={`field-sheet-backdrop ${closing ? "field-sheet-backdrop--exit" : ""}`} onClick={close} aria-hidden />
-      <div className={`field-sheet ${closing ? "field-sheet--exit" : ""}`} role="dialog" aria-modal>
-        <div className="field-sheet-drag-zone">
+      <div ref={backdropRef} className={`field-sheet-backdrop ${closing ? "field-sheet-backdrop--exit" : ""}`} onClick={close} aria-hidden />
+      <div ref={sheetRef} className={`field-sheet ${closing ? "field-sheet--exit" : ""}`} role="dialog" aria-modal>
+        <div
+          className="field-sheet-drag-zone"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+        >
           <div className="field-sheet-handle" />
           <div className="field-sheet-navbar">
             <button type="button" className="field-sheet-nav-btn" onClick={close}>{isEdit ? "Close" : "Cancel"}</button>
