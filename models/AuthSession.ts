@@ -6,6 +6,7 @@ export interface IAuthSession extends Document {
   provider?: "credentials" | "google";
   userAgent?: string;
   ip?: string;
+  location?: string;
   expires: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -18,6 +19,7 @@ const AuthSessionSchema = new Schema<IAuthSession>(
     provider: { type: String, enum: ["credentials", "google"], default: "credentials" },
     userAgent: { type: String, default: "" },
     ip: { type: String, default: "" },
+    location: { type: String, default: "" },
     expires: { type: Date, required: true, index: true },
   },
   { timestamps: true }

@@ -9,16 +9,25 @@ import {
 import toast from "react-hot-toast";
 import {
   CLIENT_CUSTOM_FIELD_ICONS,
-  CLIENT_CUSTOM_FIELD_PROFILE_POSITIONS,
+  CLIENT_CUSTOM_FIELD_FORM_SECTIONS,
+  CLIENT_CUSTOM_FIELD_FORM_TABS,
+  CLIENT_CUSTOM_FIELD_PROFILE_CLUSTERS,
+  CLIENT_CUSTOM_FIELD_PROFILE_DISPLAYS,
   CLIENT_CUSTOM_FIELD_TYPES,
   customFieldKeyFromLabel,
   type ClientCustomFieldDefinition,
+  type ClientCustomFieldFormSection,
+  type ClientCustomFieldFormTab,
+  type ClientCustomFieldGroupDefinition,
   type ClientCustomFieldIcon,
-  type ClientCustomFieldProfilePosition,
+  type ClientCustomFieldProfileCluster,
+  type ClientCustomFieldProfileDisplay,
   type ClientCustomFieldType,
 } from "@/lib/clientCustomFields";
 import { invalidate, useCache } from "@/lib/useCache";
 import ConfirmModal from "@/components/ui/ConfirmModal";
+import CustomFieldPlacementPreview from "./CustomFieldPlacementPreview";
+import { CATEGORIES } from "@/lib/utils";
 
 /* ─── constants ─────────────────────────────────────────────────────────── */
 
@@ -29,9 +38,32 @@ const emptyFieldForm = {
   searchable: false,
   required: false,
   active: true,
+  showInForm: true,
   showInProfile: true,
-  profilePosition: "beforeContact" as ClientCustomFieldProfilePosition,
+  includeInExport: true,
+  applicableCategories: [] as string[],
+  groupId: "",
+  formTab: "basic" as ClientCustomFieldFormTab,
+  formSection: "company" as ClientCustomFieldFormSection,
+  profileDisplay: "inline" as ClientCustomFieldProfileDisplay,
+  profileCluster: "additional" as ClientCustomFieldProfileCluster,
   icon: "fileText" as ClientCustomFieldIcon,
+  order: "",
+};
+
+const emptyGroupForm = {
+  label: "",
+  key: "",
+  description: "",
+  icon: "fileText" as ClientCustomFieldIcon,
+  active: true,
+  applicableCategories: [] as string[],
+  formTab: "basic" as ClientCustomFieldFormTab,
+  formSection: "company" as ClientCustomFieldFormSection,
+  profileDisplay: "subsection" as Exclude<ClientCustomFieldProfileDisplay, "inline">,
+  profileCluster: "additional" as ClientCustomFieldProfileCluster,
+  collapsible: true,
+  defaultExpanded: true,
   order: "",
 };
 
@@ -73,7 +105,7 @@ type ConfirmState = {
   onConfirm: () => Promise<void>;
 };
 
-type Sheet = "none" | "add" | "edit";
+type Sheet = "none" | "add" | "edit" | "addGroup" | "editGroup";
 
 const closedConfirm: ConfirmState = { open: false, title: "", onConfirm: async () => {} };
 
@@ -179,25 +211,28 @@ function AppleToggle({
   onChange,
   label,
   subtitle,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   subtitle?: string;
+  disabled?: boolean;
 }) {
   return (
-    <label className="apple-row apple-toggle-row">
+    <label className={`apple-row apple-toggle-row ${disabled ? "apple-row--disabled" : ""}`}>
       <span className="apple-row-content">
         <span className="apple-row-label">{label}</span>
         {subtitle && <span className="apple-row-subtitle">{subtitle}</span>}
       </span>
       <span
         className={`apple-toggle ${checked ? "apple-toggle--on" : ""}`}
-        onClick={() => onChange(!checked)}
+        onClick={() => { if (!disabled) onChange(!checked); }}
         role="switch"
         aria-checked={checked}
-        tabIndex={0}
-        onKeyDown={(e) => e.key === " " && onChange(!checked)}
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled}
+        onKeyDown={(e) => e.key === " " && !disabled && onChange(!checked)}
       >
         <span className="apple-toggle-thumb" />
       </span>
@@ -727,11 +762,15 @@ function AppleIconGridPicker({
 function FieldSheet({
   open,
   editingField,
+  initialGroupId,
+  groups,
   onClose,
   onSaved,
 }: {
   open: boolean;
   editingField: ClientCustomFieldDefinition | null;
+  initialGroupId: string;
+  groups: ClientCustomFieldGroupDefinition[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -946,14 +985,27 @@ function FieldSheet({
         searchable: editingField.searchable,
         required: editingField.required,
         active: editingField.active,
+        showInForm: editingField.showInForm !== false,
         showInProfile: editingField.showInProfile !== false,
-        profilePosition: editingField.profilePosition || "beforeContact",
+        includeInExport: editingField.type === "password" ? false : editingField.includeInExport !== false,
+        applicableCategories: editingField.applicableCategories || [],
+        groupId: editingField.groupId || "",
+        formTab: editingField.formTab || "basic",
+        formSection: editingField.formSection || (
+          editingField.profilePosition === "afterContact" ? "contacts" :
+          editingField.profilePosition === "afterCompany" ? "compliance" : "company"
+        ),
+        profileDisplay: editingField.profileDisplay || "inline",
+        profileCluster: editingField.profileCluster || (
+          editingField.profilePosition === "afterContact" ? "contact" :
+          editingField.profilePosition === "afterCompany" ? "compliance" : "company"
+        ),
         icon: editingField.icon || "fileText",
         order: String(editingField.order || ""),
       });
       setKeyTouched(true);
     } else {
-      setForm(emptyFieldForm);
+      setForm({ ...emptyFieldForm, groupId: initialGroupId });
       setKeyTouched(false);
     }
   }
@@ -1007,6 +1059,18 @@ function FieldSheet({
       ...c,
       label,
       key: isEdit || keyTouched ? c.key : customFieldKeyFromLabel(label),
+    }));
+  };
+
+  const activeGroups = groups.filter((group) => group.active);
+  const selectedGroup = activeGroups.find((group) => group._id === form.groupId);
+  const availableFormSections = CLIENT_CUSTOM_FIELD_FORM_SECTIONS.filter((section) => section.tab === form.formTab);
+  const toggleCategory = (category: string) => {
+    setForm((current) => ({
+      ...current,
+      applicableCategories: current.applicableCategories.includes(category)
+        ? current.applicableCategories.filter((value) => value !== category)
+        : [...current.applicableCategories, category],
     }));
   };
 
@@ -1119,6 +1183,27 @@ function FieldSheet({
               </span>
             </div>
 
+            <CustomFieldPlacementPreview
+              label={form.label}
+              icon={<FieldIconSquare iconKey={form.icon} size={18} />}
+              groupLabel={selectedGroup?.label}
+              formTab={selectedGroup?.formTab || form.formTab}
+              formSection={selectedGroup?.formSection || form.formSection}
+              profileDisplay={selectedGroup?.profileDisplay || form.profileDisplay}
+              profileCluster={selectedGroup?.profileCluster || form.profileCluster}
+              onFormTabChange={selectedGroup ? undefined : (formTab) => setForm((current) => ({
+                ...current,
+                formTab,
+                formSection: formTab === "portal" ? "portalCredentials" : current.formSection === "portalCredentials" ? "company" : current.formSection,
+              }))}
+              onFormSectionChange={(formSection) => {
+                if (!selectedGroup) setForm((current) => ({ ...current, formSection }));
+              }}
+              onProfileClusterChange={(profileCluster) => {
+                if (!selectedGroup) setForm((current) => ({ ...current, profileCluster }));
+              }}
+            />
+
             {/* Identity */}
             <AppleSection header="IDENTITY">
               <AppleInputRow label="Label">
@@ -1151,29 +1236,31 @@ function FieldSheet({
 
             {/* Appearance — inline pickers replace native selects */}
             <AppleSection header="APPEARANCE">
-              <AppleInlinePicker
-                label="Type"
-                value={form.type}
-                options={CLIENT_CUSTOM_FIELD_TYPES}
-                onChange={(v) => setForm((c) => ({ ...c, type: v as ClientCustomFieldType }))}
-                isOpen={openPicker === "type"}
-                onToggle={() => togglePicker("type")}
-              />
+              {isEdit ? (
+                <AppleInputRow label="Type">
+                  <span className="apple-picker-value">{CLIENT_CUSTOM_FIELD_TYPES.find((item) => item.id === form.type)?.label}</span>
+                </AppleInputRow>
+              ) : (
+                <AppleInlinePicker
+                  label="Type"
+                  value={form.type}
+                  options={CLIENT_CUSTOM_FIELD_TYPES}
+                  onChange={(v) => setForm((c) => ({
+                    ...c,
+                    type: v as ClientCustomFieldType,
+                    searchable: v === "password" || v === "checkbox" ? false : c.searchable,
+                    includeInExport: v === "password" ? false : c.includeInExport,
+                  }))}
+                  isOpen={openPicker === "type"}
+                  onToggle={() => togglePicker("type")}
+                />
+              )}
               <div className="apple-separator" />
               <AppleIconGridPicker
                 value={form.icon}
                 onChange={(v) => setForm((c) => ({ ...c, icon: v }))}
                 isOpen={openPicker === "icon"}
                 onToggle={() => togglePicker("icon")}
-              />
-              <div className="apple-separator" />
-              <AppleInlinePicker
-                label="Position"
-                value={form.profilePosition}
-                options={CLIENT_CUSTOM_FIELD_PROFILE_POSITIONS}
-                onChange={(v) => setForm((c) => ({ ...c, profilePosition: v as ClientCustomFieldProfilePosition }))}
-                isOpen={openPicker === "position"}
-                onToggle={() => togglePicker("position")}
               />
               <div className="apple-separator" />
               <AppleInputRow label="Order">
@@ -1186,35 +1273,134 @@ function FieldSheet({
                 />
               </AppleInputRow>
             </AppleSection>
+            {isEdit && <p className="apple-section-footer" style={{ marginTop: -8 }}>Type is fixed after creation so saved client values cannot be reinterpreted.</p>}
 
-            {/* Options */}
+            <AppleSection
+              header="FIELD GROUP"
+              footer={selectedGroup
+                ? `This field inherits the ${selectedGroup.label} form and profile placement.`
+                : "Keep an individual field inline, or add it to a reusable section of related fields."}
+            >
+              <AppleInlinePicker
+                label="Presentation"
+                value={form.groupId}
+                options={[
+                  { id: "", label: "Individual Field" },
+                  ...activeGroups.filter((group): group is ClientCustomFieldGroupDefinition & { _id: string } => Boolean(group._id)).map((group) => ({ id: group._id, label: group.label })),
+                ]}
+                onChange={(v) => setForm((current) => ({ ...current, groupId: v }))}
+                isOpen={openPicker === "group"}
+                onToggle={() => togglePicker("group")}
+              />
+            </AppleSection>
+
+            {!selectedGroup && (
+              <>
+                <AppleSection header="CLIENT FORM PLACEMENT" footer="Choose the tab and stable section where users enter this value.">
+                  <AppleInlinePicker
+                    label="Form Tab"
+                    value={form.formTab}
+                    options={CLIENT_CUSTOM_FIELD_FORM_TABS}
+                    onChange={(v) => {
+                      const formTab = v as ClientCustomFieldFormTab;
+                      const firstSection = CLIENT_CUSTOM_FIELD_FORM_SECTIONS.find((section) => section.tab === formTab)?.id || "company";
+                      setForm((current) => ({ ...current, formTab, formSection: firstSection }));
+                    }}
+                    isOpen={openPicker === "formTab"}
+                    onToggle={() => togglePicker("formTab")}
+                  />
+                  <div className="apple-separator" />
+                  <AppleInlinePicker
+                    label="Section"
+                    value={form.formSection}
+                    options={availableFormSections}
+                    onChange={(v) => setForm((current) => ({ ...current, formSection: v as ClientCustomFieldFormSection }))}
+                    isOpen={openPicker === "formSection"}
+                    onToggle={() => togglePicker("formSection")}
+                  />
+                </AppleSection>
+
+                <AppleSection header="PROFILE OVERVIEW PLACEMENT" footer="The live preview follows the Company Overview information architecture.">
+                  <AppleInlinePicker
+                    label="Presentation"
+                    value={form.profileDisplay}
+                    options={CLIENT_CUSTOM_FIELD_PROFILE_DISPLAYS}
+                    onChange={(v) => setForm((current) => ({ ...current, profileDisplay: v as ClientCustomFieldProfileDisplay }))}
+                    isOpen={openPicker === "profileDisplay"}
+                    onToggle={() => togglePicker("profileDisplay")}
+                  />
+                  <div className="apple-separator" />
+                  <AppleInlinePicker
+                    label="Location"
+                    value={form.profileCluster}
+                    options={CLIENT_CUSTOM_FIELD_PROFILE_CLUSTERS}
+                    onChange={(v) => setForm((current) => ({ ...current, profileCluster: v as ClientCustomFieldProfileCluster }))}
+                    isOpen={openPicker === "profileCluster"}
+                    onToggle={() => togglePicker("profileCluster")}
+                  />
+                </AppleSection>
+              </>
+            )}
+
+            <AppleSection header="APPLICABLE CLIENTS" footer="No selection means this field is available for every client category.">
+              <div className="apple-category-grid">
+                {CATEGORIES.map((category) => (
+                  <button
+                    key={category}
+                    type="button"
+                    className={`apple-category-chip ${form.applicableCategories.includes(category) ? "selected" : ""}`}
+                    onClick={() => toggleCategory(category)}
+                  >
+                    {category}
+                    {form.applicableCategories.includes(category) && <Check size={11} />}
+                  </button>
+                ))}
+              </div>
+            </AppleSection>
+
             <AppleSection header="OPTIONS">
               <AppleToggle
                 checked={form.searchable}
                 onChange={(v) => setForm((c) => ({ ...c, searchable: v }))}
                 label="Searchable"
-                subtitle="Appear in client search results"
+                subtitle={form.type === "password" || form.type === "checkbox" ? "Unavailable for secure and checkbox fields" : "Allow the client search box to match this value"}
+                disabled={form.type === "password" || form.type === "checkbox"}
               />
               <div className="apple-separator" />
               <AppleToggle
                 checked={form.required}
                 onChange={(v) => setForm((c) => ({ ...c, required: v }))}
                 label="Required"
-                subtitle="Must be filled in when creating a client"
+                subtitle="Required when creating or editing an applicable client"
               />
               <div className="apple-separator" />
               <AppleToggle
                 checked={form.active}
                 onChange={(v) => setForm((c) => ({ ...c, active: v }))}
                 label="Active"
-                subtitle="Show in forms and exports"
+                subtitle="Make this field available throughout client records"
+              />
+              <div className="apple-separator" />
+              <AppleToggle
+                checked={form.showInForm}
+                onChange={(v) => setForm((c) => ({ ...c, showInForm: v }))}
+                label="Show in Client Form"
+                subtitle="Allow users to enter and update this value"
               />
               <div className="apple-separator" />
               <AppleToggle
                 checked={form.showInProfile}
                 onChange={(v) => setForm((c) => ({ ...c, showInProfile: v }))}
                 label="Show in Profile"
-                subtitle="Display on client profile page"
+                subtitle="Display on the client profile overview"
+              />
+              <div className="apple-separator" />
+              <AppleToggle
+                checked={form.includeInExport}
+                onChange={(v) => setForm((c) => ({ ...c, includeInExport: v }))}
+                label="Include in Exports"
+                subtitle={form.type === "password" ? "Secure values are never included in normal exports" : "Make this field available in custom client exports"}
+                disabled={form.type === "password"}
               />
             </AppleSection>
 
@@ -1226,11 +1412,209 @@ function FieldSheet({
   );
 }
 
+function FieldGroupSheet({
+  open,
+  editingGroup,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  editingGroup: ClientCustomFieldGroupDefinition | null;
+  onClose: () => void;
+  onSaved: (group?: ClientCustomFieldGroupDefinition, created?: boolean) => void;
+}) {
+  const isEdit = Boolean(editingGroup?._id);
+  const [mounted, setMounted] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [form, setForm] = useState(emptyGroupForm);
+  const [keyTouched, setKeyTouched] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [openPicker, setOpenPicker] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const firstRenderRef = useRef(true);
+  const autosaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    if (open) {
+      setVisible(true);
+      setClosing(false);
+      firstRenderRef.current = true;
+      setSyncStatus("idle");
+      if (editingGroup) {
+        setForm({
+          label: editingGroup.label,
+          key: editingGroup.key,
+          description: editingGroup.description || "",
+          icon: editingGroup.icon || "fileText",
+          active: editingGroup.active,
+          applicableCategories: editingGroup.applicableCategories || [],
+          formTab: editingGroup.formTab || "basic",
+          formSection: editingGroup.formSection || (editingGroup.formTab === "portal" ? "portalCredentials" : "company"),
+          profileDisplay: editingGroup.profileDisplay || "subsection",
+          profileCluster: editingGroup.profileCluster || "additional",
+          collapsible: editingGroup.collapsible !== false,
+          defaultExpanded: Boolean(editingGroup.defaultExpanded),
+          order: String(editingGroup.order || ""),
+        });
+        setKeyTouched(true);
+      } else {
+        setForm(emptyGroupForm);
+        setKeyTouched(false);
+      }
+    }
+  }, [editingGroup, open]);
+
+  useEffect(() => {
+    if (firstRenderRef.current) { firstRenderRef.current = false; return; }
+    if (!isEdit || !editingGroup?._id || !form.label.trim() || !form.key.trim()) return;
+    if (autosaveRef.current) clearTimeout(autosaveRef.current);
+    setSyncStatus("saving");
+    autosaveRef.current = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/client-custom-field-groups/${editingGroup._id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+        });
+        if (!response.ok) { setSyncStatus("error"); return; }
+        invalidate("/api/client-custom-field-groups", "/api/client-custom-fields", "/api/clients");
+        setSyncStatus("saved");
+        onSaved();
+      } catch { setSyncStatus("error"); }
+    }, 800);
+    return () => { if (autosaveRef.current) clearTimeout(autosaveRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form]);
+
+  const close = () => {
+    setClosing(true);
+    setTimeout(() => {
+      setVisible(false);
+      setClosing(false);
+      onClose();
+    }, 290);
+  };
+  const save = async () => {
+    if (!form.label.trim() || !form.key.trim()) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/client-custom-field-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) { toast.error(body?.error || "Failed to create group"); return; }
+      invalidate("/api/client-custom-field-groups", "/api/client-custom-fields", "/api/clients");
+      toast.success("Field group added");
+      onSaved(body as ClientCustomFieldGroupDefinition, true);
+      close();
+    } finally { setSaving(false); }
+  };
+  const updateLabel = (label: string) => setForm((current) => ({
+    ...current,
+    label,
+    key: isEdit || keyTouched ? current.key : customFieldKeyFromLabel(label),
+  }));
+  const toggleCategory = (category: string) => setForm((current) => ({
+    ...current,
+    applicableCategories: current.applicableCategories.includes(category)
+      ? current.applicableCategories.filter((value) => value !== category)
+      : [...current.applicableCategories, category],
+  }));
+
+  if (!mounted || !visible) return null;
+  return createPortal(
+    <>
+      <div className={`field-sheet-backdrop ${closing ? "field-sheet-backdrop--exit" : ""}`} onClick={close} aria-hidden />
+      <div className={`field-sheet ${closing ? "field-sheet--exit" : ""}`} role="dialog" aria-modal>
+        <div className="field-sheet-drag-zone">
+          <div className="field-sheet-handle" />
+          <div className="field-sheet-navbar">
+            <button type="button" className="field-sheet-nav-btn" onClick={close}>{isEdit ? "Close" : "Cancel"}</button>
+            <span className="field-sheet-title">{isEdit ? "Edit Field Group" : "New Field Group"}</span>
+            {isEdit ? (
+              <span className="field-sheet-sync-slot">
+                {syncStatus === "saving" && <span className="sync-chip sync-chip--saving"><span className="sync-spinner" />Saving</span>}
+                {syncStatus === "saved" && <span className="sync-chip sync-chip--saved"><Check size={11} />Saved</span>}
+                {syncStatus === "error" && <span className="sync-chip sync-chip--error"><AlertTriangle size={11} />Failed</span>}
+              </span>
+            ) : (
+              <button type="button" className="field-sheet-nav-btn field-sheet-nav-btn--done" disabled={saving || !form.label.trim() || !form.key.trim()} onClick={save}>{saving ? "Saving…" : "Done"}</button>
+            )}
+          </div>
+        </div>
+        <div className={`field-sheet-body ${!closing ? "field-sheet-content-enter" : "field-sheet-content-exit"}`}>
+          <div className="field-sheet-preview">
+            <FieldIconSquare iconKey={form.icon} size={56} />
+            <span className="field-sheet-preview-label">{form.label || "Section Name"}</span>
+            <span className="field-sheet-preview-key">{form.key || "sectionKey"}</span>
+          </div>
+          <CustomFieldPlacementPreview
+            label="First field"
+            icon={<FieldIconSquare iconKey={form.icon} size={18} />}
+            groupLabel={form.label || "Custom Section"}
+            formTab={form.formTab}
+            formSection={form.formSection}
+            profileDisplay={form.profileDisplay}
+            profileCluster={form.profileCluster}
+            onFormTabChange={(formTab) => setForm((current) => ({
+              ...current,
+              formTab,
+              formSection: formTab === "portal" ? "portalCredentials" : current.formSection === "portalCredentials" ? "company" : current.formSection,
+            }))}
+            onFormSectionChange={(formSection) => setForm((current) => ({ ...current, formSection }))}
+            onProfileClusterChange={(profileCluster) => setForm((current) => ({ ...current, profileCluster }))}
+          />
+          <AppleSection header="IDENTITY">
+            <AppleInputRow label="Name"><input className="apple-text-input" value={form.label} onChange={(event) => updateLabel(event.target.value)} placeholder="e.g. Secondary Portal Access" autoFocus /></AppleInputRow>
+            <div className="apple-separator" />
+            <AppleInputRow label="Key"><input className="apple-text-input apple-text-input--mono" value={form.key} onChange={(event) => { setKeyTouched(true); setForm((current) => ({ ...current, key: event.target.value })); }} disabled={isEdit} placeholder="secondaryPortalAccess" /></AppleInputRow>
+            <div className="apple-separator" />
+            <AppleInputRow label="Description"><input className="apple-text-input" value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} placeholder="Optional supporting text" /></AppleInputRow>
+          </AppleSection>
+          <AppleSection header="APPEARANCE">
+            <AppleIconGridPicker value={form.icon} onChange={(icon) => setForm((current) => ({ ...current, icon }))} isOpen={openPicker === "icon"} onToggle={() => setOpenPicker((current) => current === "icon" ? null : "icon")} />
+            <div className="apple-separator" />
+            <AppleInputRow label="Order"><input className="apple-text-input apple-text-input--mono apple-text-input--right" type="number" value={form.order} onChange={(event) => setForm((current) => ({ ...current, order: event.target.value }))} placeholder="Auto" /></AppleInputRow>
+          </AppleSection>
+          <AppleSection header="CLIENT FORM PLACEMENT">
+            <AppleInlinePicker label="Form Tab" value={form.formTab} options={CLIENT_CUSTOM_FIELD_FORM_TABS} onChange={(value) => setForm((current) => ({ ...current, formTab: value as ClientCustomFieldFormTab, formSection: value === "portal" ? "portalCredentials" : current.formSection === "portalCredentials" ? "company" : current.formSection }))} isOpen={openPicker === "formTab"} onToggle={() => setOpenPicker((current) => current === "formTab" ? null : "formTab")} />
+            <div className="apple-separator" />
+            <AppleInlinePicker label="Drop Location" value={form.formSection} options={CLIENT_CUSTOM_FIELD_FORM_SECTIONS.filter((section) => section.tab === form.formTab)} onChange={(value) => setForm((current) => ({ ...current, formSection: value as ClientCustomFieldFormSection }))} isOpen={openPicker === "formSection"} onToggle={() => setOpenPicker((current) => current === "formSection" ? null : "formSection")} />
+          </AppleSection>
+          <AppleSection header="PROFILE OVERVIEW PLACEMENT">
+            <AppleInlinePicker label="Presentation" value={form.profileDisplay} options={CLIENT_CUSTOM_FIELD_PROFILE_DISPLAYS.filter((item) => item.id !== "inline")} onChange={(value) => setForm((current) => ({ ...current, profileDisplay: value as "subsection" | "card" }))} isOpen={openPicker === "profileDisplay"} onToggle={() => setOpenPicker((current) => current === "profileDisplay" ? null : "profileDisplay")} />
+            <div className="apple-separator" />
+            <AppleInlinePicker label="Drop Location" value={form.profileCluster} options={CLIENT_CUSTOM_FIELD_PROFILE_CLUSTERS} onChange={(value) => setForm((current) => ({ ...current, profileCluster: value as ClientCustomFieldProfileCluster }))} isOpen={openPicker === "profileCluster"} onToggle={() => setOpenPicker((current) => current === "profileCluster" ? null : "profileCluster")} />
+          </AppleSection>
+          <AppleSection header="APPLICABLE CLIENTS" footer="No selection means this group is available for every client category.">
+            <div className="apple-category-grid">{CATEGORIES.map((category) => <button key={category} type="button" className={`apple-category-chip ${form.applicableCategories.includes(category) ? "selected" : ""}`} onClick={() => toggleCategory(category)}>{category}{form.applicableCategories.includes(category) && <Check size={11} />}</button>)}</div>
+          </AppleSection>
+          <AppleSection header="BEHAVIOUR">
+            <AppleToggle checked={form.active} onChange={(active) => setForm((current) => ({ ...current, active }))} label="Active" subtitle="Show this section in client records" />
+            <div className="apple-separator" />
+            <AppleToggle checked={form.collapsible} onChange={(collapsible) => setForm((current) => ({ ...current, collapsible }))} label="Collapsible" subtitle="Allow users to expand and collapse the section" />
+            <div className="apple-separator" />
+            <AppleToggle checked={form.defaultExpanded} onChange={(defaultExpanded) => setForm((current) => ({ ...current, defaultExpanded }))} label="Expanded by Default" subtitle="Open the section when a client is viewed" disabled={!form.collapsible} />
+          </AppleSection>
+        </div>
+      </div>
+    </>,
+    document.body,
+  );
+}
+
 /* ─── Main panel ─────────────────────────────────────────────────────────── */
 
 export default function CustomFieldsPanel() {
   const [sheet, setSheet] = useState<Sheet>("none");
   const [editingField, setEditingField] = useState<ClientCustomFieldDefinition | null>(null);
+  const [editingGroup, setEditingGroup] = useState<ClientCustomFieldGroupDefinition | null>(null);
+  const [initialGroupId, setInitialGroupId] = useState("");
+  const [fieldSheetNonce, setFieldSheetNonce] = useState(0);
   const [confirmState, setConfirmState] = useState<ConfirmState>(closedConfirm);
   const [permDeleteLoading, setPermDeleteLoading] = useState(false);
 
@@ -1238,11 +1622,30 @@ export default function CustomFieldsPanel() {
     "/api/client-custom-fields?includeInactive=1",
     { initialData: [] },
   );
+  const { data: groups = [], refetch: refetchGroups } = useCache<ClientCustomFieldGroupDefinition[]>(
+    "/api/client-custom-field-groups?includeInactive=1",
+    { initialData: [] },
+  );
 
-  const openAdd = () => { setEditingField(null); setSheet("add"); };
+  const openAdd = (groupId = "") => {
+    setEditingField(null);
+    setInitialGroupId(groupId);
+    setFieldSheetNonce((value) => value + 1);
+    setSheet("add");
+  };
   const openEdit = (f: ClientCustomFieldDefinition) => { setEditingField(f); setSheet("edit"); };
-  const closeSheet = () => { setSheet("none"); setEditingField(null); };
+  const openAddGroup = () => { setEditingGroup(null); setSheet("addGroup"); };
+  const openEditGroup = (group: ClientCustomFieldGroupDefinition) => { setEditingGroup(group); setSheet("editGroup"); };
+  const closeSheet = () => { setSheet("none"); setEditingField(null); setEditingGroup(null); };
   const onSaved = () => { closeSheet(); refetch(); };
+  const handleGroupSaved = (group?: ClientCustomFieldGroupDefinition, created?: boolean) => {
+    refetchGroups();
+    refetch();
+    if (created && group?._id) {
+      const groupId = group._id;
+      setTimeout(() => openAdd(groupId), 380);
+    }
+  };
 
   const disableField = (f: ClientCustomFieldDefinition) => {
     if (!f._id) return;
@@ -1311,12 +1714,73 @@ export default function CustomFieldsPanel() {
 
   const active = fields.filter((f) => f.active);
   const inactive = fields.filter((f) => !f.active);
+  const activeGroups = groups.filter((group) => group.active);
+  const inactiveGroups = groups.filter((group) => !group.active);
+
+  const setGroupActive = async (group: ClientCustomFieldGroupDefinition, activeState: boolean) => {
+    if (!group._id) return;
+    const response = await fetch(`/api/client-custom-field-groups/${group._id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: activeState }),
+    });
+    if (!response.ok) { toast.error("Failed to update group"); return; }
+    invalidate("/api/client-custom-field-groups", "/api/client-custom-fields", "/api/clients");
+    refetchGroups();
+  };
+
+  const deleteGroup = (group: ClientCustomFieldGroupDefinition) => {
+    if (!group._id) return;
+    const fieldCount = fields.filter((field) => field.groupId === group._id).length;
+    setConfirmState({
+      open: true,
+      title: `Delete "${group.label}"?`,
+      description: fieldCount > 0
+        ? `${fieldCount} field${fieldCount === 1 ? "" : "s"} will become individual fields. Client values will remain saved.`
+        : "This will permanently remove the empty field group.",
+      confirmLabel: "Delete Group",
+      confirmText: group.key,
+      variant: "danger",
+      onConfirm: async () => {
+        const response = await fetch(`/api/client-custom-field-groups/${group._id}?permanent=1`, { method: "DELETE" });
+        if (!response.ok) { toast.error("Failed to delete group"); return; }
+        invalidate("/api/client-custom-field-groups", "/api/client-custom-fields", "/api/clients");
+        refetchGroups();
+        refetch();
+        setConfirmState(closedConfirm);
+      },
+    });
+  };
 
   return (
     <>
       <style>{appleStyles}</style>
 
       <div className="apple-page">
+
+        <AppleSection
+          header="FIELD GROUPS"
+          footer="Groups create a coherent section in the client form and Profile Overview. Assigned fields inherit the group placement."
+        >
+          {activeGroups.length === 0 && (
+            <div className="apple-empty-row"><Info size={16} className="apple-empty-icon" /><span>No active field groups</span></div>
+          )}
+          {activeGroups.map((group, index) => (
+            <div key={group._id || group.key}>
+              {index > 0 && <div className="apple-separator" />}
+              <GroupRow
+                group={group}
+                fieldCount={fields.filter((field) => field.groupId === group._id).length}
+                onAddField={() => openAdd(group._id || "")}
+                onEdit={() => openEditGroup(group)}
+                onDisable={() => setGroupActive(group, false)}
+                onDelete={() => deleteGroup(group)}
+              />
+            </div>
+          ))}
+          <div className="apple-separator" />
+          <AppleRow icon={Plus} iconBg="#5856D6" label="Add Field Group" subtitle="Create a reusable section of related fields" chevron onClick={openAddGroup} />
+        </AppleSection>
 
         {/* ── Active fields ── */}
         <AppleSection
@@ -1386,14 +1850,40 @@ export default function CustomFieldsPanel() {
           </AppleSection>
         )}
 
+        {inactiveGroups.length > 0 && (
+          <AppleSection header="DISABLED GROUPS" footer="Fields and values remain saved while a group is disabled.">
+            {inactiveGroups.map((group, index) => (
+              <div key={group._id || group.key}>
+                {index > 0 && <div className="apple-separator" />}
+                <GroupRow
+                  group={group}
+                  fieldCount={fields.filter((field) => field.groupId === group._id).length}
+                  onEdit={() => openEditGroup(group)}
+                  onEnable={() => setGroupActive(group, true)}
+                  onDelete={() => deleteGroup(group)}
+                />
+              </div>
+            ))}
+          </AppleSection>
+        )}
+
       </div>
 
       {/* ── Sheet ── */}
       <FieldSheet
-        open={sheet !== "none"}
+        key={`field-sheet-${fieldSheetNonce}`}
+        open={sheet === "add" || sheet === "edit"}
         editingField={editingField}
+        initialGroupId={initialGroupId}
+        groups={groups}
         onClose={closeSheet}
-        onSaved={onSaved}
+        onSaved={() => { onSaved(); refetchGroups(); }}
+      />
+      <FieldGroupSheet
+        open={sheet === "addGroup" || sheet === "editGroup"}
+        editingGroup={editingGroup}
+        onClose={closeSheet}
+        onSaved={handleGroupSaved}
       />
 
       {/* ── Confirm modal ── */}
@@ -1414,6 +1904,60 @@ export default function CustomFieldsPanel() {
 
 /* ─── Field row ──────────────────────────────────────────────────────────── */
 
+function GroupRow({
+  group,
+  fieldCount,
+  onAddField,
+  onEdit,
+  onDisable,
+  onEnable,
+  onDelete,
+}: {
+  group: ClientCustomFieldGroupDefinition;
+  fieldCount: number;
+  onAddField?: () => void;
+  onEdit: () => void;
+  onDisable?: () => void;
+  onEnable?: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className={`apple-field-row ${!group.active ? "apple-field-row--inactive" : ""}`}>
+      <button type="button" className="apple-field-row-main" onClick={onEdit}>
+        <FieldIconSquare iconKey={group.icon || "fileText"} size={32} />
+        <span className="apple-field-row-text">
+          <span className="apple-field-row-label">{group.label}</span>
+          <span className="apple-field-row-meta">
+            <span className="apple-field-key">{group.key}</span>
+            <span className="apple-field-row-dots">·</span>
+            <span className="apple-field-meta-tail">
+              {fieldCount === 0 ? "Empty section — add a field" : `${fieldCount} field${fieldCount === 1 ? "" : "s"}`} · {group.formTab === "portal" ? "Portal Access" : "Basic Details"} · {group.profileDisplay === "card" ? "Profile Card" : "Profile Subsection"}
+            </span>
+          </span>
+        </span>
+        <ChevronRight size={16} className="apple-row-chevron" />
+      </button>
+      <div className="apple-field-row-actions">
+        {group.active && onAddField && (
+          <button type="button" title="Add field to group" aria-label={`Add field to ${group.label}`} onClick={onAddField} className="apple-action-btn apple-action-btn--add">
+            <Plus size={14} />
+          </button>
+        )}
+        <span
+          role="switch"
+          aria-checked={group.active}
+          title={group.active ? "Disable group" : "Re-enable group"}
+          tabIndex={0}
+          className={`apple-toggle apple-field-row-toggle ${group.active ? "apple-toggle--on" : ""}`}
+          onClick={group.active ? onDisable : onEnable}
+          onKeyDown={(event) => event.key === " " && (group.active ? onDisable?.() : onEnable?.())}
+        ><span className="apple-toggle-thumb" /></span>
+        <button type="button" title="Delete group" onClick={onDelete} className="apple-action-btn apple-action-btn--danger"><Trash2 size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
 function FieldRow({
   field,
   onEdit,
@@ -1431,6 +1975,7 @@ function FieldRow({
 }) {
   const subtitleParts = [
     field.type.charAt(0).toUpperCase() + field.type.slice(1),
+    field.groupId ? "Grouped" : (field.formTab === "portal" ? "Portal Form" : "Basic Form"),
     field.searchable ? "Searchable" : null,
     field.required ? "Required" : null,
     field.showInProfile !== false ? "In Profile" : null,
@@ -1804,6 +2349,14 @@ const appleStyles = `
 .apple-action-btn:active { opacity: 0.65; }
 .apple-action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 /* Action button colours use semi-transparent tints so they adapt to both modes */
+.apple-action-btn--add {
+  background: rgba(0, 122, 255, 0.12);
+  color: #007AFF;
+}
+.dark .apple-action-btn--add {
+  background: rgba(10, 132, 255, 0.17);
+  color: #0A84FF;
+}
 .apple-action-btn--warn {
   background: rgba(255, 149, 0, 0.12);
   color: #FF9500;
@@ -2375,6 +2928,33 @@ const appleStyles = `
 /* ══════════════════════════════════════════════════════════════════════════
    REDUCED MOTION — instant transitions for accessibility
    ══════════════════════════════════════════════════════════════════════════ */
+
+.apple-category-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 16px;
+}
+.apple-category-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  transition: transform .18s ease, border-color .18s ease, background .18s ease, color .18s ease;
+}
+.apple-category-chip:hover { transform: translateY(-1px); }
+.apple-category-chip.selected {
+  border-color: rgba(0,122,255,.42);
+  background: rgba(0,122,255,.1);
+  color: #007aff;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .field-sheet,

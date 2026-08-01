@@ -40,7 +40,7 @@ import {
 } from "@/lib/clientContactSelections";
 import type { PersonEntry } from "@/app/dashboard/clients/[clientId]/ClientProfileSupport";
 import type { ClientFormData } from "@/components/clients/ClientFormModal";
-import type { ClientCustomFieldDefinition, ClientCustomFieldValues } from "@/lib/clientCustomFields";
+import type { ClientCustomFieldDefinition, ClientCustomFieldGroupDefinition, ClientCustomFieldValues } from "@/lib/clientCustomFields";
 
 const ClientFormModal = dynamic(() => import("@/components/clients/ClientFormModal"), {
   ssr: false,
@@ -1055,6 +1055,10 @@ export default function ClientsPage() {
     "/api/client-custom-fields",
     { enabled: modalOpen, initialData: [] }
   );
+  const { data: customFieldGroups } = useCache<ClientCustomFieldGroupDefinition[]>(
+    "/api/client-custom-field-groups",
+    { enabled: modalOpen, initialData: [] }
+  );
 
   const queryParams = useMemo(() => {
     const params = new URLSearchParams();
@@ -1671,6 +1675,7 @@ export default function ClientsPage() {
           onClose={() => setModalOpen(false)}
           client={editClient}
           customFieldDefinitions={customFieldDefinitions}
+          customFieldGroups={customFieldGroups}
           onSave={handleSaveClient}
           saving={saving}
         />

@@ -364,7 +364,7 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
     throw new Error("Select at least one field to export");
   }
 
-  const customFieldDefinitions = (await ClientCustomField.find({ active: true })
+  const customFieldDefinitions = (await ClientCustomField.find({ active: true, includeInExport: { $ne: false }, type: { $ne: "password" } })
     .sort({ order: 1, label: 1 })
     .lean()) as Array<{ key?: string; label?: string }>;
   const customFieldConfigs = customFieldDefinitions.reduce<Record<string, CustomClientExportFieldDefinition>>((acc, field) => {

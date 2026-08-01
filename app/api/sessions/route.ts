@@ -5,6 +5,11 @@ import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import { readSessionTokenFromCookieStore } from "@/lib/authSessionConfig";
 import { getRequestIp, isAdminSession } from "@/lib/authUsers";
+import {
+  isPrivateOrLocalIp,
+  lookupIpLocation,
+  resolveSessionNetwork,
+} from "@/lib/sessionLocation";
 import AuthAccount from "@/models/AuthAccount";
 import AuthSession from "@/models/AuthSession";
 import User from "@/models/User";
@@ -35,6 +40,7 @@ export async function GET(req: NextRequest) {
       provider?: "credentials" | "google";
       userAgent?: string;
       ip?: string;
+      location?: string;
       expires: Date;
       createdAt: Date;
       updatedAt: Date;
@@ -49,6 +55,29 @@ export async function GET(req: NextRequest) {
   }).select("userId").lean() as unknown as Array<{ userId: string }>;
   const googleUserIds = new Set(googleAccounts.map((account) => String(account.userId)));
 
+  const unresolvedPublicIps = Array.from(new Set(
+    sessions
+      .filter((entry) => !entry.location && entry.ip && !isPrivateOrLocalIp(entry.ip))
+      .map((entry) => entry.ip as string)
+  ));
+  const resolvedLocations = new Map<string, string>();
+  if (unresolvedPublicIps.length > 0) {
+    const lookups = await Promise.all(
+      unresolvedPublicIps.map(async (ip) => ({ ip, network: await lookupIpLocation(ip) }))
+    );
+    const updates = lookups.flatMap(({ ip, network }) => {
+      if (!network?.location) return [];
+      resolvedLocations.set(ip, network.location);
+      return [{
+        updateMany: {
+          filter: { ip, location: { $in: [null, ""] } },
+          update: { $set: { location: network.location } },
+        },
+      }];
+    });
+    if (updates.length > 0) await AuthSession.bulkWrite(updates);
+  }
+
   return NextResponse.json(
     sessions.map((entry) => {
       const user = userMap.get(String(entry.userId));
@@ -60,6 +89,7 @@ export async function GET(req: NextRequest) {
         provider: entry.provider || (googleUserIds.has(String(entry.userId)) ? "google" : "credentials"),
         userAgent: entry.userAgent || "",
         ip: entry.ip || "",
+        location: entry.location || resolvedLocations.get(entry.ip || "") || (isPrivateOrLocalIp(entry.ip) ? "Local network" : "Location unavailable"),
         expires: entry.expires,
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt,
@@ -117,12 +147,15 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Session token not found" }, { status: 400 });
   }
 
+  const requestIp = getRequestIp(req.headers);
+  const network = await resolveSessionNetwork(req.headers, requestIp);
   await AuthSession.findOneAndUpdate(
     { sessionToken: currentSessionToken },
     {
       $set: {
         userAgent: req.headers.get("user-agent") || "",
-        ip: getRequestIp(req.headers),
+        ip: network.ip,
+        location: network.location,
       },
     },
     { new: true }
@@ -131,7 +164,7 @@ export async function PATCH(req: NextRequest) {
   if (userId) {
     await User.findByIdAndUpdate(userId, {
       $set: {
-        lastLoginIp: getRequestIp(req.headers),
+        lastLoginIp: network.ip,
         lastLoginUserAgent: req.headers.get("user-agent") || "",
       },
     });

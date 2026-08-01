@@ -17,6 +17,7 @@ import {
   isActiveUser,
   normalizeLoginIdentifier,
 } from "@/lib/authUsers";
+import { resolveSessionNetwork } from "@/lib/sessionLocation";
 import User from "@/models/User";
 import AuthSession from "@/models/AuthSession";
 
@@ -73,20 +74,22 @@ export async function POST(req: NextRequest) {
   const expires = getSessionExpires();
   const userAgent = req.headers.get("user-agent") || "";
   const ip = getRequestIp(req.headers);
+  const network = await resolveSessionNetwork(req.headers, ip);
   await AuthSession.deleteMany({ userId: user._id.toString(), expires: { $lte: new Date() } });
   await AuthSession.create({
     sessionToken,
     userId: user._id.toString(),
     provider: "credentials",
     userAgent,
-    ip,
+    ip: network.ip,
+    location: network.location,
     expires,
   });
   await User.findByIdAndUpdate(user._id, {
     $set: {
       lastLoginAt: new Date(),
       lastLoginProvider: "credentials",
-      lastLoginIp: ip,
+      lastLoginIp: network.ip,
       lastLoginUserAgent: userAgent,
     },
   });

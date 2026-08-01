@@ -5,7 +5,11 @@ import { connectDB } from "@/lib/mongoose";
 import ClientCustomField from "@/models/ClientCustomField";
 import {
   customFieldKeyFromLabel,
+  isClientCustomFieldFormSection,
+  isClientCustomFieldFormTab,
   isClientCustomFieldIcon,
+  isClientCustomFieldProfileCluster,
+  isClientCustomFieldProfileDisplay,
   isClientCustomFieldProfilePosition,
   isClientCustomFieldType,
   type ClientCustomFieldIcon,
@@ -51,6 +55,15 @@ export async function POST(req: NextRequest) {
       ? body.profilePosition
       : "beforeContact";
     const icon: ClientCustomFieldIcon = isClientCustomFieldIcon(body.icon) ? body.icon : "fileText";
+    const formTab = isClientCustomFieldFormTab(body.formTab) ? body.formTab : "basic";
+    const formSection = isClientCustomFieldFormSection(body.formSection)
+      ? body.formSection
+      : formTab === "portal" ? "portalCredentials" : "company";
+    const profileDisplay = isClientCustomFieldProfileDisplay(body.profileDisplay) ? body.profileDisplay : "inline";
+    const profileCluster = isClientCustomFieldProfileCluster(body.profileCluster) ? body.profileCluster : "additional";
+    const applicableCategories = Array.isArray(body.applicableCategories)
+      ? body.applicableCategories.filter((item: unknown): item is string => typeof item === "string").map((item: string) => item.trim()).filter(Boolean)
+      : [];
 
     if (!label) {
       return NextResponse.json({ error: "Field label is required" }, { status: 400 });
@@ -71,10 +84,18 @@ export async function POST(req: NextRequest) {
       key,
       label,
       type,
-      searchable: Boolean(body.searchable),
+      searchable: type === "password" || type === "checkbox" ? false : Boolean(body.searchable),
       required: Boolean(body.required),
       active: body.active !== false,
+      showInForm: body.showInForm !== false,
       showInProfile: body.showInProfile !== false,
+      includeInExport: type === "password" ? false : body.includeInExport !== false,
+      applicableCategories,
+      groupId: typeof body.groupId === "string" ? body.groupId.trim() : "",
+      formTab,
+      formSection,
+      profileDisplay,
+      profileCluster,
       profilePosition,
       icon,
       order: typeof body.order !== "undefined" && String(body.order).trim() !== "" && Number.isFinite(Number(body.order))

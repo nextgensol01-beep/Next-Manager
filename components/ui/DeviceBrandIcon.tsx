@@ -77,7 +77,9 @@ function OperaLogo({ className, style }: IconProps) {
 export function DeviceOsIcon({ device, className, style }: { device: ParsedDevice; className?: string; style?: CSSProperties }) {
   if (device.os === "Windows") return <WindowsLogo className={className} style={style} />;
   if (device.os === "Android") return <AndroidLogo className={className} style={style} />;
-  if (device.os === "macOS" || device.os === "iPhone" || device.os === "iPad") return <AppleLogo className={className} style={style} />;
+  if (["macOS", "iOS", "iPadOS", "iPhone", "iPad"].includes(device.os)) {
+    return <AppleLogo className={className} style={style} />;
+  }
   return <Globe className={className} style={style} />;
 }
 

@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import SettingsSidebar, { SETTINGS_TABS } from "./SettingsSidebar";
 import { SettingsSearchProvider } from "./SettingsSearchContext";
@@ -15,16 +15,19 @@ const TAB_SLUGS = ["general", "access", "custom-fields"];
 
 export default function SettingsShell() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const requestedTabIndex = TAB_SLUGS.indexOf(tabParam ?? "");
+  const resolvedDesktopTab = requestedTabIndex >= 0 ? requestedTabIndex : 0;
 
-  // Desktop: pure local state, URL param ignored
-  const [desktopTab, setDesktopTab] = useState(0);
+  const [desktopTab, setDesktopTab] = useState(resolvedDesktopTab);
+  const desktopTabRef = useRef(resolvedDesktopTab);
   const [exitingTab, setExitingTab] = useState<number | null>(null);
   const animatingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Mobile: derived from URL param
-  const tabParam = searchParams.get("tab");
   const mobileTabIndex = TAB_SLUGS.indexOf(tabParam ?? "");
   const activeTabMobile = mobileTabIndex >= 0 ? mobileTabIndex : 0;
   const mobileView = tabParam ? "detail" : "list";
@@ -34,6 +37,17 @@ export default function SettingsShell() {
   const listScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
+  useEffect(() => {
+    if (resolvedDesktopTab !== desktopTabRef.current) {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
+      animatingRef.current = false;
+      setExitingTab(null);
+      desktopTabRef.current = resolvedDesktopTab;
+      setDesktopTab(resolvedDesktopTab);
+    }
+  }, [resolvedDesktopTab]);
 
   useEffect(() => {
     if (!tabParam && listScrollRef.current) {
@@ -52,6 +66,12 @@ export default function SettingsShell() {
   const isScrolled = listScrollY > 0;
 
   const selectDesktopTab = (index: number, sectionId?: string) => {
+    const slug = TAB_SLUGS[index];
+    if (tabParam !== slug) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("tab", slug);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    }
     if (animatingRef.current || index === desktopTab) {
       // Even if same tab, scroll to section
       if (sectionId) {
@@ -63,6 +83,7 @@ export default function SettingsShell() {
     }
     animatingRef.current = true;
     setExitingTab(desktopTab);
+    desktopTabRef.current = index;
     setDesktopTab(index);
     timerRef.current = setTimeout(() => {
       setExitingTab(null);
@@ -76,7 +97,9 @@ export default function SettingsShell() {
   };
 
   const selectMobileTab = (index: number) => {
-    router.push(`?tab=${TAB_SLUGS[index]}`);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", TAB_SLUGS[index]);
+    router.push(`${pathname}?${params.toString()}`);
   };
 
   const goBack = () => router.back();

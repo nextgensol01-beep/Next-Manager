@@ -15,10 +15,12 @@ import {
 } from "@/app/dashboard/clients/[clientId]/ClientProfileSupport";
 import type {
   ClientCustomFieldDefinition,
+  ClientCustomFieldFormSection,
+  ClientCustomFieldGroupDefinition,
   ClientCustomFieldValues,
 } from "@/lib/clientCustomFields";
 import { customFieldValueIsEmpty } from "@/lib/clientCustomFields";
-import { Wand2, RefreshCw, Lock, UserPlus, AlertCircle, X, Users, ClipboardList, CheckCircle2 } from "lucide-react";
+import { Wand2, RefreshCw, Lock, UserPlus, AlertCircle, X, Users, ClipboardList, CheckCircle2, Eye, EyeOff, ExternalLink } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -71,6 +73,7 @@ interface ClientFormModalProps {
   onClose: () => void;
   client: ExistingClient | null;
   customFieldDefinitions: ClientCustomFieldDefinition[];
+  customFieldGroups?: ClientCustomFieldGroupDefinition[];
   onSave: (
     data: ClientFormData,
     persons: PersonEntry[],
@@ -909,15 +912,13 @@ export default function ClientFormModal({
   onClose,
   client,
   customFieldDefinitions,
+  customFieldGroups = [],
   onSave,
   saving,
   initialTab = "basic",
 }: ClientFormModalProps) {
   const isEdit = client !== null;
-  const visibleCustomFields = customFieldDefinitions.filter((f) => f.key !== "legalName");
-  const companyCustomFields = visibleCustomFields.filter((field) => field.profilePosition === "afterCompany");
-  const beforeContactCustomFields = visibleCustomFields.filter((field) => (field.profilePosition || "beforeContact") === "beforeContact");
-  const afterContactCustomFields = visibleCustomFields.filter((field) => field.profilePosition === "afterContact");
+  const availableCustomFields = customFieldDefinitions.filter((field) => field.key !== "legalName" && field.showInForm !== false);
 
   // ── Form state ──────────────────────────────────────────────────────────
   const [form, setForm] = useState<ClientFormData>(emptyForm);
@@ -926,11 +927,29 @@ export default function ClientFormModal({
   const [removedPersonIds, setRemovedPersonIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<"basic" | "portal">(initialTab);
   const [showPassword, setShowPassword] = useState(false);
+  const [visibleSecureFields, setVisibleSecureFields] = useState<Set<string>>(new Set());
   const [confirmingClose, setConfirmingClose] = useState(false);
   const [tabAnimating, setTabAnimating] = useState(false);
   const [tabDirection, setTabDirection] = useState<"left" | "right">("right");
   const [tabSwitched, setTabSwitched] = useState(false);
   const [portalVisited, setPortalVisited] = useState(initialTab === "portal");
+  const visibleCustomFields = availableCustomFields.filter((field) =>
+    !field.applicableCategories?.length || field.applicableCategories.includes(form.category)
+  );
+  const applicableGroups = customFieldGroups.filter((group) =>
+    group.active && (!group.applicableCategories?.length || group.applicableCategories.includes(form.category))
+  );
+  const applicableGroupIds = new Set(applicableGroups.map((group) => group._id).filter(Boolean));
+  const ungroupedCustomFields = visibleCustomFields.filter((field) => !field.groupId || !applicableGroupIds.has(field.groupId));
+  const legacyFormSection = (field: ClientCustomFieldDefinition) => field.formSection || (
+    field.profilePosition === "afterContact" ? "contacts" :
+    field.profilePosition === "afterCompany" ? "compliance" : "company"
+  );
+  const identityCustomFields = ungroupedCustomFields.filter((field) => (field.formTab || "basic") === "basic" && legacyFormSection(field) === "identity");
+  const companyCustomFields = ungroupedCustomFields.filter((field) => (field.formTab || "basic") === "basic" && legacyFormSection(field) === "company");
+  const contactCustomFields = ungroupedCustomFields.filter((field) => (field.formTab || "basic") === "basic" && legacyFormSection(field) === "contacts");
+  const complianceCustomFields = ungroupedCustomFields.filter((field) => (field.formTab || "basic") === "basic" && legacyFormSection(field) === "compliance");
+  const portalCustomFields = ungroupedCustomFields.filter((field) => field.formTab === "portal");
 
   // ── Validation errors ───────────────────────────────────────────────────
   const [fieldErrors, setFieldErrors] = useState<{ companyName: boolean; state: boolean; customFields: Record<string, boolean> }>({
@@ -1227,7 +1246,9 @@ export default function ClientFormModal({
   // Show card view if user explicitly clicked Add Contact OR client already has contacts
   const showContactCards = contactsStarted;
   const renderCustomFieldRows = (fields: ClientCustomFieldDefinition[]) =>
-    fields.map((field, idx) => (
+    fields.map((field, idx) => {
+      const secureVisible = visibleSecureFields.has(field.key);
+      return (
       <FieldRow
         key={field.key}
         label={field.required ? `${field.label} *` : field.label}
@@ -1261,21 +1282,76 @@ export default function ClientFormModal({
               className="input-field"
               style={{ fontSize: "13px" }}
             />
+          ) : field.type === "textarea" ? (
+            <textarea
+              value={String(form.customFields?.[field.key] || "")}
+              onChange={(e) => updateCustomFieldValue(field, e.target.value)}
+              className="input-field"
+              style={{ fontSize: "13px", minHeight: 72, resize: "vertical" }}
+              rows={3}
+            />
+          ) : field.type === "password" ? (
+            <div className="relative w-full">
+              <input
+                type={secureVisible ? "text" : "password"}
+                value={String(form.customFields?.[field.key] || "")}
+                onChange={(e) => updateCustomFieldValue(field, e.target.value)}
+                className="input-field font-mono pr-20"
+                style={{ fontSize: "13px" }}
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-[#0071e3]"
+                onClick={() => setVisibleSecureFields((current) => {
+                  const next = new Set(current);
+                  if (next.has(field.key)) next.delete(field.key); else next.add(field.key);
+                  return next;
+                })}
+              >
+                {secureVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                {secureVisible ? "Hide" : "Show"}
+              </button>
+            </div>
           ) : (
             <input
-              type="text"
+              type={field.type === "url" ? "url" : "text"}
               value={String(form.customFields?.[field.key] || "")}
               onChange={(e) => updateCustomFieldValue(field, e.target.value)}
               className="input-field"
               style={{ fontSize: "13px" }}
+              placeholder={field.type === "url" ? "https://" : undefined}
             />
           )}
         </div>
+        {field.type === "password" && form.customFields?.[field.key] && (
+          <button type="button" className="mt-1.5 text-[11px] font-semibold text-[#0071e3]" onClick={() => navigator.clipboard.writeText(String(form.customFields?.[field.key] || ""))}>Copy secure value</button>
+        )}
+        {field.type === "url" && form.customFields?.[field.key] && (
+          <a className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#0071e3]" href={String(form.customFields[field.key])} target="_blank" rel="noreferrer">Open link <ExternalLink className="h-3 w-3" /></a>
+        )}
         {fieldErrors.customFields[field.key] && (
           <p className="text-[11px] text-red-500 mt-1 font-medium">{field.label} is required</p>
         )}
       </FieldRow>
-    ));
+      );
+    });
+
+  const renderCustomGroupSections = (tab: "basic" | "portal", section: ClientCustomFieldFormSection) => applicableGroups
+    .filter((group) => group.formTab === tab && (group.formSection || (tab === "portal" ? "portalCredentials" : "company")) === section)
+    .sort((left, right) => (left.order || 0) - (right.order || 0))
+    .map((group, index) => {
+      const groupFields = visibleCustomFields
+        .filter((field) => field.groupId === group._id)
+        .sort((left, right) => (left.order || 0) - (right.order || 0));
+      if (groupFields.length === 0) return null;
+      return (
+        <InsetGroup key={group._id || group.key} title={group.label} animDelay={140 + (index * 20)}>
+          {group.description && <p className="px-4 pt-3 text-[11px] leading-relaxed text-faint">{group.description}</p>}
+          {renderCustomFieldRows(groupFields)}
+        </InsetGroup>
+      );
+    });
 
   return (
     <>
@@ -1542,7 +1618,7 @@ export default function ClientFormModal({
                     </div>
                   </FieldRow>
 
-                  <FieldRow label="Category" last>
+                  <FieldRow label="Category" last={identityCustomFields.length === 0}>
                     {isEdit ? (
                       <div
                         className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm"
@@ -1573,7 +1649,9 @@ export default function ClientFormModal({
                       </div>
                     )}
                   </FieldRow>
+                  {renderCustomFieldRows(identityCustomFields)}
                 </InsetGroup>
+                {renderCustomGroupSections("basic", "identity")}
 
                 {/* Company */}
                 <InsetGroup title="Company" animDelay={40}>
@@ -1613,12 +1691,7 @@ export default function ClientFormModal({
                   )}
                   {renderCustomFieldRows(companyCustomFields)}
                 </InsetGroup>
-
-                {beforeContactCustomFields.length > 0 && (
-                  <InsetGroup title="Profile Fields" animDelay={60}>
-                    {renderCustomFieldRows(beforeContactCustomFields)}
-                  </InsetGroup>
-                )}
+                {renderCustomGroupSections("basic", "company")}
 
                 {/* Contacts */}
                 <InsetGroup
@@ -1682,13 +1755,9 @@ export default function ClientFormModal({
                       </div>
                     </>
                   )}
+                  {renderCustomFieldRows(contactCustomFields)}
                 </InsetGroup>
-
-                {afterContactCustomFields.length > 0 && (
-                  <InsetGroup title="Additional Contact Details" animDelay={100}>
-                    {renderCustomFieldRows(afterContactCustomFields)}
-                  </InsetGroup>
-                )}
+                {renderCustomGroupSections("basic", "contacts")}
 
                 {/* Compliance */}
                 <InsetGroup title="Compliance & Location" animDelay={120}>
@@ -1726,7 +1795,7 @@ export default function ClientFormModal({
                       />
                     </div>
                   </FieldRow>
-                  <FieldRow label="Address" last={form.category === "PWP"}>
+                  <FieldRow label="Address" last={form.category === "PWP" && complianceCustomFields.length === 0}>
                     <div className="cfm-input-row">
                       <textarea
                         className="input-field"
@@ -1738,7 +1807,7 @@ export default function ClientFormModal({
                     </div>
                   </FieldRow>
                   {form.category !== "PWP" && (
-                    <FieldRow label="CPCB Registration Number" last>
+                    <FieldRow label="CPCB Registration Number" last={complianceCustomFields.length === 0}>
                       <div className="cfm-input-row">
                         <input
                           className="input-field font-mono"
@@ -1749,7 +1818,9 @@ export default function ClientFormModal({
                       </div>
                     </FieldRow>
                   )}
+                  {renderCustomFieldRows(complianceCustomFields)}
                 </InsetGroup>
+                {renderCustomGroupSections("basic", "compliance")}
               </div>
             </div>
 
@@ -1830,7 +1901,7 @@ export default function ClientFormModal({
                   <FieldRow
                     label="OTP Mobile"
                     hint="Used to receive OTP during portal login"
-                    last
+                    last={portalCustomFields.length === 0}
                   >
                     <div className="cfm-input-row">
                       <input
@@ -1842,7 +1913,10 @@ export default function ClientFormModal({
                       />
                     </div>
                   </FieldRow>
+                  {renderCustomFieldRows(portalCustomFields)}
                 </InsetGroup>
+
+                {renderCustomGroupSections("portal", "portalCredentials")}
               </div>
             </div>
           </div>

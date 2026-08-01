@@ -4,7 +4,15 @@ import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import ClientCustomField from "@/models/ClientCustomField";
 import Client from "@/models/Client";
-import { isClientCustomFieldIcon, isClientCustomFieldProfilePosition, isClientCustomFieldType } from "@/lib/clientCustomFields";
+import {
+  isClientCustomFieldFormSection,
+  isClientCustomFieldFormTab,
+  isClientCustomFieldIcon,
+  isClientCustomFieldProfileCluster,
+  isClientCustomFieldProfileDisplay,
+  isClientCustomFieldProfilePosition,
+  isClientCustomFieldType,
+} from "@/lib/clientCustomFields";
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -21,11 +29,35 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (!label) return NextResponse.json({ error: "Field label is required" }, { status: 400 });
       update.label = label;
     }
-    if (isClientCustomFieldType(body.type)) update.type = body.type;
-    if ("searchable" in body) update.searchable = Boolean(body.searchable);
+    const existing = await ClientCustomField.findById(id).lean() as { key?: string; type?: string } | null;
+    if (!existing) return NextResponse.json({ error: "Field not found" }, { status: 404 });
+    if (isClientCustomFieldType(body.type) && body.type !== existing.type) {
+      const affectedCount = await Client.countDocuments({ [`customFields.${existing.key}`]: { $exists: true, $nin: ["", null] } });
+      if (affectedCount > 0) {
+        return NextResponse.json({
+          error: `Field type is locked because ${affectedCount} client${affectedCount === 1 ? " has" : "s have"} saved data`,
+          affectedCount,
+        }, { status: 409 });
+      }
+      update.type = body.type;
+    }
+    const effectiveType = isClientCustomFieldType(body.type) ? body.type : existing.type;
+    if ("searchable" in body) update.searchable = effectiveType === "password" || effectiveType === "checkbox" ? false : Boolean(body.searchable);
     if ("required" in body) update.required = Boolean(body.required);
     if ("active" in body) update.active = Boolean(body.active);
+    if ("showInForm" in body) update.showInForm = Boolean(body.showInForm);
     if ("showInProfile" in body) update.showInProfile = Boolean(body.showInProfile);
+    if ("includeInExport" in body) update.includeInExport = effectiveType === "password" ? false : Boolean(body.includeInExport);
+    if ("applicableCategories" in body) {
+      update.applicableCategories = Array.isArray(body.applicableCategories)
+        ? body.applicableCategories.filter((item: unknown): item is string => typeof item === "string").map((item: string) => item.trim()).filter(Boolean)
+        : [];
+    }
+    if ("groupId" in body) update.groupId = typeof body.groupId === "string" ? body.groupId.trim() : "";
+    if (isClientCustomFieldFormTab(body.formTab)) update.formTab = body.formTab;
+    if (isClientCustomFieldFormSection(body.formSection)) update.formSection = body.formSection;
+    if (isClientCustomFieldProfileDisplay(body.profileDisplay)) update.profileDisplay = body.profileDisplay;
+    if (isClientCustomFieldProfileCluster(body.profileCluster)) update.profileCluster = body.profileCluster;
     if (isClientCustomFieldProfilePosition(body.profilePosition)) update.profilePosition = body.profilePosition;
     if (isClientCustomFieldIcon(body.icon)) update.icon = body.icon;
     if ("order" in body && String(body.order).trim() !== "" && Number.isFinite(Number(body.order))) update.order = Number(body.order);

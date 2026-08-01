@@ -22,6 +22,7 @@ type ActiveSession = {
   provider?: "credentials" | "google";
   userAgent?: string;
   ip?: string;
+  location?: string;
   expires: string;
   createdAt: string;
   updatedAt: string;
@@ -375,38 +376,6 @@ function ActionSheet({
   );
 }
 
-/** Fetch city/country from IP using ip-api.com (free, no key needed) */
-function useIpLocation(ip?: string | null) {
-  const [location, setLocation] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!ip) return;
-    // Skip private/local IPs
-    if (
-      ip === "::1" || ip === "127.0.0.1" ||
-      ip.startsWith("192.168.") || ip.startsWith("10.") ||
-      ip.startsWith("172.") || ip === "localhost"
-    ) {
-      setLocation("This device");
-      return;
-    }
-    setLoading(true);
-    fetch(`https://ip-api.com/json/${ip}?fields=city,regionName,country,status`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.status === "success") {
-          const parts = [data.city, data.country].filter(Boolean);
-          setLocation(parts.join(", ") || null);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [ip]);
-
-  return { location, loading };
-}
-
 /** Format relative time */
 function timeAgo(dateStr?: string | null): string {
   if (!dateStr) return "";
@@ -435,17 +404,8 @@ function SessionCard({
 }) {
   const device = parseDevice(entry.userAgent);
   const provider = entry.provider === "google" ? "Google" : "Password";
-  const { location, loading: locLoading } = useIpLocation(entry.ip);
   const lastActive = timeAgo(entry.updatedAt || entry.createdAt);
-
-  const isLocal =
-    !entry.ip ||
-    entry.ip === "::1" ||
-    entry.ip === "127.0.0.1" ||
-    entry.ip.startsWith("192.168.") ||
-    entry.ip.startsWith("10.");
-
-  const locationText = isLocal ? "This device" : (location || entry.ip || "Unknown");
+  const locationText = entry.location || "Location unavailable";
 
   const actionBadge = entry.isCurrent ? (
     <span
@@ -518,10 +478,7 @@ function SessionCard({
         <div className="flex-shrink-0 flex flex-col items-end gap-0.5" style={{ width: "160px" }}>
           <span className="flex items-center gap-1 text-[11px] text-faint">
             <MapPin className="w-3 h-3 flex-shrink-0" />
-            {locLoading
-              ? <span className="inline-block w-16 h-2.5 rounded bg-[var(--color-border)] animate-pulse" />
-              : <span className="truncate max-w-[130px]">{locationText}</span>
-            }
+            <span className="truncate max-w-[130px]" title={locationText}>{locationText}</span>
           </span>
           {lastActive && (
             <span className="flex items-center gap-1 text-[11px] text-faint">
@@ -589,10 +546,7 @@ function SessionCard({
         <div className="flex items-center gap-3 mt-2">
           <span className="flex items-center gap-1 text-[11px] text-faint">
             <MapPin className="w-3 h-3 flex-shrink-0" />
-            {locLoading
-              ? <span className="inline-block w-20 h-3 rounded bg-[var(--color-border)] animate-pulse" />
-              : <span>{locationText}</span>
-            }
+            <span>{locationText}</span>
           </span>
           {lastActive && (
             <span className="flex items-center gap-1 text-[11px] text-faint">

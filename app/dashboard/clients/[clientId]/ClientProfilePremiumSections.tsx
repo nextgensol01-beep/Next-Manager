@@ -72,7 +72,21 @@ export type ClientProfileCustomField = {
   value: string;
   icon: React.ReactNode;
   mono?: boolean;
-  position: "beforeContact" | "afterContact" | "afterCompany";
+  type?: string;
+  profileDisplay: "inline" | "subsection" | "card";
+  profileCluster: "company" | "contact" | "compliance" | "additional";
+  groupId?: string;
+};
+
+export type ClientProfileCustomFieldGroup = {
+  id: string;
+  label: string;
+  description?: string;
+  icon: React.ReactNode;
+  profileDisplay: "subsection" | "card";
+  profileCluster: "company" | "contact" | "compliance" | "additional";
+  collapsible?: boolean;
+  defaultExpanded?: boolean;
 };
 
 type MobileTitleFit = {
@@ -293,6 +307,7 @@ type CompanyOverviewProps = {
   isPWP: boolean;
   legalName: string;
   customFields: ClientProfileCustomField[];
+  customFieldGroups: ClientProfileCustomFieldGroup[];
   hiddenCustomCount: number;
   showAllCustomFields: boolean;
   onToggleCustomFields: () => void;
@@ -402,6 +417,7 @@ function ProfileFieldRow({
   sub,
   mono,
   copy,
+  href,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -409,13 +425,20 @@ function ProfileFieldRow({
   sub?: string;
   mono?: boolean;
   copy?: React.ReactNode;
+  href?: string;
 }) {
   return (
     <div className="client-profile-field-row">
       <div className="client-profile-field-icon">{icon}</div>
       <div className="min-w-0 flex-1">
         <p className="client-profile-field-label">{label}</p>
-        <p className={`client-profile-field-value ${mono ? "font-mono" : ""}`}>{value || "-"}</p>
+        {href ? (
+          <a className={`client-profile-field-value inline-flex items-center gap-1 hover:underline ${mono ? "font-mono" : ""}`} href={href} target="_blank" rel="noreferrer">
+            {value || "-"}<ExternalLink className="h-3 w-3" />
+          </a>
+        ) : (
+          <p className={`client-profile-field-value ${mono ? "font-mono" : ""}`}>{value || "-"}</p>
+        )}
         {sub && <p className="text-xs text-faint">{sub}</p>}
       </div>
       {copy}
@@ -1057,6 +1080,7 @@ export function CompanyOverview({
   isPWP,
   legalName,
   customFields,
+  customFieldGroups,
   hiddenCustomCount,
   showAllCustomFields,
   onToggleCustomFields,
@@ -1078,9 +1102,24 @@ export function CompanyOverview({
   portalLastUpdated,
   passwordMask,
 }: CompanyOverviewProps) {
-  const beforeContact = customFields.filter((field) => field.position === "beforeContact");
-  const afterContact = customFields.filter((field) => field.position === "afterContact");
-  const afterCompany = customFields.filter((field) => field.position === "afterCompany");
+  const [revealedCustomFields, setRevealedCustomFields] = useState<Set<string>>(() => new Set());
+  const [openCustomGroups, setOpenCustomGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(customFieldGroups.map((group) => [group.id, group.defaultExpanded !== false]))
+  );
+  const inlineFields = customFields.filter((field) => field.profileDisplay === "inline" && !field.groupId);
+  const companyFields = inlineFields.filter((field) => field.profileCluster === "company");
+  const contactFields = inlineFields.filter((field) => field.profileCluster === "contact");
+  const complianceFields = inlineFields.filter((field) => field.profileCluster === "compliance");
+  const additionalFields = inlineFields.filter((field) => field.profileCluster === "additional");
+  const subsectionGroups = customFieldGroups.filter((group) =>
+    group.profileDisplay === "subsection" && customFields.some((field) => field.groupId === group.id)
+  );
+  const cardGroups = customFieldGroups.filter((group) =>
+    group.profileDisplay === "card" && customFields.some((field) => field.groupId === group.id)
+  );
+  const standaloneSubsectionFields = customFields.filter((field) => !field.groupId && field.profileDisplay === "subsection");
+  const standaloneCardFields = customFields.filter((field) => !field.groupId && field.profileDisplay === "card");
+  const subsectionGroupsAt = (cluster: ClientProfileCustomFieldGroup["profileCluster"]) => subsectionGroups.filter((group) => group.profileCluster === cluster);
   const contacts = client.contacts || [];
   const hasPortalDetails = Boolean(client.cpcbLoginId || client.cpcbPassword || client.otpMobileNumber);
 
@@ -1089,12 +1128,76 @@ export function CompanyOverview({
       key={field.id}
       icon={field.icon}
       label={field.label}
-      value={field.value}
+      value={field.type === "password" && field.value && !revealedCustomFields.has(field.id) ? "••••••••" : field.value}
       mono={field.mono}
+      href={field.type === "url" ? field.value : undefined}
+      copy={field.value ? (
+        <div className="flex items-center gap-1">
+          {field.type === "password" && (
+            <button
+              type="button"
+              onClick={() => setRevealedCustomFields((current) => {
+                const next = new Set(current);
+                if (next.has(field.id)) next.delete(field.id);
+                else next.add(field.id);
+                return next;
+              })}
+              className="client-profile-small-button"
+            >
+              {revealedCustomFields.has(field.id) ? "Hide" : "Show"}
+            </button>
+          )}
+          <CopyButton
+            copied={copiedKey === `custom-${field.id}`}
+            label={field.label}
+            onClick={() => onCopy(field.value, `custom-${field.id}`, field.label)}
+          />
+        </div>
+      ) : null}
     />
   ));
 
+  const renderCustomGroup = (group: ClientProfileCustomFieldGroup, asCard = false) => {
+    const fields = customFields.filter((field) => field.groupId === group.id);
+    if (fields.length === 0) return null;
+    const open = group.collapsible === false ? true : (openCustomGroups[group.id] ?? group.defaultExpanded !== false);
+    const content = <div className="client-profile-field-grid">{renderCustomFields(fields)}</div>;
+    if (asCard) {
+      return (
+        <section key={group.id} className="client-profile-card">
+          <div className="client-profile-card-header">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="client-profile-field-icon">{group.icon}</span>
+              <div className="min-w-0"><p className="client-profile-kicker">Custom section</p><h2>{group.label}</h2>{group.description && <p className="text-xs text-faint">{group.description}</p>}</div>
+            </div>
+            {group.collapsible !== false && (
+              <button type="button" onClick={() => setOpenCustomGroups((current) => ({ ...current, [group.id]: !open }))} className="client-profile-small-button" aria-expanded={open} aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`}>
+                <motion.span animate={{ rotate: open ? 0 : -90 }}><ChevronDown className="h-4 w-4" /></motion.span>
+              </button>
+            )}
+          </div>
+          <AnimatePresence initial={false}>{open && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">{content}</motion.div>}</AnimatePresence>
+        </section>
+      );
+    }
+    return (
+      <div key={group.id} className="client-profile-subsection">
+        <CollapsibleHeader title={group.label} subtitle={group.description} open={open} onToggle={() => group.collapsible !== false && setOpenCustomGroups((current) => ({ ...current, [group.id]: !open }))} />
+        <AnimatePresence initial={false}>{open && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">{content}</motion.div>}</AnimatePresence>
+      </div>
+    );
+  };
+  const renderStandaloneSubsections = (cluster: ClientProfileCustomField["profileCluster"]) => standaloneSubsectionFields
+    .filter((field) => field.profileCluster === cluster)
+    .map((field) => (
+      <div key={field.id} className="client-profile-subsection">
+        <div className="client-profile-subsection-header"><div className="flex items-center gap-2"><span className="client-profile-field-icon">{field.icon}</span><span className="text-sm font-semibold text-default">{field.label}</span></div></div>
+        <div className="client-profile-field-grid">{renderCustomFields([field])}</div>
+      </div>
+    ));
+
   return (
+    <>
     <section className="client-profile-card client-profile-overview-card">
       <div className="client-profile-card-header">
         <div>
@@ -1118,7 +1221,7 @@ export function CompanyOverview({
 
         <div className="client-profile-field-grid">
           {legalName && <ProfileFieldRow icon={<FileText className="h-4 w-4" />} label="Legal Name" value={legalName} />}
-          {renderCustomFields(beforeContact)}
+          {renderCustomFields(companyFields)}
           <ProfileFieldRow icon={<User className="h-4 w-4" />} label="Primary Contact" value={contactName} sub={contactDesig} />
           <ProfileFieldRow
             icon={<Phone className="h-4 w-4" />}
@@ -1146,7 +1249,7 @@ export function CompanyOverview({
               />
             ) : null}
           />
-          {renderCustomFields(afterContact)}
+          {renderCustomFields(contactFields)}
           <ProfileFieldRow icon={<MapPin className="h-4 w-4" />} label="State" value={client.state} />
           {client.address && <ProfileFieldRow icon={<MapPin className="h-4 w-4" />} label="Address" value={client.address} />}
           {client.gstNumber && (
@@ -1179,7 +1282,8 @@ export function CompanyOverview({
               )}
             />
           )}
-          {renderCustomFields(afterCompany)}
+          {renderCustomFields(complianceFields)}
+          {renderCustomFields(additionalFields)}
         </div>
       </div>
 
@@ -1188,6 +1292,9 @@ export function CompanyOverview({
           {showAllCustomFields ? "Show less information" : `Show ${hiddenCustomCount} more detail${hiddenCustomCount === 1 ? "" : "s"}`}
         </button>
       )}
+
+      {subsectionGroupsAt("company").map((group) => renderCustomGroup(group))}
+      {renderStandaloneSubsections("company")}
 
       {contacts.length > 0 && (
         <div className="client-profile-subsection">
@@ -1212,6 +1319,10 @@ export function CompanyOverview({
           </AnimatePresence>
         </div>
       )}
+      {subsectionGroupsAt("contact").map((group) => renderCustomGroup(group))}
+      {renderStandaloneSubsections("contact")}
+      {subsectionGroupsAt("compliance").map((group) => renderCustomGroup(group))}
+      {renderStandaloneSubsections("compliance")}
 
       <div className="client-profile-subsection">
         <CollapsibleHeader
@@ -1302,11 +1413,22 @@ export function CompanyOverview({
         </AnimatePresence>
       </div>
 
+      {subsectionGroupsAt("additional").map((group) => renderCustomGroup(group))}
+      {renderStandaloneSubsections("additional")}
+
       <div className="client-profile-card-footer">
         <span>Added {formatDate(client.createdAt)}</span>
         <span>Last updated {formatDateTime(client.updatedAt || client.createdAt)}</span>
       </div>
     </section>
+    {cardGroups.map((group) => renderCustomGroup(group, true))}
+    {standaloneCardFields.map((field) => (
+      <section key={field.id} className="client-profile-card">
+        <div className="client-profile-card-header"><div><p className="client-profile-kicker">Custom section</p><h2>{field.label}</h2></div></div>
+        <div className="client-profile-field-grid">{renderCustomFields([field])}</div>
+      </section>
+    ))}
+    </>
   );
 }
 

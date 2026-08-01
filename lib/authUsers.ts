@@ -44,8 +44,10 @@ export async function isAdminSession(session: Session | null) {
 
 export function getRequestIp(headers: Headers) {
   return (
+    headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() ||
     headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     headers.get("x-real-ip") ||
+    headers.get("cf-connecting-ip") ||
     ""
   );
 }

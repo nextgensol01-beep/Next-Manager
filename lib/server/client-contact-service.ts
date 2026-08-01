@@ -213,7 +213,7 @@ async function getSearchableCustomFieldConditions(search: string) {
   return buildSearchFieldConditions(customFieldPaths, search);
 }
 
-async function normalizeClientCustomFields(input: unknown, existingValues: unknown = {}) {
+async function normalizeClientCustomFields(input: unknown, existingValues: unknown = {}, clientCategory = "") {
   const definitions = await getActiveClientCustomFields();
   const rawValues = input && typeof input === "object" && !Array.isArray(input)
     ? input as Record<string, unknown>
@@ -224,6 +224,11 @@ async function normalizeClientCustomFields(input: unknown, existingValues: unkno
 
   for (const definition of definitions) {
     if (definition.key === "legalName") continue;
+    if (
+      Array.isArray(definition.applicableCategories) &&
+      definition.applicableCategories.length > 0 &&
+      !definition.applicableCategories.includes(clientCategory)
+    ) continue;
 
     const normalizedValue = normalizeCustomFieldValue(definition, rawValues[definition.key]);
     if (definition.required && customFieldValueIsEmpty(definition, normalizedValue)) {
@@ -954,7 +959,7 @@ export async function createClientRecord(body: Record<string, unknown>) {
   const { clientId: ignoredClientId, ...clientData } = clientFields;
   void ignoredClientId;
 
-  const customFields = await normalizeClientCustomFields(body.customFields);
+  const customFields = await normalizeClientCustomFields(body.customFields, {}, clientCategory);
   const nextClientId = await allocateNextClientId(clientCategory);
   const client = await Client.create({ ...clientData, clientId: nextClientId, customFields });
   await syncClientPersons(
@@ -989,7 +994,7 @@ export async function updateClientRecord(clientId: string, body: Record<string, 
   }
 
   const clientFields = pickClientFields(rest);
-  const customFields = await normalizeClientCustomFields(body.customFields, existingClient.customFields);
+  const customFields = await normalizeClientCustomFields(body.customFields, existingClient.customFields, existingClient.category);
   const client = await Client.findOneAndUpdate(
     { clientId },
     { $set: { ...clientFields, customFields } },

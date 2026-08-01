@@ -18,7 +18,7 @@ import {
   clientWorkspaceKey,
   fetchClientWorkspace,
 } from "@/lib/clientWorkspaceCache";
-import type { ClientCustomFieldDefinition } from "@/lib/clientCustomFields";
+import type { ClientCustomFieldDefinition, ClientCustomFieldGroupDefinition } from "@/lib/clientCustomFields";
 import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearState } from "@/app/providers";
 import ClientProfileActivityTimeline from "./ClientProfileActivityTimeline";
@@ -36,6 +36,7 @@ import {
   NotesSection,
   QuickActions,
   type ClientProfileCustomField,
+  type ClientProfileCustomFieldGroup,
   type ClientProfileMetric,
   type ClientProfileQuickAction,
 } from "./ClientProfilePremiumSections";
@@ -320,6 +321,7 @@ export default function ClientProfilePage() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showAllCustomProfileInfo, setShowAllCustomProfileInfo] = useState(false);
   const { data: customFieldDefinitions } = useCache<ClientCustomFieldDefinition[]>("/api/client-custom-fields", { initialData: [] });
+  const { data: customFieldGroups } = useCache<ClientCustomFieldGroupDefinition[]>("/api/client-custom-field-groups", { initialData: [] });
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sectionOpen, setSectionOpen] = useState({
     contacts: true,
@@ -2218,17 +2220,25 @@ export default function ClientProfilePage() {
     .filter((field) => {
       if (field.key === "legalName") return false;
       if (field.showInProfile === false) return false;
-      const value = client.customFields?.[field.key];
-      return field.type === "checkbox" ? Boolean(value) : String(value ?? "").trim().length > 0;
+      if (field.applicableCategories?.length && !field.applicableCategories.includes(client.category)) return false;
+      return true;
     })
     .sort((left, right) => (left.order || 0) - (right.order || 0) || left.label.localeCompare(right.label));
-  const displayedCustomFields = showAllCustomProfileInfo ? visibleCustomFields : visibleCustomFields.slice(0, 3);
+  const applicableCustomFieldGroups = customFieldGroups.filter((group) =>
+    !group.applicableCategories?.length || group.applicableCategories.includes(client.category)
+  );
+  const applicableCustomGroupIds = new Set(applicableCustomFieldGroups.flatMap((group) => group._id ? [group._id] : []));
+  const groupedCustomFields = visibleCustomFields.filter((field) => field.groupId && applicableCustomGroupIds.has(field.groupId));
+  const ungroupedCustomFields = visibleCustomFields.filter((field) => !field.groupId || !applicableCustomGroupIds.has(field.groupId));
+  const displayedUngroupedCustomFields = showAllCustomProfileInfo ? ungroupedCustomFields : ungroupedCustomFields.slice(0, 3);
+  const displayedCustomFields = [...displayedUngroupedCustomFields, ...groupedCustomFields];
   const displayCustomFieldValue = (field: ClientCustomFieldDefinition) => {
     const value = client.customFields?.[field.key];
     if (field.type === "checkbox") return value ? "Yes" : "No";
+    if (field.type === "date") return formatDate(String(value ?? ""));
     return String(value ?? "");
   };
-  const renderCustomFieldIcon = (field: ClientCustomFieldDefinition) => {
+  const renderCustomFieldIcon = (field: Pick<ClientCustomFieldDefinition, "icon">) => {
     const Icon = CUSTOM_FIELD_ICON_COMPONENTS[field.icon || "fileText"] || FileText;
     return <Icon className="w-4 h-4" />;
   };
@@ -2341,9 +2351,28 @@ export default function ClientProfilePage() {
     label: field.label,
     value: displayCustomFieldValue(field),
     icon: renderCustomFieldIcon(field),
-    mono: field.type === "number",
-    position: (field.profilePosition || "beforeContact") as ClientProfileCustomField["position"],
+    mono: field.type === "number" || field.type === "password",
+    type: field.type,
+    profileDisplay: field.groupId && applicableCustomGroupIds.has(field.groupId)
+      ? (applicableCustomFieldGroups.find((group) => group._id === field.groupId)?.profileDisplay || "subsection")
+      : (field.profileDisplay || "inline"),
+    profileCluster: field.profileCluster || (
+      field.profilePosition === "afterContact" ? "contact" : field.profilePosition === "afterCompany" ? "additional" : "company"
+    ),
+    groupId: field.groupId && applicableCustomGroupIds.has(field.groupId) ? field.groupId : undefined,
   }));
+  const customProfileFieldGroups: ClientProfileCustomFieldGroup[] = applicableCustomFieldGroups
+    .filter((group) => group._id && groupedCustomFields.some((field) => field.groupId === group._id))
+    .map((group) => ({
+      id: group._id || group.key,
+      label: group.label,
+      description: group.description,
+      icon: renderCustomFieldIcon({ icon: group.icon }),
+      profileDisplay: group.profileDisplay,
+      profileCluster: group.profileCluster || "additional",
+      collapsible: group.collapsible,
+      defaultExpanded: group.defaultExpanded,
+    }));
 
   const validityField = visibleCustomFields.find((field) =>
     /valid|validity|expiry|expire/i.test(`${field.key} ${field.label}`)
@@ -2990,7 +3019,8 @@ export default function ClientProfilePage() {
                 isPWP={isPWP}
                 legalName={legalName}
                 customFields={customProfileFields}
-                hiddenCustomCount={visibleCustomFields.length - displayedCustomFields.length}
+                customFieldGroups={customProfileFieldGroups}
+                hiddenCustomCount={ungroupedCustomFields.length - displayedUngroupedCustomFields.length}
                 showAllCustomFields={showAllCustomProfileInfo}
                 onToggleCustomFields={() => setShowAllCustomProfileInfo((current) => !current)}
                 primaryContact={primaryContact}
@@ -3350,6 +3380,7 @@ export default function ClientProfilePage() {
         onClose={() => setEditModal(false)}
         client={client}
         customFieldDefinitions={customFieldDefinitions}
+        customFieldGroups={customFieldGroups}
         onSave={handleSaveClient}
         saving={saving}
         initialTab={editInitialTab}
