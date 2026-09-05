@@ -9,6 +9,7 @@ import {
   type InvoiceCoverageInput,
 } from "@/lib/invoiceCoverage";
 import {
+  annualReturnPrerequisitesComplete,
   deriveAutomaticAnnualReturnStatus,
   type AnnualReturnStatus,
 } from "@/lib/annualReturnStatus";
@@ -45,18 +46,16 @@ export async function syncAnnualReturnStatus(
   const typedClient = client as unknown as { category?: string } | null;
   const typedQuotations = quotations as unknown as Array<{ status?: string }>;
   const coverage = buildInvoiceCoverageSummary(typedInvoices, financialYear);
-  const invoiceCoverageComplete =
-    coverage.sale.doneCount === 12 && coverage.purchase.doneCount === 12;
-  const requiresAcceptedQuotation =
-    typedClient?.category === "Importer" || typedClient?.category === "Brand Owner";
   const hasAcceptedQuotation = typedQuotations.some((quotation) => quotation.status === "Accepted");
   const hasWorkflowActivity =
     invoices.length > 0 || Boolean(hasUpload) || Boolean(hasBilling) || quotations.length > 0;
-  const allPrerequisitesComplete =
-    invoiceCoverageComplete &&
-    Boolean(hasUpload) &&
-    Boolean(hasBilling) &&
-    (!requiresAcceptedQuotation || hasAcceptedQuotation);
+  const allPrerequisitesComplete = annualReturnPrerequisitesComplete({
+    clientCategory: typedClient?.category,
+    invoiceCoveragePercent: ((coverage.sale.doneCount + coverage.purchase.doneCount) / 24) * 100,
+    hasUpload: Boolean(hasUpload),
+    hasBilling: Boolean(hasBilling),
+    hasAcceptedQuotation,
+  });
 
   const currentStatus = current?.status as AnnualReturnStatus | undefined;
   const nextStatus = deriveAutomaticAnnualReturnStatus({

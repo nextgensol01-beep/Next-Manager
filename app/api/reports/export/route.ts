@@ -14,6 +14,7 @@ import ExcelJS from "exceljs";
 import { CURRENT_FY, FINANCIAL_YEARS } from "@/lib/utils";
 import { REPORT_FILE_PREFIX, isReportType, type ReportType } from "@/lib/reports";
 import { buildInvoiceCoverageSummary, getCoveredInvoiceMonths, getFinancialYearMonths } from "@/lib/invoiceCoverage";
+import { finaliseReadableReportSheet } from "@/lib/server/excel-report-style";
 
 const HEADER_COLOR = "FF2D47E2";
 const INR_NUM_FMT = "\"INR\" #,##0.00";
@@ -803,6 +804,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
+    wb.worksheets.forEach((sheet) => finaliseReadableReportSheet(sheet, { freezeColumns: 2 }));
     const buffer = await wb.xlsx.writeBuffer();
     const filePrefix = REPORT_FILE_PREFIX[type];
     return new NextResponse(buffer as unknown as BodyInit, {

@@ -18,6 +18,7 @@ export interface Billing {
 }
 export interface Payment {
   _id: string; clientId: string; financialYear: string;
+  billingId?: string;
   amountPaid: number; paymentType?: "billing" | "advance";
   paymentDate: string; paymentMode: string;
   referenceNumber?: string; notes?: string;

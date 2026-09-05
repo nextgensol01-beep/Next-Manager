@@ -6,6 +6,7 @@ import useSWR from "swr";
 import { useMotionValue, useReducedMotion, useScroll, useSpring } from "framer-motion";
 import { FINANCIAL_YEARS, formatCurrency, formatDate, PAYMENT_MODES } from "@/lib/utils";
 import { buildInvoiceCoverageSummary } from "@/lib/invoiceCoverage";
+import { annualReturnWorkflowProgressSteps } from "@/lib/annualReturnStatus";
 import { findCpcbRegistrationDate, isDateInFinancialYear } from "@/lib/currentFyRegistration";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import Modal from "@/components/ui/Modal";
@@ -35,6 +36,7 @@ import {
   HealthDashboard,
   NotesSection,
   QuickActions,
+  TargetScreenshotsSection,
   type ClientProfileCustomField,
   type ClientProfileCustomFieldGroup,
   type ClientProfileMetric,
@@ -47,6 +49,7 @@ import {
   ClientAlerts,
   ClientProfileSecondaryWorkspace,
   ClientPrimaryTabs,
+  COMPLIANCE_NAV,
   ComplianceStatusPanel,
   ComplianceWorkspace,
   CpcbUploadSummary,
@@ -64,6 +67,7 @@ import {
   type AnnualReturnRecord,
   type AnnualReturnProgressStep,
   type ClientProfileAlert,
+  type ClientProfileSecondaryNavItem,
   type ClientProfileTabId,
   type ComplianceSectionId,
   type DocumentsSectionId,
@@ -76,9 +80,9 @@ import {
   type TimelineSectionId,
 } from "./ClientProfileWorkspaceSections";
 import {
-  AlertCircle, BarChart2, Building2, Calendar, CheckCircle2, ClipboardCheck, FileText, FileUp,
-  Hash, Mail, MapPin, Pencil, Phone, Receipt, Send,
-  Shield, Target, Trash2, Upload, User, Wallet, Zap
+  AlertCircle, BarChart2, Bell, Building2, Calendar, CheckCircle2, ClipboardCheck, FileText, FileUp,
+  Flag, Hash, LockKeyhole, Mail, MapPin, NotebookPen, Pencil, Phone, Receipt, Send,
+  Shield, ShieldCheck, Target, Trash2, Upload, User, Users, Wallet, Zap
 } from "lucide-react";
 import {
   ACTIVITY_PAGE_SIZE,
@@ -93,6 +97,7 @@ import {
   getContactEmails,
   getContactPhones,
   getLatestTimestamp,
+  formatDateTime,
   normalizeEmailList,
   normalizePhoneList,
   restoreSuggestion,
@@ -105,6 +110,8 @@ import {
   type ActivityResponse,
   type Billing,
   type Client,
+  type ClientNote,
+  type ClientWorkItem,
   type Document,
   type DocumentCategory,
   type EmailOption,
@@ -121,6 +128,39 @@ const INVOICE_TYPE_OPTIONS = [
 ] as const;
 
 const RECEIVED_VIA_OPTIONS = INVOICE_RECEIVED_VIA_OPTIONS;
+
+const WORK_ITEM_COPY: Record<ClientWorkItem["kind"], { label: string; action: string; titlePlaceholder: string; detailsPlaceholder: string }> = {
+  task: {
+    label: "Task",
+    action: "Create task",
+    titlePlaceholder: "What needs to be completed?",
+    detailsPlaceholder: "Add context, deliverables, or important instructions…",
+  },
+  reminder: {
+    label: "Reminder",
+    action: "Schedule reminder",
+    titlePlaceholder: "What should we remember?",
+    detailsPlaceholder: "Add context so the reminder is clear when it becomes due…",
+  },
+  follow_up: {
+    label: "Follow-up",
+    action: "Create follow-up",
+    titlePlaceholder: "What should we follow up on?",
+    detailsPlaceholder: "Add the latest context and the desired next step…",
+  },
+  call: {
+    label: "Call",
+    action: "Schedule call",
+    titlePlaceholder: "What is this call about?",
+    detailsPlaceholder: "Add an agenda, talking points, or preparation notes…",
+  },
+  meeting: {
+    label: "Meeting",
+    action: "Schedule meeting",
+    titlePlaceholder: "What is this meeting about?",
+    detailsPlaceholder: "Add an agenda, attendees, or preparation notes…",
+  },
+};
 
 type InvoiceType = (typeof INVOICE_TYPE_OPTIONS)[number]["id"];
 type ReceivedVia = InvoiceReceivedVia;
@@ -156,6 +196,7 @@ const CUSTOM_FIELD_ICON_COMPONENTS = {
   phone: Phone,
   mail: Mail,
   calendar: Calendar,
+  lock: LockKeyhole,
   shield: Shield,
 } as const;
 
@@ -197,6 +238,8 @@ export default function ClientProfilePage() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [annualReturns, setAnnualReturns] = useState<AnnualReturnRecord[]>([]);
   const [linkedQuotations, setLinkedQuotations] = useState<QuotationSummary[]>([]);
+  const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
+  const [clientWorkItems, setClientWorkItems] = useState<ClientWorkItem[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [activitiesTotal, setActivitiesTotal] = useState(0);
   const [activityHasMore, setActivityHasMore] = useState(false);
@@ -205,7 +248,7 @@ export default function ClientProfilePage() {
   const [activityLoadingMore, setActivityLoadingMore] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
   const [activityRange, setActivityRange] = useState<ActivityRange>("30d");
-  const [latestEmailActivity, setLatestEmailActivity] = useState<ActivityItem | null>(null);
+  const [latestActivity, setLatestActivity] = useState<ActivityItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadWarning, setLoadWarning] = useState<string | null>(null);
@@ -249,8 +292,18 @@ export default function ClientProfilePage() {
   const [secondaryNavCollapsed, setSecondaryNavCollapsed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [docModal, setDocModal] = useState(false);
-  const [docForm, setDocForm] = useState({ documentName: "", driveLink: "", category: "other" as DocumentCategory });
+  const [docForm, setDocForm] = useState({
+    documentName: "",
+    driveLink: "",
+    category: "other" as DocumentCategory,
+    documentKind: "general" as "general" | "epr-certificate" | "target-screenshot",
+    financialYear: "",
+  });
   const [documentUploadOpen, setDocumentUploadOpen] = useState(false);
+  const [documentUploadContext, setDocumentUploadContext] = useState<{
+    purpose: "general" | "target-screenshot";
+    financialYear?: string;
+  }>({ purpose: "general" });
   const [docModalMode, setDocModalMode] = useState<"create" | "edit">("create");
   const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null);
   const [documentPendingDelete, setDocumentPendingDelete] = useState<Document | null>(null);
@@ -317,6 +370,17 @@ export default function ClientProfilePage() {
   const [reminderPreviewHtml, setReminderPreviewHtml] = useState<string | null>(null);
   const [reminderSending, setReminderSending] = useState(false);
   const [inlineSaving, setInlineSaving] = useState(false);
+  const [noteModal, setNoteModal] = useState(false);
+  const [noteBody, setNoteBody] = useState("");
+  const [workItemModal, setWorkItemModal] = useState(false);
+  const [workItemForm, setWorkItemForm] = useState({
+    kind: "task" as ClientWorkItem["kind"],
+    title: "",
+    details: "",
+    priority: "normal" as ClientWorkItem["priority"],
+    ownerEmail: "",
+    dueAt: "",
+  });
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showAllCustomProfileInfo, setShowAllCustomProfileInfo] = useState(false);
@@ -481,6 +545,27 @@ export default function ClientProfilePage() {
     };
   }, [client, selectedFy]);
 
+  const refreshSupportData = useCallback(async () => {
+    const encodedClientId = encodeURIComponent(String(clientId));
+    const [notesResponse, workItemsResponse] = await Promise.all([
+      fetch(`/api/client-notes?clientId=${encodedClientId}`, { cache: "no-store" }),
+      fetch(`/api/client-work-items?clientId=${encodedClientId}`, { cache: "no-store" }),
+    ]);
+    if (notesResponse.ok) {
+      const payload = await notesResponse.json();
+      setClientNotes(Array.isArray(payload) ? payload : []);
+    }
+    if (workItemsResponse.ok) {
+      const payload = await workItemsResponse.json();
+      setClientWorkItems(Array.isArray(payload) ? payload : []);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    if (sessionStatus !== "authenticated" || !clientId) return;
+    void refreshSupportData().catch(() => undefined);
+  }, [clientId, refreshSupportData, sessionStatus]);
+
   const fetchActivitiesPage = useCallback(async ({
     offset,
     replace,
@@ -515,7 +600,7 @@ export default function ClientProfilePage() {
     setActivityHasMore(Boolean(payload.hasMore));
     setActivityOffset(Number(payload.nextOffset) || 0);
     if (replace) {
-      setLatestEmailActivity(payload.latestEmailActivity || null);
+      setLatestActivity(payload.latestActivity || null);
     }
     setActivityError(null);
   }, [activityFilter, activityRange, clientId, readErrorMessage, selectedFy]);
@@ -528,7 +613,7 @@ export default function ClientProfilePage() {
     setActivityHasMore(false);
     setActivityOffset(0);
     setActivityError(null);
-    setLatestEmailActivity(null);
+    setLatestActivity(null);
     setActivityLoading(true);
     setActivityLoadingMore(false);
 
@@ -584,6 +669,110 @@ export default function ClientProfilePage() {
     if (activityRefreshTimerRef.current) clearTimeout(activityRefreshTimerRef.current);
   }, []);
 
+  const openNoteModal = () => {
+    setNoteBody("");
+    setNoteModal(true);
+  };
+
+  const saveClientNote = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!noteBody.trim()) return;
+    setInlineSaving(true);
+    try {
+      const response = await fetch("/api/client-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, financialYear: selectedFy, body: noteBody.trim() }),
+      });
+      if (!response.ok) {
+        toast.error(await readErrorMessage(response, "Unable to save the note."));
+        return;
+      }
+      const saved = await response.json() as ClientNote;
+      setClientNotes((current) => [saved, ...current]);
+      setNoteModal(false);
+      setNoteBody("");
+      scheduleActivityRefresh();
+      toast.success("Note added");
+    } finally {
+      setInlineSaving(false);
+    }
+  };
+
+  const deleteClientNote = async (note: ClientNote) => {
+    if (!window.confirm("Delete this internal note?")) return;
+    const response = await fetch(`/api/client-notes/${note._id}`, { method: "DELETE" });
+    if (!response.ok) {
+      toast.error(await readErrorMessage(response, "Unable to delete the note."));
+      return;
+    }
+    setClientNotes((current) => current.filter((entry) => entry._id !== note._id));
+    scheduleActivityRefresh();
+    toast.success("Note deleted");
+  };
+
+  const openWorkItemModal = (kind: ClientWorkItem["kind"]) => {
+    setWorkItemForm({
+      kind,
+      title: "",
+      details: "",
+      priority: "normal",
+      ownerEmail: session?.user?.email || "",
+      dueAt: "",
+    });
+    setWorkItemModal(true);
+  };
+
+  const saveClientWorkItem = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!workItemForm.title.trim()) return;
+    setInlineSaving(true);
+    try {
+      const response = await fetch("/api/client-work-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...workItemForm, clientId, financialYear: selectedFy }),
+      });
+      if (!response.ok) {
+        toast.error(await readErrorMessage(response, "Unable to save this item."));
+        return;
+      }
+      const saved = await response.json() as ClientWorkItem;
+      setClientWorkItems((current) => [saved, ...current]);
+      setWorkItemModal(false);
+      scheduleActivityRefresh();
+      toast.success("Item added");
+    } finally {
+      setInlineSaving(false);
+    }
+  };
+
+  const setClientWorkItemStatus = async (item: ClientWorkItem, status: ClientWorkItem["status"]) => {
+    const response = await fetch(`/api/client-work-items/${item._id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (!response.ok) {
+      toast.error(await readErrorMessage(response, "Unable to update this item."));
+      return;
+    }
+    const saved = await response.json() as ClientWorkItem;
+    setClientWorkItems((current) => current.map((entry) => entry._id === saved._id ? saved : entry));
+    scheduleActivityRefresh();
+  };
+
+  const deleteClientWorkItem = async (item: ClientWorkItem) => {
+    if (!window.confirm("Delete this item?")) return;
+    const response = await fetch(`/api/client-work-items/${item._id}`, { method: "DELETE" });
+    if (!response.ok) {
+      toast.error(await readErrorMessage(response, "Unable to delete this item."));
+      return;
+    }
+    setClientWorkItems((current) => current.filter((entry) => entry._id !== item._id));
+    scheduleActivityRefresh();
+  };
+
   const billing  = allBillings.find((b) => b.financialYear === selectedFy) || null;
   const payments = allPayments.filter((p) => p.financialYear === selectedFy);
   const invoices = allInvoices.filter((invoice) => invoice.financialYear === selectedFy);
@@ -595,7 +784,6 @@ export default function ClientProfilePage() {
     (quotation.status === "Sent" || quotation.status === "Accepted")
   ));
   const filteredActivities = activities;
-  const lastEmailActivity = latestEmailActivity;
   const billingFormTotal =
     Number(billingForm.govtCharges || 0) +
     Number(billingForm.consultancyCharges || 0) +
@@ -1051,20 +1239,31 @@ export default function ClientProfilePage() {
     setDocModal(false);
     setDocModalMode("create");
     setEditingDocumentId(null);
-    setDocForm({ documentName: "", driveLink: "", category: "other" });
+    setDocForm({ documentName: "", driveLink: "", category: "other", documentKind: "general", financialYear: "" });
   };
 
   const openCreateDocument = () => {
     setDocModalMode("create");
     setEditingDocumentId(null);
-    setDocForm({ documentName: "", driveLink: "", category: "other" });
+    setDocForm({ documentName: "", driveLink: "", category: "other", documentKind: "general", financialYear: selectedFy });
     setDocModal(true);
+  };
+
+  const openDocumentUpload = (purpose: "general" | "target-screenshot" = "general", financialYear?: string) => {
+    setDocumentUploadContext({ purpose, financialYear });
+    setDocumentUploadOpen(true);
   };
 
   const openEditDocument = (document: Document) => {
     setDocModalMode("edit");
     setEditingDocumentId(document._id);
-    setDocForm({ documentName: document.documentName, driveLink: document.driveLink, category: document.category || "other" });
+    setDocForm({
+      documentName: document.documentName,
+      driveLink: document.driveLink,
+      category: document.category || "other",
+      documentKind: document.documentKind || "general",
+      financialYear: document.financialYear || selectedFy,
+    });
     setDocModal(true);
   };
 
@@ -1269,6 +1468,7 @@ export default function ClientProfilePage() {
       invalidate("/api/invoices");
       await refreshAnnualReturnForFy(invoiceForm.financialYear);
       refreshWorkspaceSilently();
+      scheduleActivityRefresh();
       toast.success(`${savedRecords.length} month${savedRecords.length === 1 ? "" : "s"} updated.`);
       navigateToClientSection({ primary: "compliance", secondary: "invoiceTracking" });
     } catch {
@@ -1342,6 +1542,7 @@ export default function ClientProfilePage() {
       invalidate("/api/upload-records");
       await refreshAnnualReturnForFy(payload.financialYear);
       refreshWorkspaceSilently();
+      scheduleActivityRefresh();
       toast.success("Upload record added!");
       navigateToClientSection({ primary: "compliance", secondary: "cpcbUpload" });
     } catch {
@@ -1530,6 +1731,7 @@ export default function ClientProfilePage() {
       ops?.commit?.(safeCommit);
       await refreshAnnualReturnForFy(payload.financialYear);
       refreshWorkspaceSilently();
+      scheduleActivityRefresh();
       toast.success(editingBillingId ? "Billing updated!" : "Billing saved!");
       navigateToClientSection({ primary: "financial", secondary: "billing" });
     } catch {
@@ -1552,6 +1754,7 @@ export default function ClientProfilePage() {
       }
       commit();
       refreshWorkspaceSilently();
+      scheduleActivityRefresh();
       toast.success("Billing moved to recycle bin");
     } catch {
       rollback();
@@ -1652,6 +1855,7 @@ export default function ClientProfilePage() {
       const saved = await response.json();
       ops?.commit?.(saved);
       refreshWorkspaceSilently();
+      scheduleActivityRefresh();
       toast.success(editingPaymentId ? "Payment updated!" : "Payment recorded!");
       navigateToClientSection({ primary: "financial", secondary: "payments" });
     } catch {
@@ -1674,6 +1878,7 @@ export default function ClientProfilePage() {
       }
       commit();
       refreshWorkspaceSilently();
+      scheduleActivityRefresh();
       toast.success("Payment moved to recycle bin");
     } catch {
       rollback();
@@ -1750,7 +1955,15 @@ export default function ClientProfilePage() {
       setSelectedFy(payload.financialYear);
       invalidate("/api/financial-year", "/api/dashboard", "/api/activities");
       refreshWorkspaceSilently();
+      scheduleActivityRefresh();
       toast.success(isPWP ? "Credit data saved!" : "FY data saved!");
+      const targetTotal = payload.targets.reduce((sum, entry) => sum + Number(entry.value || 0), 0);
+      const hasScreenshot = documents.some((document) => (
+        document.documentKind === "target-screenshot" && document.financialYear === payload.financialYear
+      ));
+      if (targetTotal > 0 && !hasScreenshot && window.confirm(`Target data was saved for FY ${payload.financialYear}. Add the target screenshot now?`)) {
+        openDocumentUpload("target-screenshot", payload.financialYear);
+      }
       navigateToClientSection({ primary: "compliance", secondary: "targetsCredits" });
     } finally {
       setInlineSaving(false);
@@ -1792,6 +2005,7 @@ export default function ClientProfilePage() {
       });
       invalidate("/api/annual-return", "/api/dashboard", "/api/activities");
       refreshWorkspaceSilently();
+      scheduleActivityRefresh();
       const displayedStatus = saved.status === "Pending" ? "Not Started" : saved.status;
       toast.success(
         displayedStatus === status
@@ -1932,6 +2146,7 @@ export default function ClientProfilePage() {
       }
 
       closeReminderModal();
+      scheduleActivityRefresh();
       toast.success(`Reminder sent to ${reminderRecipients.length} recipient${reminderRecipients.length === 1 ? "" : "s"}!`);
       navigateToClientSection({ primary: "financial", secondary: "billing" });
     } finally {
@@ -1946,6 +2161,28 @@ export default function ClientProfilePage() {
         setSelectedFy(targetBilling.financialYear);
         openBillingModalForRecord(targetBilling);
       }
+      return;
+    }
+
+    if (activity.entityType === "client") {
+      openBasicEdit();
+      return;
+    }
+
+    if (activity.entityType === "note") {
+      navigateToClientSection({ primary: "notes", secondary: "notes" });
+      return;
+    }
+
+    if (activity.entityType === "work-item") {
+      const secondary: NotesTasksSectionId = activity.type.startsWith("reminder_")
+        ? "reminders"
+        : activity.type.startsWith("follow_up_")
+          ? "followUps"
+          : activity.type.startsWith("call_") || activity.type.startsWith("meeting_")
+            ? "callsMeetings"
+            : "tasks";
+      navigateToClientSection({ primary: "notes", secondary });
       return;
     }
 
@@ -2062,6 +2299,7 @@ export default function ClientProfilePage() {
       );
       refreshWorkspaceSilently();
       invalidate("/api/clients");
+      scheduleActivityRefresh();
       setEditModal(false);
       toast.success("Client updated!");
     } finally {
@@ -2119,6 +2357,9 @@ export default function ClientProfilePage() {
   const hasLinkedContacts = (client.contacts?.length ?? 0) > 0;
   const getActivityActionLabel = (activity: ActivityItem) => {
     if (activity.entityType === "billing") return "Open Billing";
+    if (activity.entityType === "client") return "Open Profile";
+    if (activity.entityType === "note") return "Open Notes";
+    if (activity.entityType === "work-item") return "Open Item";
     if (activity.entityType === "payment") return "Open Payment";
     if (activity.entityType === "financial-year") return "Open FY";
     if (activity.entityType === "annual-return") return "Open Annual Return";
@@ -2300,7 +2541,21 @@ export default function ClientProfilePage() {
       : cpcbUploadProgress > 0
         ? "Started"
         : "Not Started";
-  const annualReturnComplete = annualReturnStatus === "Filed" || annualReturnStatus === "Verified" || annualReturnStatus === "Not Required This FY";
+  const annualReturnNotApplicable = annualReturnStatus === "Not Required This FY";
+  const annualReturnNotApplicableReason = annualReturn?.remarks?.trim()
+    || `No Annual Return filing is required for FY ${selectedFy}.`;
+  const annualReturnComplete = annualReturnStatus === "Filed" || annualReturnStatus === "Verified";
+  const annualReturnProgressByStep = new Map(annualReturnWorkflowProgressSteps({
+    status: annualReturnStatus,
+    clientCategory: client.category,
+    invoiceCoveragePercent: invoiceCoverageProgress * 100,
+    hasUpload: hasCpcbUploadRecords,
+    uploadRecordCount: uploadRecords.length,
+    hasBilling: Boolean(billing),
+    hasAcceptedQuotation: quotationAccepted,
+    hasSentQuotation: hasSentLinkedQuotation,
+    linkedQuotationCount: linkedQuotations.length,
+  }).map((step) => [step.id, step.progress]));
   const annualReturnProgressSteps: AnnualReturnProgressStep[] = [
     requiresAcceptedQuotation ? {
       id: "quotation",
@@ -2310,36 +2565,36 @@ export default function ClientProfilePage() {
         : hasSentLinkedQuotation
           ? "Linked quotation sent, awaiting acceptance"
           : "No accepted linked quotation for this FY",
-      progress: quotationAccepted ? 1 : hasSentLinkedQuotation ? 0.5 : 0,
+      progress: annualReturnProgressByStep.get("quotation") || 0,
     } : (!isPWP && linkedQuotations.length > 0 ? {
       id: "quotation",
       label: "Quotation",
       detail: quotationAccepted ? "Accepted linked quotation available" : "Quotation is optional for this client type",
-      progress: quotationAccepted ? 1 : hasSentLinkedQuotation ? 0.5 : 0.25,
+      progress: annualReturnProgressByStep.get("quotation") || 0,
     } : null),
     {
       id: "invoice-coverage",
       label: "Invoice Coverage",
       detail: `${invoiceReceivedMonths}/24 sale/purchase months complete`,
-      progress: invoiceCoverageProgress,
+      progress: annualReturnProgressByStep.get("invoice-coverage") || 0,
     },
     {
       id: "cpcb-upload",
       label: "CPCB Upload",
       detail: `${cpcbUploadStatus} - ${cpcbUploadedTotal.toLocaleString("en-IN")} MT uploaded`,
-      progress: cpcbUploadProgress,
+      progress: annualReturnProgressByStep.get("cpcb-upload") || 0,
     },
     {
       id: "billing",
       label: "Bill Created",
       detail: billing ? `${billing.paymentStatus} - ${formatCurrency(billing.totalAmount)}` : `No bill for FY ${selectedFy}`,
-      progress: billing ? 1 : 0,
+      progress: annualReturnProgressByStep.get("billing") || 0,
     },
     {
       id: "annual-return",
       label: "Annual Return Filed",
       detail: annualReturnComplete ? annualReturnStatus : `Current status: ${annualReturnStatus}`,
-      progress: annualReturnComplete ? 1 : annualReturnStatus === "Ready to File" ? 0.9 : annualReturnStatus === "In Progress" ? 0.5 : 0,
+      progress: annualReturnProgressByStep.get("annual-return") || 0,
     },
   ].filter(Boolean) as AnnualReturnProgressStep[];
   const annualReturnProgress = annualReturnProgressSteps.length > 0
@@ -2367,7 +2622,7 @@ export default function ClientProfilePage() {
       id: group._id || group.key,
       label: group.label,
       description: group.description,
-      icon: renderCustomFieldIcon({ icon: group.icon }),
+      icon: group.showIcon !== false ? renderCustomFieldIcon({ icon: group.icon }) : undefined,
       profileDisplay: group.profileDisplay,
       profileCluster: group.profileCluster || "additional",
       collapsible: group.collapsible,
@@ -2425,7 +2680,7 @@ export default function ClientProfilePage() {
       label: "Upload Document",
       description: `${documents.length} saved`,
       icon: <FileUp className="w-4 h-4" />,
-      onClick: openCreateDocument,
+      onClick: () => openDocumentUpload("general", selectedFy),
       tone: "neutral",
     },
     {
@@ -2491,17 +2746,25 @@ export default function ClientProfilePage() {
     },
     {
       label: "AR Progress",
-      value: `${Math.round(annualReturnProgress * 100)}%`,
-      sub: `${annualReturnProgressSteps.filter((step) => step.progress >= 1).length}/${annualReturnProgressSteps.length} workflow milestones complete`,
-      icon: <Target className="w-4 h-4" />,
-      tone: annualReturnProgress >= 1 ? "success" : annualReturnProgress > 0.45 ? "warning" : "neutral",
+      value: annualReturnNotApplicable ? "N/A" : `${Math.round(annualReturnProgress * 100)}%`,
+      sub: annualReturnNotApplicable
+        ? `Not required for FY ${selectedFy}`
+        : `${annualReturnProgressSteps.filter((step) => step.progress >= 1).length}/${annualReturnProgressSteps.length} workflow milestones complete`,
+      icon: annualReturnNotApplicable ? <ShieldCheck className="w-4 h-4" /> : <Target className="w-4 h-4" />,
+      tone: annualReturnNotApplicable
+        ? "neutral"
+        : annualReturnProgress >= 1 ? "success" : annualReturnProgress > 0.45 ? "warning" : "neutral",
       actionLabel: "Review",
-      progress: annualReturnProgress,
-      detailRows: [
+      progress: annualReturnNotApplicable ? undefined : annualReturnProgress,
+      detailRows: annualReturnNotApplicable ? [
+        { label: "Filing requirement", value: "Not required" },
+        { label: "Progress calculation", value: "Excluded" },
+        { label: "FY records", value: "Preserved" },
+      ] : [
         { label: "Completed", value: `${annualReturnProgressSteps.filter((step) => step.progress >= 1).length}/${annualReturnProgressSteps.length}` },
         { label: "Pending", value: `${annualReturnProgressSteps.filter((step) => step.progress < 1).length}` },
       ],
-      milestones: annualReturnProgressSteps.map((step) => ({
+      milestones: annualReturnNotApplicable ? undefined : annualReturnProgressSteps.map((step) => ({
         label: step.label,
         value: step.progress >= 1 ? "Complete" : step.progress > 0 ? "In progress" : "Pending",
         state: step.progress >= 1 ? "done" : step.progress > 0 ? "partial" : "pending",
@@ -2585,14 +2848,14 @@ export default function ClientProfilePage() {
     },
     {
       label: "Last Activity",
-      value: lastEmailActivity ? formatDate(lastEmailActivity.date) : activitiesTotal.toLocaleString("en-IN"),
-      sub: lastEmailActivity ? lastEmailActivity.label : "No email activity yet",
+      value: latestActivity ? formatDate(latestActivity.date) : activitiesTotal.toLocaleString("en-IN"),
+      sub: latestActivity ? latestActivity.label : "No activity yet",
       icon: <Zap className="w-4 h-4" />,
       tone: activitiesTotal > 0 ? "brand" : "neutral",
       actionLabel: "Review",
       detailRows: [
-        { label: "Latest", value: lastEmailActivity ? lastEmailActivity.label : "No email activity yet" },
-        { label: "Date", value: lastEmailActivity ? formatDate(lastEmailActivity.date) : "-" },
+        { label: "Latest", value: latestActivity ? latestActivity.label : "No activity yet" },
+        { label: "Date", value: latestActivity ? formatDate(latestActivity.date) : "-" },
         { label: "Total Activity", value: activitiesTotal.toLocaleString("en-IN") },
       ],
       onClick: () => navigateToClientSection({ primary: "timeline", secondary: "all" }),
@@ -2796,6 +3059,7 @@ export default function ClientProfilePage() {
   const certificateDocumentPattern = /(certificate|certification|approval|registration)/i;
   const documentGroups: Record<DocumentsSectionId, Document[]> = {
     all: documents,
+    targets: documents.filter((document) => document.documentKind === "target-screenshot"),
     compliance: documents.filter((document) => matchesDocument(document, "compliance", complianceDocumentPattern)),
     financial: documents.filter((document) => matchesDocument(document, "financial", financialDocumentPattern)),
     invoices: documents.filter((document) => matchesDocument(document, "invoices", invoiceDocumentPattern)),
@@ -2807,24 +3071,62 @@ export default function ClientProfilePage() {
       matchesDocument(document, "certificates", certificateDocumentPattern),
     ].some(Boolean)),
   };
-  const renderDocumentsPanel = (documentsForSection: Document[]) => (
+  const targetEntriesTotal = Array.isArray(fyData?.targets)
+    ? fyData.targets.reduce((sum, target) => sum + Number(target.value || 0), 0)
+    : 0;
+  const legacyTargetTotal = [1, 2, 3, 4].reduce((sum, category) => (
+    sum + Number(fyData?.[`cat${category}Target` as keyof FYRecord] || 0)
+  ), 0);
+  // New FY records keep Recycling/EOL values in targets[]. Older records may
+  // only have the aggregate or legacy CAT fields, so consider every shape.
+  const selectedFyTargetTotal = Math.max(
+    Number(fyData?.totalTarget || 0),
+    targetEntriesTotal,
+    legacyTargetTotal
+  );
+  const hasEprCertificate = documents.some((document) => (
+    document.documentKind === "epr-certificate" || /\bepr\b.*\bcertificate\b|\bcertificate\b.*\bepr\b/i.test(document.documentName)
+  ));
+  const hasTargetScreenshot = documents.some((document) => (
+    document.documentKind === "target-screenshot" && document.financialYear === selectedFy
+  ));
+  const renderDocumentsPanel = (documentsForSection: Document[], showRequirementSummary = false) => (
     <DocumentsSection
       documents={documentsForSection}
+      showRequirementSummary={showRequirementSummary}
       canManageDocuments={canManageDocuments}
       open={sectionOpen.documents}
       busyAction={busyAction}
       hasLinkedContacts={hasLinkedContacts}
       onToggle={() => toggleSection("documents")}
       onAdd={openCreateDocument}
-      onUpload={() => setDocumentUploadOpen(true)}
+      onUpload={() => openDocumentUpload("general", selectedFy)}
       onEdit={openEditDocument}
       onDelete={setDocumentPendingDelete}
       onMigrate={(document) => void migrateDocument(document)}
       onLinkContact={openBasicEdit}
+      selectedFy={selectedFy}
+      hasEprCertificate={hasEprCertificate}
+      targetDataAdded={selectedFyTargetTotal > 0 || hasTargetScreenshot}
+      hasTargetScreenshot={hasTargetScreenshot}
+      onUploadTargetScreenshot={() => openDocumentUpload("target-screenshot", selectedFy)}
     />
   );
   const documentsSections: Record<DocumentsSectionId, React.ReactNode> = {
-    all: renderDocumentsPanel(documentGroups.all),
+    all: renderDocumentsPanel(documentGroups.all, true),
+    targets: (
+      <TargetScreenshotsSection
+        documents={documentGroups.targets}
+        selectedFy={selectedFy}
+        busyAction={busyAction}
+        canManageDocuments={canManageDocuments}
+        onUpload={(financialYear) => openDocumentUpload("target-screenshot", financialYear)}
+        targetsHref={(financialYear) => `/dashboard/financial-year?fy=${encodeURIComponent(financialYear)}&clientId=${encodeURIComponent(client.clientId)}&open=targets`}
+        onEdit={openEditDocument}
+        onDelete={setDocumentPendingDelete}
+        onMigrate={(document) => void migrateDocument(document)}
+      />
+    ),
     compliance: renderDocumentsPanel(documentGroups.compliance),
     financial: renderDocumentsPanel(documentGroups.financial),
     invoices: renderDocumentsPanel(documentGroups.invoices),
@@ -2877,71 +3179,127 @@ export default function ClientProfilePage() {
     if (nextFilter) setActivityFilter(nextFilter);
   };
 
-  const renderActionPanel = (kicker: string, title: string, alerts: ClientProfileAlert[], emptyText: string) => (
-    <section className="client-profile-card">
-      <div className="client-profile-card-header">
-        <div>
-          <p className="client-profile-kicker">{kicker}</p>
-          <h2>{title}</h2>
-        </div>
-      </div>
-      <div className="client-profile-status-checks">
-        {alerts.length === 0 ? (
-          <div data-done="true">
-            <span><CheckCircle2 className="h-4 w-4" /></span>
-            <div>
-              <p>No immediate action</p>
-              <small>{emptyText}</small>
-            </div>
-          </div>
-        ) : alerts.map((alert) => (
-          <button key={`${kicker}-${alert.id}`} type="button" onClick={alert.onAction} data-done="false">
-            <span>{alert.icon || <AlertCircle className="h-4 w-4" />}</span>
-            <div>
-              <p>{alert.title}</p>
-              <small>{alert.detail || "Review this item"}</small>
-            </div>
+  const compactSecondaryNavigation: {
+    activeId: string;
+    items: Array<ClientProfileSecondaryNavItem<string>>;
+    navStates?: Partial<Record<string, "complete" | "in-progress" | "action" | "recorded">>;
+    onChange: (id: string) => void;
+  } | undefined = activePrimaryTab === "compliance"
+    ? {
+        activeId: activeComplianceSection,
+        items: (isPWP ? COMPLIANCE_NAV.filter((item) => item.id !== "registration") : COMPLIANCE_NAV),
+        navStates: complianceNavStates,
+        onChange: (id) => setActiveComplianceSection(id as ComplianceSectionId),
+      }
+    : activePrimaryTab === "financial"
+      ? {
+          activeId: activeFinancialSection,
+          items: financialNavItems,
+          onChange: (id) => setActiveFinancialSection(id as FinancialSectionId),
+        }
+      : activePrimaryTab === "documents"
+        ? {
+            activeId: activeDocumentsSection,
+            items: DOCUMENTS_NAV,
+            onChange: (id) => setActiveDocumentsSection(id as DocumentsSectionId),
+          }
+        : activePrimaryTab === "timeline"
+          ? {
+              activeId: activeTimelineSection,
+              items: TIMELINE_NAV,
+              onChange: (id) => handleTimelineSectionChange(id as TimelineSectionId),
+            }
+          : activePrimaryTab === "notes"
+            ? {
+                activeId: activeNotesSection,
+                items: NOTES_TASKS_NAV,
+                onChange: (id) => setActiveNotesSection(id as NotesTasksSectionId),
+              }
+            : undefined;
+
+  const renderWorkItemsPanel = (
+    kicker: string,
+    title: string,
+    kinds: ClientWorkItem["kind"][],
+    emptyText: string,
+  ) => {
+    const items = clientWorkItems.filter((item) => (
+      kinds.includes(item.kind) && (!item.financialYear || item.financialYear === selectedFy)
+    ));
+    return (
+      <section className="client-profile-card">
+        <div className="client-profile-card-header">
+          <div><p className="client-profile-kicker">{kicker}</p><h2>{title}</h2></div>
+          <button type="button" className="client-profile-secondary-button" onClick={() => openWorkItemModal(kinds[0])}>
+            Add {kinds[0].replace("_", " ")}
           </button>
-        ))}
-      </div>
-    </section>
-  );
+        </div>
+        {items.length === 0 ? (
+          <div className="client-profile-empty-inline"><CheckCircle2 className="h-4 w-4" /><p>{emptyText}</p></div>
+        ) : (
+          <div className="space-y-3">
+            {items.map((item) => (
+              <article key={item._id} className="rounded-2xl border border-base bg-surface/70 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <strong className={item.status === "completed" ? "text-muted line-through" : "text-default"}>{item.title}</strong>
+                      <span className="client-profile-status-pill" data-status={item.status}>{item.status}</span>
+                      {item.priority === "high" && <span className="client-profile-status-pill" data-status="Pending">High priority</span>}
+                    </div>
+                    {item.details && <p className="mt-1 whitespace-pre-wrap text-sm text-muted">{item.details}</p>}
+                    <p className="mt-2 text-xs text-faint">
+                      {item.ownerEmail || "Unassigned"}{item.dueAt ? ` · Due ${formatDateTime(item.dueAt)}` : ""}{item.financialYear ? ` · FY ${item.financialYear}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {item.status !== "completed" && (
+                      <button type="button" className="client-profile-icon-button" onClick={() => void setClientWorkItemStatus(item, "completed")} aria-label={`Complete ${item.title}`}>
+                        <CheckCircle2 className="h-4 w-4" />
+                      </button>
+                    )}
+                    {item.status === "completed" && (
+                      <button type="button" className="client-profile-icon-button" onClick={() => void setClientWorkItemStatus(item, "open")} aria-label={`Reopen ${item.title}`}>
+                        <Zap className="h-4 w-4" />
+                      </button>
+                    )}
+                    <button type="button" className="client-profile-icon-button client-profile-danger-icon" onClick={() => void deleteClientWorkItem(item)} aria-label={`Delete ${item.title}`}>
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    );
+  };
 
   const notesSections: Record<NotesTasksSectionId, React.ReactNode> = {
     notes: (
       <NotesSection
-        notes={billing?.notes}
-        updatedAt={getLatestTimestamp(client.updatedAt, client.createdAt)}
-        onEditBilling={() => openBillingModalForRecord(billing)}
+        notes={clientNotes.filter((note) => !note.financialYear || note.financialYear === selectedFy)}
+        onAdd={openNoteModal}
+        onDelete={(note) => void deleteClientNote(note)}
       />
     ),
-    tasks: renderActionPanel("Tasks", "Next team actions", profileAlerts, "The current FY profile looks clear."),
-    reminders: renderActionPanel(
-      "Reminders",
-      "Due reminders",
-      profileAlerts.filter((alert) => alert.id === "payment-pending" || alert.id === "registered-current-fy"),
-      "No payment or next-FY reminder is due."
-    ),
-    followUps: renderActionPanel(
-      "Follow-ups",
-      "Client follow-ups",
-      profileAlerts.filter((alert) => alert.id === "invoice-data" || alert.id === "annual-return" || alert.id === "quotation-not-accepted"),
-      "No compliance or quotation follow-up is pending."
-    ),
-    callsMeetings: renderActionPanel(
-      "Calls / Meetings",
-      "Contact actions",
-      hasLinkedContacts ? [] : [{
-        id: "link-contact",
-        title: "No linked contact",
-        detail: "Add a primary contact before logging calls or meetings.",
-        tone: "warning",
-        icon: <Phone className="h-4 w-4" />,
-        onAction: openBasicEdit,
-      }],
-      "No call or meeting action is pending."
-    ),
+    tasks: renderWorkItemsPanel("Tasks", "Team tasks", ["task"], "No tasks have been added for this FY."),
+    reminders: renderWorkItemsPanel("Reminders", "Scheduled reminders", ["reminder"], "No reminders have been scheduled for this FY."),
+    followUps: renderWorkItemsPanel("Follow-ups", "Client follow-ups", ["follow_up"], "No follow-ups have been added for this FY."),
+    callsMeetings: renderWorkItemsPanel("Calls / Meetings", "Calls and meetings", ["call", "meeting"], "No calls or meetings have been logged for this FY."),
   };
+
+  const activeWorkItemCopy = WORK_ITEM_COPY[workItemForm.kind];
+  const ActiveWorkItemIcon = workItemForm.kind === "reminder"
+    ? Bell
+    : workItemForm.kind === "follow_up"
+      ? Target
+      : workItemForm.kind === "call"
+        ? Phone
+        : workItemForm.kind === "meeting"
+          ? Users
+          : ClipboardCheck;
 
   return (
     <div className="client-profile-page">
@@ -2974,6 +3332,7 @@ export default function ClientProfilePage() {
         <QuickActions actions={quickActions} />
         <ClientPrimaryTabs
           activeTab={activePrimaryTab}
+          compactSecondaryNavigation={compactSecondaryNavigation}
           navRef={primaryTabsRef}
           onChange={handlePrimaryTabChange}
         />
@@ -3007,6 +3366,8 @@ export default function ClientProfilePage() {
                 </div>
               </section>
               <AnnualReturnProgressPanel
+                notApplicable={annualReturnNotApplicable}
+                notApplicableReason={annualReturnNotApplicableReason}
                 progress={annualReturnProgress}
                 selectedFy={selectedFy}
                 steps={annualReturnProgressSteps}
@@ -3055,6 +3416,8 @@ export default function ClientProfilePage() {
             <>
               <FYTabBar value={selectedFy} onChange={setSelectedFy} />
               <AnnualReturnProgressPanel
+                notApplicable={annualReturnNotApplicable}
+                notApplicableReason={annualReturnNotApplicableReason}
                 progress={annualReturnProgress}
                 selectedFy={selectedFy}
                 steps={annualReturnProgressSteps}
@@ -3131,6 +3494,8 @@ export default function ClientProfilePage() {
           open={documentUploadOpen}
           clientId={clientId}
           onClose={() => setDocumentUploadOpen(false)}
+          purpose={documentUploadContext.purpose}
+          financialYear={documentUploadContext.financialYear}
           onUploaded={(uploaded) => {
             setDocuments((current) => [...uploaded, ...current]);
             invalidate("/api/documents", "/api/activities");
@@ -3139,6 +3504,169 @@ export default function ClientProfilePage() {
           }}
         />
       )}
+      <Modal
+        open={noteModal}
+        onClose={() => setNoteModal(false)}
+        title="Add internal note"
+        subtitle="Private workspace note"
+        size="md"
+        className="client-profile-compose-modal"
+        backdropFilter="blur(12px) saturate(130%)"
+        backdropColor="rgba(0,0,0,0.62)"
+      >
+        <form onSubmit={saveClientNote} className="client-profile-compose-form">
+          <div className="client-profile-compose-context">
+            <span className="client-profile-compose-icon"><NotebookPen className="h-5 w-5" /></span>
+            <div>
+              <strong>Capture important context</strong>
+              <p>Only your internal team can see this note.</p>
+            </div>
+            <span className="client-profile-compose-fy">FY {selectedFy}</span>
+          </div>
+
+          <div className="client-profile-compose-body">
+            <label className="client-profile-compose-field">
+              <span className="client-profile-compose-label">Note <em>Required</em></span>
+              <textarea
+                className="client-profile-compose-input client-profile-compose-textarea client-profile-compose-note-area"
+                value={noteBody}
+                onChange={(event) => setNoteBody(event.target.value)}
+                maxLength={4000}
+                placeholder="Write a concise update, decision, or piece of client context…"
+                required
+                autoFocus
+              />
+              <span className="client-profile-compose-field-meta">
+                <span>Saved against this client and financial year</span>
+                <span>{noteBody.length.toLocaleString("en-IN")} / 4,000</span>
+              </span>
+            </label>
+          </div>
+
+          <div className="client-profile-compose-footer">
+            <span>Internal note · FY {selectedFy}</span>
+            <div>
+              <button type="button" className="client-profile-secondary-button" onClick={() => setNoteModal(false)}>Cancel</button>
+              <button type="submit" className="client-profile-primary-button" disabled={inlineSaving || !noteBody.trim()}>
+                <NotebookPen className="h-4 w-4" />
+                {inlineSaving ? "Saving…" : "Add note"}
+              </button>
+            </div>
+          </div>
+        </form>
+      </Modal>
+      <Modal
+        open={workItemModal}
+        onClose={() => setWorkItemModal(false)}
+        title={`Add ${activeWorkItemCopy.label.toLowerCase()}`}
+        subtitle="Plan the next client action"
+        size="lg"
+        className="client-profile-compose-modal client-profile-work-item-modal"
+        backdropFilter="blur(12px) saturate(130%)"
+        backdropColor="rgba(0,0,0,0.62)"
+      >
+        <form onSubmit={saveClientWorkItem} className="client-profile-compose-form">
+          <div className="client-profile-compose-context">
+            <span className="client-profile-compose-icon"><ActiveWorkItemIcon className="h-5 w-5" /></span>
+            <div>
+              <strong>{activeWorkItemCopy.label} for {client?.companyName || "this client"}</strong>
+              <p>It will appear in the team workspace and client timeline.</p>
+            </div>
+            <span className="client-profile-compose-fy">FY {selectedFy}</span>
+          </div>
+
+          <div className="client-profile-compose-body">
+            <label className="client-profile-compose-field">
+              <span className="client-profile-compose-label">Title <em>Required</em></span>
+              <input
+                className="client-profile-compose-input client-profile-compose-title-input"
+                value={workItemForm.title}
+                onChange={(event) => setWorkItemForm((current) => ({ ...current, title: event.target.value }))}
+                maxLength={240}
+                placeholder={activeWorkItemCopy.titlePlaceholder}
+                required
+                autoFocus
+              />
+            </label>
+
+            <label className="client-profile-compose-field">
+              <span className="client-profile-compose-label">Details <em>Optional</em></span>
+              <textarea
+                className="client-profile-compose-input client-profile-compose-textarea"
+                value={workItemForm.details}
+                onChange={(event) => setWorkItemForm((current) => ({ ...current, details: event.target.value }))}
+                maxLength={4000}
+                placeholder={activeWorkItemCopy.detailsPlaceholder}
+              />
+              <span className="client-profile-compose-field-meta">
+                <span>Add enough context for anyone on the team to take over.</span>
+                <span>{workItemForm.details.length.toLocaleString("en-IN")} / 4,000</span>
+              </span>
+            </label>
+
+            <fieldset className="client-profile-compose-field">
+              <legend className="client-profile-compose-label">Priority</legend>
+              <div className="client-profile-priority-selector">
+                {(["low", "normal", "high"] as const).map((priority) => (
+                  <button
+                    key={priority}
+                    type="button"
+                    data-active={workItemForm.priority === priority ? "true" : "false"}
+                    data-priority={priority}
+                    onClick={() => setWorkItemForm((current) => ({ ...current, priority }))}
+                    aria-pressed={workItemForm.priority === priority}
+                  >
+                    <Flag className="h-3.5 w-3.5" />
+                    {priority === "normal" ? "Normal" : priority[0].toUpperCase() + priority.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            <div className="client-profile-compose-grid">
+              <label className="client-profile-compose-field">
+                <span className="client-profile-compose-label">Owner <em>Optional</em></span>
+                <span className="client-profile-compose-input-shell">
+                  <User className="h-4 w-4" />
+                  <input
+                    type="email"
+                    value={workItemForm.ownerEmail}
+                    onChange={(event) => setWorkItemForm((current) => ({ ...current, ownerEmail: event.target.value }))}
+                    placeholder="team@company.com"
+                  />
+                </span>
+              </label>
+              <label className="client-profile-compose-field">
+                <span className="client-profile-compose-label">Due date {workItemForm.kind === "reminder" ? <em>Required</em> : <em>Optional</em>}</span>
+                <span className="client-profile-compose-input-shell">
+                  <Calendar className="h-4 w-4" />
+                  <input
+                    type="datetime-local"
+                    value={workItemForm.dueAt}
+                    onChange={(event) => setWorkItemForm((current) => ({ ...current, dueAt: event.target.value }))}
+                    required={workItemForm.kind === "reminder"}
+                  />
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div className="client-profile-compose-footer">
+            <span>{activeWorkItemCopy.label} · FY {selectedFy}</span>
+            <div>
+              <button type="button" className="client-profile-secondary-button" onClick={() => setWorkItemModal(false)}>Cancel</button>
+              <button
+                type="submit"
+                className="client-profile-primary-button"
+                disabled={inlineSaving || !workItemForm.title.trim() || (workItemForm.kind === "reminder" && !workItemForm.dueAt)}
+              >
+                <ActiveWorkItemIcon className="h-4 w-4" />
+                {inlineSaving ? "Saving…" : activeWorkItemCopy.action}
+              </button>
+            </div>
+          </div>
+        </form>
+      </Modal>
       <Modal
         open={Boolean(documentPendingDelete)}
         onClose={() => {
@@ -3304,6 +3832,7 @@ export default function ClientProfilePage() {
                   <input
                     type="number"
                     min="0"
+                    step="any"
                     className="input-field font-mono"
                     value={uploadForm[field]}
                     onChange={(e) => setUploadForm((current) => ({ ...current, [field]: e.target.value }))}
@@ -3330,6 +3859,10 @@ export default function ClientProfilePage() {
         docForm={docForm}
         setDocForm={setDocForm}
         closeDocumentModal={closeDocumentModal}
+        openDocumentUpload={() => {
+          closeDocumentModal();
+          openDocumentUpload("general", selectedFy);
+        }}
         saveDocument={saveDocument}
         fyModal={fyModal}
         fyForm={fyForm}

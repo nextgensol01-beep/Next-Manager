@@ -155,7 +155,7 @@ export default function GeneralPanel() {
       <SettingsGroup label="Financial Year">
         <SettingsRow
           label="Enable FY override"
-          subtitle="Pages use your selected FY by default after reload"
+          subtitle="Saved to your account and used on every signed-in device"
         >
           <Toggle
             checked={featureEnabled}
@@ -182,7 +182,7 @@ export default function GeneralPanel() {
             ))}
           </select>
           <p className="text-xs text-faint mt-1.5">
-            Leave empty to always use FY {currentFinancialYear} automatically.
+            Leave empty to use FY {currentFinancialYear} automatically on every device.
           </p>
         </div>
       </SettingsGroup>
@@ -225,8 +225,9 @@ export default function GeneralPanel() {
       {/* How it works */}
       <SettingsGroup label="How It Works">
         {[
+          "This preference belongs to your account and follows you across devices.",
           "If disabled, every page uses the current financial year.",
-          "If enabled with a saved FY, pages load with that FY after reload.",
+          "If enabled with a saved FY, pages load with that FY after sign-in.",
           "You can still switch FY temporarily on any individual page.",
         ].map((text, i) => (
           <div key={i} className="flex items-start gap-3 px-4 py-3">

@@ -55,8 +55,8 @@ export async function POST(req: NextRequest) {
 
     // ── Load billing record ──────────────────────────────────────────────────
     const billing = await Billing.findOne({ clientId, financialYear })
-      .select("totalAmount")
-      .lean() as { totalAmount?: number } | null;
+      .select("_id totalAmount")
+      .lean() as { _id?: unknown; totalAmount?: number } | null;
 
     if (!billing) {
       return NextResponse.json(
@@ -68,8 +68,12 @@ export async function POST(req: NextRequest) {
     // ── Compute current pending amount ───────────────────────────────────────
     const existingBillingPayments = await Payment.find({
       clientId,
-      financialYear,
       paymentType: { $ne: "advance" },
+      $or: [
+        { billingId: String(billing._id) },
+        { billingId: { $in: ["", null] }, financialYear },
+        { billingId: { $exists: false }, financialYear },
+      ],
     }).select("amountPaid").lean() as Array<{ amountPaid?: number }>;
 
     const alreadyPaid = existingBillingPayments.reduce(
@@ -88,11 +92,10 @@ export async function POST(req: NextRequest) {
     // ── Load advance payments for this client/FY, oldest first ──────────────
     const advancePayments = await Payment.find({
       clientId,
-      financialYear,
       paymentType: "advance",
     })
       .sort({ paymentDate: 1, createdAt: 1 })
-      .lean() as Array<{ _id: unknown; amountPaid?: number; paymentMode?: string; [key: string]: unknown }>;
+      .lean() as Array<{ _id: unknown; amountPaid?: number; paymentMode?: string; financialYear?: string; [key: string]: unknown }>;
 
     const advanceBalance = advancePayments.reduce(
       (sum, p) => sum + (Number(p.amountPaid) || 0),
@@ -101,7 +104,7 @@ export async function POST(req: NextRequest) {
 
     if (advanceBalance <= 0) {
       return NextResponse.json(
-        { error: "No advance balance available for this client and financial year." },
+        { error: "No advance balance available for this client." },
         { status: 400 }
       );
     }
@@ -134,6 +137,7 @@ export async function POST(req: NextRequest) {
     // ── Create the new billing payment ───────────────────────────────────────
     const newBillingPayment = await Payment.create({
       clientId,
+      billingId: String(billing._id),
       financialYear,
       amountPaid: amountToApply,
       paymentType: "billing",

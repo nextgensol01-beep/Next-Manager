@@ -6,6 +6,7 @@ import { syncBillingTotalPaid } from "@/lib/billing-utils";
 import Payment from "@/models/Payment";
 import Client from "@/models/Client";
 import Billing from "@/models/Billing";
+import { recordActivityEvent } from "@/lib/server/activity-events";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -19,8 +20,12 @@ export async function GET(req: NextRequest) {
 
     const query: Record<string, unknown> = {};
     if (clientId) query.clientId = clientId;
-    if (fy) query.financialYear = fy;
     if (type === "billing" || type === "advance") query.paymentType = type;
+    if (fy) {
+      if (type === "billing") query.financialYear = fy;
+      else if (type !== "advance") query.$or = [{ financialYear: fy }, { paymentType: "advance" }];
+      // Advances are client-level balances and remain available across FYs.
+    }
 
     const payments = await Payment.find(query).sort({ paymentDate: -1 });
     return NextResponse.json(payments);
@@ -64,9 +69,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "paymentMode is required" }, { status: 400 });
     }
 
+    const requestedBillingId = typeof body.billingId === "string" ? body.billingId.trim() : "";
     const [client, billing] = await Promise.all([
       Client.findOne({ clientId }).select("clientId").lean() as Promise<{ clientId?: string } | null>,
-      Billing.findOne({ clientId, financialYear }).select("totalAmount").lean() as Promise<{ totalAmount?: number } | null>,
+      (requestedBillingId
+        ? Billing.findOne({ _id: requestedBillingId, clientId }).select("_id totalAmount financialYear").lean()
+        : Billing.findOne({ clientId, financialYear }).select("_id totalAmount financialYear").lean()) as Promise<{ _id?: unknown; totalAmount?: number; financialYear?: string } | null>,
     ]);
 
     if (!client) {
@@ -74,6 +82,10 @@ export async function POST(req: NextRequest) {
     }
 
     const paymentType = requestedType ?? (billing ? "billing" : "advance");
+    const billingId = paymentType === "billing" && billing ? String(billing._id) : "";
+    const billingFinancialYear = paymentType === "billing" && billing?.financialYear
+      ? String(billing.financialYear)
+      : financialYear;
 
     if (paymentType === "billing" && !billing) {
       return NextResponse.json({
@@ -84,8 +96,12 @@ export async function POST(req: NextRequest) {
     if (paymentType === "billing" && billing) {
       const existingBillingPayments = await Payment.find({
         clientId,
-        financialYear,
         paymentType: { $ne: "advance" },
+        $or: [
+          { billingId },
+          { billingId: { $in: ["", null] }, financialYear: billingFinancialYear },
+          { billingId: { $exists: false }, financialYear: billingFinancialYear },
+        ],
       })
         .select("amountPaid")
         .lean() as Array<{ amountPaid?: number }>;
@@ -108,7 +124,8 @@ export async function POST(req: NextRequest) {
 
     const payment = await Payment.create({
       clientId,
-      financialYear,
+      billingId,
+      financialYear: billingFinancialYear,
       amountPaid,
       paymentType,
       paymentDate,
@@ -124,9 +141,23 @@ export async function POST(req: NextRequest) {
         Billing.collection,
         Payment.collection,
         clientId,
-        financialYear
+        billingFinancialYear
       );
     }
+
+    await recordActivityEvent({
+      clientId,
+      category: "financial",
+      type: paymentType === "advance" ? "advance_payment_received" : "payment_received",
+      label: paymentType === "advance" ? "Advance Payment Received" : "Payment Received",
+      detail: `INR ${amountPaid.toLocaleString("en-IN")} via ${paymentMode}${referenceNumber ? ` · Ref: ${referenceNumber}` : ""}`,
+      color: "emerald",
+      badge: "Recorded",
+      financialYear: billingFinancialYear,
+      entityId: String(payment._id),
+      entityType: "payment",
+      relatedEntityIds: [String(payment._id)],
+    }, session);
 
     return NextResponse.json(payment, { status: 201 });
   } catch (error) {

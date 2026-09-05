@@ -6,6 +6,7 @@ import AnnualReturn from "@/models/AnnualReturn";
 import Client from "@/models/Client";
 import { getClientContactsMap } from "@/lib/server/client-contact-service";
 import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
+import { recordActivityEvent } from "@/lib/server/activity-events";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -88,6 +89,7 @@ export async function POST(req: NextRequest) {
   try {
     await connectDB();
     const body = await req.json();
+    const previous = await AnnualReturn.findOne({ clientId: body.clientId, financialYear: body.financialYear }).lean() as { status?: string } | null;
 
     let record = await AnnualReturn.findOneAndUpdate(
       { clientId: body.clientId, financialYear: body.financialYear },
@@ -96,6 +98,22 @@ export async function POST(req: NextRequest) {
     );
     await syncAnnualReturnStatus(record.clientId, record.financialYear);
     record = await AnnualReturn.findById(record._id);
+
+    await recordActivityEvent({
+      clientId: record.clientId,
+      category: "compliance",
+      type: previous ? "annual_return_updated" : "annual_return_created",
+      label: previous ? "Annual Return Updated" : "Annual Return Started",
+      detail: previous?.status && previous.status !== record.status
+        ? `Status changed from ${previous.status} to ${record.status}`
+        : `Status set to ${record.status}`,
+      color: record.status === "Filed" || record.status === "Verified" ? "emerald" : "amber",
+      badge: record.status,
+      financialYear: record.financialYear,
+      entityId: String(record._id),
+      entityType: "annual-return",
+      relatedEntityIds: [String(record._id)],
+    }, session);
 
     return NextResponse.json(record, { status: 201 });
   } catch (error) {

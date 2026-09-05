@@ -7,6 +7,7 @@ import Payment from "@/models/Payment";
 import Client from "@/models/Client";
 import Billing from "@/models/Billing";
 import DeletedRecord from "@/models/DeletedRecord";
+import { recordActivityEvent } from "@/lib/server/activity-events";
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -124,6 +125,21 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         financialYear
       );
     }
+
+
+    await recordActivityEvent({
+      clientId,
+      category: "financial",
+      type: "payment_updated",
+      label: paymentType === "advance" ? "Advance Payment Updated" : "Payment Updated",
+      detail: `Amount changed from INR ${Number(existingPayment.amountPaid || 0).toLocaleString("en-IN")} to INR ${amountPaid.toLocaleString("en-IN")}`,
+      color: "violet",
+      badge: "Updated",
+      financialYear,
+      entityId: String(updatedPayment?._id || id),
+      entityType: "payment",
+      relatedEntityIds: [String(updatedPayment?._id || id)],
+    }, session);
 
     return NextResponse.json(updatedPayment);
   } catch (error) {

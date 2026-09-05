@@ -34,11 +34,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "clientId, documentName and driveLink are required" }, { status: 400 });
     }
     const allowedCategories = new Set(["compliance", "financial", "invoices", "certificates", "other"]);
+    const documentKind = body.documentKind === "epr-certificate"
+      ? "epr-certificate"
+      : body.documentKind === "target-screenshot"
+        ? "target-screenshot"
+        : "general";
+    const financialYear = typeof body.financialYear === "string" ? body.financialYear.trim() : "";
+    if (documentKind === "target-screenshot") {
+      if (!financialYear) {
+        return NextResponse.json({ error: "Financial year is required for a target screenshot." }, { status: 400 });
+      }
+      const existingScreenshot = await Document.exists({
+        clientId: body.clientId,
+        documentKind: "target-screenshot",
+        financialYear,
+      });
+      if (existingScreenshot) {
+        return NextResponse.json({ error: `A target screenshot already exists for FY ${financialYear}.` }, { status: 409 });
+      }
+    }
     const doc = await Document.create({
       ...body,
       documentName,
       driveLink,
       category: allowedCategories.has(body.category) ? body.category : "other",
+      documentKind,
+      financialYear: documentKind === "target-screenshot" ? financialYear : undefined,
       storageType: "legacy-link",
       source: "manual-link",
       migrationStatus: "legacy",
@@ -48,13 +69,14 @@ export async function POST(req: NextRequest) {
       category: "documents",
       type: "document_linked",
       label: "Document Linked",
-      detail: `${doc.documentName} · ${String(doc.category || "other").replace(/^./, (letter) => letter.toUpperCase())}`,
+      detail: `${doc.documentName} · ${doc.documentKind === "target-screenshot" ? `Target screenshot · FY ${doc.financialYear}` : String(doc.category || "other").replace(/^./, (letter) => letter.toUpperCase())}`,
       color: "blue",
       badge: "Link",
       badgeColor: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
       entityId: String(doc._id),
       entityType: "document",
       relatedEntityIds: [String(doc._id)],
+      financialYear: doc.financialYear || undefined,
     }, session);
     return NextResponse.json(doc, { status: 201 });
   } catch (error) {

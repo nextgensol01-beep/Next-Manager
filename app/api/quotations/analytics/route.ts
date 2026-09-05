@@ -33,8 +33,6 @@ export async function GET(req: NextRequest) {
       .filter(({ quotation }) => !status || quotation.status === status)
       .map(({ revision }) => revision?.grandTotal || 0));
     const statusCount = (status: string) => rows.filter(({ quotation }) => quotation.status === status).length;
-    const now = new Date();
-    const soon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     const statusDistribution = Array.from(new Set(quotations.map((quotation) => quotation.status))).map((status) => ({
       name: status,
@@ -78,18 +76,13 @@ export async function GET(req: NextRequest) {
         acceptedQuotations,
         rejectedQuotations: statusCount("Rejected"),
         expiredQuotations: statusCount("Expired"),
-        pendingQuotations: rows.filter(({ quotation }) => ["Finalized", "Sent"].includes(quotation.status)).length,
+        pendingQuotations: rows.filter(({ quotation }) => ["Finalized", "Sent", "RevisionRequested", "Expired"].includes(quotation.status)).length,
         conversionRate: rows.length ? Math.round((acceptedQuotations / rows.length) * 100) : 0,
         totalQuotedValue: sum(rows.map(({ revision }) => revision?.grandTotal || 0)),
         acceptedRevenue: valueOf("Accepted"),
-        lostRevenue: valueOf("Rejected") + valueOf("Expired"),
+        lostRevenue: valueOf("Rejected"),
         draftCreatedQuotations: 0,
-        expiringSoonQuotations: rows.filter(({ quotation }) => (
-          quotation.validTill &&
-          quotation.validTill >= now &&
-          quotation.validTill <= soon &&
-          !["Accepted", "Rejected", "Expired"].includes(quotation.status)
-        )).length,
+        expiringSoonQuotations: 0,
       },
       statusDistribution,
       monthlyTrend: Array.from(monthlyMap.values()).sort((a, b) => a.month.localeCompare(b.month)),

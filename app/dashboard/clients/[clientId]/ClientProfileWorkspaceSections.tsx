@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
@@ -8,6 +8,7 @@ import {
   Bell,
   CalendarCheck,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
@@ -52,7 +53,7 @@ export type ComplianceSectionId =
   | "registration"
   | "status";
 export type FinancialSectionId = "overview" | "quotations" | "billing" | "payments" | "ledger";
-export type DocumentsSectionId = "all" | "compliance" | "financial" | "invoices" | "certificates" | "other";
+export type DocumentsSectionId = "all" | "targets" | "compliance" | "financial" | "invoices" | "certificates" | "other";
 export type TimelineSectionId = "all" | "compliance" | "financial" | "communications" | "documents" | "system";
 export type NotesTasksSectionId = "notes" | "tasks" | "reminders" | "followUps" | "callsMeetings";
 export type InvoiceMonthStatus = "Pending" | "Received" | "Partial / Issue" | "Nil / No Invoice";
@@ -123,7 +124,7 @@ const PRIMARY_TABS: Array<{ id: ClientProfileTabId; label: string; icon: React.R
   { id: "notes", label: "Notes & Tasks", icon: <ListChecks className="h-4 w-4" /> },
 ];
 
-const COMPLIANCE_NAV: Array<ClientProfileSecondaryNavItem<ComplianceSectionId>> = [
+export const COMPLIANCE_NAV: Array<ClientProfileSecondaryNavItem<ComplianceSectionId>> = [
   { id: "status", label: "Compliance Overview", short: "Overview", icon: <ClipboardCheck className="h-4 w-4" /> },
   { id: "annualReturn", label: "Annual Return Tracker", short: "Annual Return", icon: <CalendarCheck className="h-4 w-4" /> },
   { id: "invoiceTracking", label: "Invoice Tracking", short: "Invoice Tracking", icon: <FileText className="h-4 w-4" /> },
@@ -142,6 +143,7 @@ export const FINANCIAL_NAV: Array<ClientProfileSecondaryNavItem<FinancialSection
 
 export const DOCUMENTS_NAV: Array<ClientProfileSecondaryNavItem<DocumentsSectionId>> = [
   { id: "all", label: "All Documents", short: "All", icon: <FolderOpen className="h-4 w-4" /> },
+  { id: "targets", label: "Target Screenshots", short: "Targets", icon: <Target className="h-4 w-4" /> },
   { id: "compliance", label: "Compliance Documents", short: "Compliance", icon: <ShieldCheck className="h-4 w-4" /> },
   { id: "financial", label: "Financial Documents", short: "Financial", icon: <Wallet className="h-4 w-4" /> },
   { id: "invoices", label: "Invoices", short: "Invoices", icon: <FileText className="h-4 w-4" /> },
@@ -235,19 +237,21 @@ export function getComplianceNavStates({
   const coveredMonths = coverage.sale.doneCount + coverage.purchase.doneCount;
   const annualStatus = annualReturnLabel(annualReturn?.status);
   const annualComplete = annualReturn?.status === "Filed"
-    || annualReturn?.status === "Verified"
-    || annualReturn?.status === "Not Required This FY";
+    || annualReturn?.status === "Verified";
+  const annualReturnNotRequired = annualReturn?.status === "Not Required This FY";
 
   return {
     status: "recorded",
-    annualReturn: annualComplete
-      ? "complete"
-      : annualStatus === "In Progress" || annualStatus === "Ready to File"
-        ? "in-progress"
-        : "action",
-    invoiceTracking: coveredMonths === 24 ? "complete" : coveredMonths > 0 ? "in-progress" : "action",
-    cpcbUpload: uploadRecords.length > 0 ? "recorded" : "action",
-    targetsCredits: hasMeaningfulFyRecord(fyData) ? "recorded" : "action",
+    annualReturn: annualReturnNotRequired
+      ? "recorded"
+      : annualComplete
+        ? "complete"
+        : annualStatus === "In Progress" || annualStatus === "Ready to File"
+          ? "in-progress"
+          : "action",
+    invoiceTracking: annualReturnNotRequired ? "recorded" : coveredMonths === 24 ? "complete" : coveredMonths > 0 ? "in-progress" : "action",
+    cpcbUpload: annualReturnNotRequired ? "recorded" : uploadRecords.length > 0 ? "recorded" : "action",
+    targetsCredits: annualReturnNotRequired ? "recorded" : hasMeaningfulFyRecord(fyData) ? "recorded" : "action",
   };
 }
 
@@ -299,39 +303,215 @@ export function getInvoiceMonthStates(
 
 export function ClientPrimaryTabs({
   activeTab,
+  compactSecondaryNavigation,
   navRef,
   onChange,
 }: {
   activeTab: ClientProfileTabId;
+  compactSecondaryNavigation?: {
+    activeId: string;
+    items: Array<ClientProfileSecondaryNavItem<string>>;
+    navStates?: Partial<Record<string, ComplianceNavState>>;
+    onChange: (id: string) => void;
+  };
   navRef?: React.Ref<HTMLElement>;
   onChange: (tab: ClientProfileTabId) => void;
 }) {
+  const prefersReducedMotion = useReducedMotion();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [scrollEdges, setScrollEdges] = useState({ left: false, right: false });
+  const compactRootRef = useRef<HTMLDivElement | null>(null);
+  const secondaryTrackRef = useRef<HTMLDivElement | null>(null);
+  const activeSecondaryRef = useRef<HTMLButtonElement | null>(null);
+  const activePrimary = PRIMARY_TABS.find((tab) => tab.id === activeTab) ?? PRIMARY_TABS[0];
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const closeMenu = (event: PointerEvent) => {
+      if (!compactRootRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeMenu);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeMenu);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const track = secondaryTrackRef.current;
+    if (!track) {
+      setScrollEdges({ left: false, right: false });
+      return;
+    }
+
+    const updateEdges = () => {
+      const maxScroll = Math.max(0, track.scrollWidth - track.clientWidth);
+      setScrollEdges({
+        left: track.scrollLeft > 3,
+        right: track.scrollLeft < maxScroll - 3,
+      });
+    };
+    const revealActive = () => {
+      const activeButton = activeSecondaryRef.current;
+      if (!activeButton) return updateEdges();
+      const targetLeft = activeButton.offsetLeft - ((track.clientWidth - activeButton.offsetWidth) / 2);
+      track.scrollTo({
+        left: Math.max(0, targetLeft),
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+      });
+      updateEdges();
+      window.setTimeout(updateEdges, prefersReducedMotion ? 0 : 260);
+    };
+
+    updateEdges();
+    requestAnimationFrame(revealActive);
+    track.addEventListener("scroll", updateEdges, { passive: true });
+    const resizeObserver = new ResizeObserver(updateEdges);
+    resizeObserver.observe(track);
+
+    return () => {
+      track.removeEventListener("scroll", updateEdges);
+      resizeObserver.disconnect();
+    };
+  }, [activeTab, compactSecondaryNavigation?.activeId, compactSecondaryNavigation?.items.length, prefersReducedMotion]);
+
   return (
     <nav ref={navRef} className="client-profile-primary-tabs" aria-label="Client workspace tabs">
-      {PRIMARY_TABS.map((tab) => {
-        const active = activeTab === tab.id;
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            className="client-profile-primary-tab"
-            data-active={active ? "true" : "false"}
-            onClick={() => onChange(tab.id)}
+      <div className="client-profile-primary-tabs-desktop">
+        {PRIMARY_TABS.map((tab) => {
+          const active = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              className="client-profile-primary-tab"
+              data-active={active ? "true" : "false"}
+              onClick={() => onChange(tab.id)}
+            >
+              {active && (
+                <motion.span
+                  layoutId="client-profile-primary-tab-indicator"
+                  className="client-profile-primary-tab-indicator"
+                  transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                />
+              )}
+              <span className="relative z-[1] flex items-center gap-2">
+                {tab.icon}
+                <span>{tab.label}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        ref={compactRootRef}
+        className="client-profile-compact-nav"
+        data-menu-open={menuOpen ? "true" : "false"}
+        data-has-secondary={compactSecondaryNavigation?.items.length ? "true" : "false"}
+      >
+        <button
+          type="button"
+          className="client-profile-compact-primary"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((current) => !current)}
+        >
+          <span className="client-profile-compact-primary-icon">{activePrimary.icon}</span>
+          <span>{activePrimary.label}</span>
+          <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+
+        {compactSecondaryNavigation?.items.length ? (
+          <div
+            className="client-profile-compact-secondary-shell"
+            data-fade-left={scrollEdges.left ? "true" : "false"}
+            data-fade-right={scrollEdges.right ? "true" : "false"}
           >
-            {active && (
-              <motion.span
-                layoutId="client-profile-primary-tab-indicator"
-                className="client-profile-primary-tab-indicator"
-                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-              />
-            )}
-            <span className="relative z-[1] flex items-center gap-2">
-              {tab.icon}
-              <span>{tab.label}</span>
-            </span>
-          </button>
-        );
-      })}
+            <div
+              ref={secondaryTrackRef}
+              className="client-profile-compact-secondary-track"
+              aria-label={`${activePrimary.label} sections`}
+            >
+              {compactSecondaryNavigation.items.map((item) => {
+                const active = compactSecondaryNavigation.activeId === item.id;
+                const state = compactSecondaryNavigation.navStates?.[item.id];
+                return (
+                  <button
+                    key={item.id}
+                    ref={active ? activeSecondaryRef : undefined}
+                    type="button"
+                    data-active={active ? "true" : "false"}
+                    aria-current={active ? "page" : undefined}
+                    onClick={() => compactSecondaryNavigation.onChange(item.id)}
+                  >
+                    {active && (
+                      <motion.span
+                        layoutId="client-profile-compact-secondary-indicator"
+                        className="client-profile-compact-secondary-indicator"
+                        transition={prefersReducedMotion
+                          ? { duration: 0 }
+                          : { duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                      />
+                    )}
+                    <span className="relative z-[1]">{item.short}</span>
+                    {state && <i data-state={state} aria-hidden="true" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <span className="client-profile-compact-context">Client workspace</span>
+        )}
+
+        <AnimatePresence>
+          {menuOpen && (
+            <motion.div
+              className="client-profile-compact-menu"
+              role="menu"
+              aria-label="Choose client workspace"
+              initial={prefersReducedMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={prefersReducedMotion ? undefined : { opacity: 0, y: -4, scale: 0.985 }}
+              transition={{ duration: prefersReducedMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <span className="client-profile-compact-menu-label">Client workspace</span>
+              <div>
+                {PRIMARY_TABS.map((tab) => {
+                  const active = activeTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="menuitem"
+                      data-active={active ? "true" : "false"}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onChange(tab.id);
+                      }}
+                    >
+                      <span>{tab.icon}</span>
+                      <span>{tab.label}</span>
+                      {active && <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </nav>
   );
 }
@@ -522,6 +702,8 @@ export function AnnualReturnProgressPanel({
   subtitle,
   title = "Annual Return Progress",
   variant = "default",
+  notApplicable = false,
+  notApplicableReason,
   onAction,
 }: {
   progress: number;
@@ -530,6 +712,8 @@ export function AnnualReturnProgressPanel({
   subtitle?: string;
   title?: string;
   variant?: "default" | "hero";
+  notApplicable?: boolean;
+  notApplicableReason?: string;
   onAction?: () => void;
 }) {
   const percentage = Math.round(Math.max(0, Math.min(1, progress)) * 100);
@@ -539,20 +723,30 @@ export function AnnualReturnProgressPanel({
     || steps[steps.length - 1];
 
   return (
-    <section className={`client-profile-card client-profile-progress-card ${variant === "hero" ? "client-profile-progress-hero" : ""}`}>
+    <section
+      className={`client-profile-card client-profile-progress-card ${variant === "hero" ? "client-profile-progress-hero" : ""}`}
+      data-state={notApplicable ? "not-applicable" : "active"}
+    >
       <div className="client-profile-card-header">
         <div>
           <p className="client-profile-kicker">{variant === "hero" ? "Annual Return" : `FY ${selectedFy}`}</p>
-          <h2>{title}</h2>
-          {subtitle && <span>{subtitle}</span>}
-          {variant === "hero" && activeStep && (
+          <h2>{notApplicable ? "Annual Return Not Required" : title}</h2>
+          {(notApplicable || subtitle) && (
+            <span>{notApplicable ? `FY ${selectedFy} is excluded from AR progress` : subtitle}</span>
+          )}
+          {variant === "hero" && !notApplicable && activeStep && (
             <p className="client-profile-progress-next">
               <span>Next</span>
               {activeStep.label} · {activeStep.detail}
             </p>
           )}
         </div>
-        {variant === "hero" ? (
+        {notApplicable ? (
+          <div className="client-profile-progress-na-badge" aria-label={`Annual Return not required for FY ${selectedFy}`}>
+            <ShieldCheck className="h-6 w-6" />
+            <strong>N/A</strong>
+          </div>
+        ) : variant === "hero" ? (
           <div
             className="client-profile-progress-ring"
             style={{ background: `conic-gradient(#0071e3 ${percentage * 3.6}deg, rgba(120,120,128,0.14) 0deg)` }}
@@ -572,43 +766,56 @@ export function AnnualReturnProgressPanel({
         )}
       </div>
 
-      <div
-        className="client-profile-progress-track"
-        role="progressbar"
-        aria-label={`${title}: ${percentage}% complete`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={percentage}
-      >
-        <motion.div
-          className="client-profile-progress-fill"
-          initial={false}
-          animate={{ width: `${percentage}%` }}
-          transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-        />
-      </div>
+      {notApplicable ? (
+        <div className="client-profile-progress-na-message">
+          <span><ShieldCheck className="h-5 w-5" /></span>
+          <div>
+            <strong>Not applicable for this financial year</strong>
+            <p>{notApplicableReason || "No Annual Return filing is required for this cycle."}</p>
+            <small>Quotation, invoice, upload, and billing records remain available and are not counted as AR progress.</small>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div
+            className="client-profile-progress-track"
+            role="progressbar"
+            aria-label={`${title}: ${percentage}% complete`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percentage}
+          >
+            <motion.div
+              className="client-profile-progress-fill"
+              initial={false}
+              animate={{ width: `${percentage}%` }}
+              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+            />
+          </div>
 
-      <div className="client-profile-progress-steps">
-        {steps.map((step) => {
-          const done = step.progress >= 1;
-          const partial = step.progress > 0 && step.progress < 1;
+          <div className="client-profile-progress-steps">
+            {steps.map((step) => {
+              const done = step.progress >= 1;
+              const partial = step.progress > 0 && step.progress < 1;
 
-          return (
-            <div key={step.id} data-done={done ? "true" : "false"} data-partial={partial ? "true" : "false"}>
-              <span>{done ? <CheckCircle2 className="h-4 w-4" /> : partial ? <Bell className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}</span>
-              <div>
-                <p>{step.label}</p>
-                <small>{step.detail}</small>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+              return (
+                <div key={step.id} data-done={done ? "true" : "false"} data-partial={partial ? "true" : "false"}>
+                  <span>{done ? <CheckCircle2 className="h-4 w-4" /> : partial ? <Bell className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}</span>
+                  <div>
+                    <p>{step.label}</p>
+                    <small>{step.detail}</small>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
       {variant === "hero" && onAction && (
         <div className="client-profile-progress-hero-footer">
           <span>FY {selectedFy}</span>
           <button type="button" onClick={onAction}>
-            Continue workflow
+            {notApplicable ? "Review FY status" : "Continue workflow"}
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
@@ -1244,21 +1451,28 @@ export function ComplianceStatusPanel({
   const uploadedTotal = uploadRecords.reduce((sum, record) => sum + uploadTotal(record), 0);
   const coveredMonths = coverage.sale.doneCount + coverage.purchase.doneCount;
   const hasMeaningfulFyData = hasMeaningfulFyRecord(fyData);
+  const annualReturnNotRequired = annualReturn?.status === "Not Required This FY";
   const checks = [
     {
       id: "annualReturn" as const,
       label: "Annual Return",
       value: annualReturnLabel(annualReturn?.status),
-      detail: annualReturn?.status === "Verified" ? "Filing cycle complete" : "Open the tracker to continue the filing workflow",
-      done: annualReturn?.status === "Filed" || annualReturn?.status === "Verified" || annualReturn?.status === "Not Required This FY",
-      tone: annualReturn?.status === "Verified" ? "green" : "blue",
-      state: annualReturn?.status === "Filed" || annualReturn?.status === "Verified" || annualReturn?.status === "Not Required This FY"
+      detail: annualReturnNotRequired
+        ? `No Annual Return filing is required for FY ${selectedFy}.`
+        : annualReturn?.status === "Verified"
+          ? "Filing cycle complete"
+          : "Open the tracker to continue the filing workflow",
+      done: annualReturn?.status === "Filed" || annualReturn?.status === "Verified" || annualReturnNotRequired,
+      tone: annualReturn?.status === "Verified" || annualReturnNotRequired ? "green" : "blue",
+      state: annualReturn?.status === "Filed" || annualReturn?.status === "Verified" || annualReturnNotRequired
         ? "complete"
         : annualReturn?.status === "In Progress" || annualReturn?.status === "Ready to File"
           ? "in-progress"
           : "action",
-      stateLabel: annualReturn?.status === "Filed" || annualReturn?.status === "Verified" || annualReturn?.status === "Not Required This FY"
-        ? "Complete"
+      stateLabel: annualReturnNotRequired
+        ? "Not required"
+        : annualReturn?.status === "Filed" || annualReturn?.status === "Verified"
+          ? "Complete"
         : annualReturnLabel(annualReturn?.status),
     },
     {
@@ -1268,8 +1482,8 @@ export function ComplianceStatusPanel({
       detail: `${coverage.sale.doneCount}/12 sale · ${coverage.purchase.doneCount}/12 purchase`,
       done: coveredMonths === 24,
       tone: "amber",
-      state: coveredMonths === 24 ? "complete" : coveredMonths > 0 ? "in-progress" : "action",
-      stateLabel: coveredMonths === 24 ? "Complete" : coveredMonths > 0 ? "In progress" : "Action needed",
+      state: annualReturnNotRequired ? "recorded" : coveredMonths === 24 ? "complete" : coveredMonths > 0 ? "in-progress" : "action",
+      stateLabel: annualReturnNotRequired ? "Not counted" : coveredMonths === 24 ? "Complete" : coveredMonths > 0 ? "In progress" : "Action needed",
     },
     {
       id: "cpcbUpload" as const,
@@ -1278,8 +1492,8 @@ export function ComplianceStatusPanel({
       detail: uploadRecords.length ? `${numberText(uploadedTotal)} MT recorded independently` : "No CPCB upload entry for this FY",
       done: uploadRecords.length > 0,
       tone: "purple",
-      state: uploadRecords.length > 0 ? "recorded" : "action",
-      stateLabel: uploadRecords.length > 0 ? "Recorded" : "Action needed",
+      state: annualReturnNotRequired ? "recorded" : uploadRecords.length > 0 ? "recorded" : "action",
+      stateLabel: annualReturnNotRequired ? "Not counted" : uploadRecords.length > 0 ? "Recorded" : "Action needed",
     },
     {
       id: "targetsCredits" as const,
@@ -1288,13 +1502,13 @@ export function ComplianceStatusPanel({
       detail: isPWP ? "Generated, sold and remaining credits" : "Target, achieved and remaining values",
       done: hasMeaningfulFyData,
       tone: "teal",
-      state: hasMeaningfulFyData ? "recorded" : "action",
-      stateLabel: hasMeaningfulFyData ? "Recorded" : "Action needed",
+      state: annualReturnNotRequired ? "recorded" : hasMeaningfulFyData ? "recorded" : "action",
+      stateLabel: annualReturnNotRequired ? "Not counted" : hasMeaningfulFyData ? "Recorded" : "Action needed",
     },
   ];
   const completeCount = checks.filter((check) => check.done).length;
   const readiness = Math.round((completeCount / checks.length) * 100);
-  const nextAction = checks.find((check) => !check.done);
+  const nextAction = annualReturnNotRequired ? undefined : checks.find((check) => !check.done);
 
   return (
     <section className="client-profile-card client-profile-compliance-overview">
@@ -1302,8 +1516,12 @@ export function ComplianceStatusPanel({
         <div>
           <p className="client-profile-kicker">Compliance Overview</p>
           <h2>FY {selectedFy} readiness</h2>
-          <span>{completeCount} of {checks.length} areas have recorded or completed data.</span>
-          {nextAction ? (
+          <span>{annualReturnNotRequired
+            ? "Annual Return is not required; supporting records remain available and are not counted as readiness."
+            : `${completeCount} of ${checks.length} areas have recorded or completed data.`}</span>
+          {annualReturnNotRequired ? (
+            <p className="client-profile-overview-complete"><ShieldCheck className="h-4 w-4" /> Compliance readiness is not applicable for this FY.</p>
+          ) : nextAction ? (
             <button type="button" onClick={() => onSectionChange(nextAction.id)}>
               <span>Recommended next</span>
               <strong>{nextAction.label}</strong>
@@ -1315,11 +1533,13 @@ export function ComplianceStatusPanel({
         </div>
         <div
           className="client-profile-overview-ring"
-          style={{ background: `conic-gradient(#007aff ${readiness * 3.6}deg, rgba(120,120,128,0.14) 0)` }}
+          style={{ background: annualReturnNotRequired
+            ? "rgba(120,120,128,0.14)"
+            : `conic-gradient(#007aff ${readiness * 3.6}deg, rgba(120,120,128,0.14) 0)` }}
           role="img"
-          aria-label={`${readiness}% readiness`}
+          aria-label={annualReturnNotRequired ? `Compliance readiness not applicable for FY ${selectedFy}` : `${readiness}% readiness`}
         >
-          <div><strong>{readiness}%</strong><span>ready</span></div>
+          <div><strong>{annualReturnNotRequired ? "N/A" : `${readiness}%`}</strong><span>{annualReturnNotRequired ? "this FY" : "ready"}</span></div>
         </div>
       </div>
 
@@ -1333,7 +1553,11 @@ export function ComplianceStatusPanel({
             data-tone={check.tone}
             onClick={() => onSectionChange(check.id)}
           >
-            <span>{check.done ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}</span>
+            <span>{check.done
+              ? <CheckCircle2 className="h-4 w-4" />
+              : annualReturnNotRequired
+                ? <FolderOpen className="h-4 w-4" />
+                : <AlertCircle className="h-4 w-4" />}</span>
             <div>
               <p>{check.label}</p>
               <strong>{check.value}</strong>

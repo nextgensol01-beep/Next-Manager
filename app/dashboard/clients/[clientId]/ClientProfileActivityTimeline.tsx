@@ -154,6 +154,7 @@ export default function ClientProfileActivityTimeline({
                                 {showStatusBadge && <i className={event.badgeColor || "bg-surface text-muted"}>{event.badge}</i>}
                               </span>
                             <small>{formatDate(event.date)}{actionLabel ? ` · ${actionLabel}` : ""}</small>
+                            {event.actorEmail && <small>Updated by {event.actorEmail}</small>}
                             </div>
                           </div>
                           {actionLabel && <ChevronRight className="client-profile-activity-chevron h-4 w-4" />}

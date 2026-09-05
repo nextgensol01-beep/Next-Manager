@@ -64,7 +64,7 @@ const ClientCustomFieldSchema = new Schema<IClientCustomField>(
     },
     icon: {
       type: String,
-      enum: ["fileText", "building", "hash", "user", "mapPin", "phone", "mail", "calendar", "shield"],
+      enum: ["fileText", "building", "hash", "user", "mapPin", "phone", "mail", "calendar", "lock", "shield"],
       default: "fileText",
     },
     order: { type: Number, default: 0 },
@@ -74,7 +74,12 @@ const ClientCustomFieldSchema = new Schema<IClientCustomField>(
 
 ClientCustomFieldSchema.index({ active: 1, order: 1 });
 
-if (mongoose.models.ClientCustomField && !mongoose.models.ClientCustomField.schema.path("formTab")) {
+const cachedClientCustomField = mongoose.models.ClientCustomField;
+const cachedClientCustomFieldIcon = cachedClientCustomField?.schema.path("icon") as { enumValues?: string[] } | undefined;
+if (cachedClientCustomField && (
+  !cachedClientCustomField.schema.path("formTab") ||
+  !cachedClientCustomFieldIcon?.enumValues?.includes("lock")
+)) {
   delete mongoose.models.ClientCustomField;
 }
 

@@ -90,6 +90,19 @@ export async function uploadClientDocument(input: {
   };
 }
 
+export async function downloadDriveFile(fileId: string) {
+  const drive = driveClient();
+  const response = await drive.files.get(
+    {
+      fileId,
+      alt: "media",
+      supportsAllDrives: true,
+    },
+    { responseType: "arraybuffer" }
+  );
+  return Buffer.from(response.data as ArrayBuffer);
+}
+
 function driveIdFromLink(link: string) {
   const patterns = [
     /\/folders\/([a-zA-Z0-9_-]+)/,

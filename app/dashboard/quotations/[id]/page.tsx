@@ -10,13 +10,14 @@ import {
   AlertTriangle, IndianRupee, Receipt, Building2,
   Sparkles, MoreHorizontal, Copy, Send, X,
   Bold, Minus, Save, ChevronDown, Check, UserRound, CalendarDays,
-  WalletCards, ArrowRight, ShieldCheck, Search, Link2
+  WalletCards, ArrowRight, ShieldCheck, Search, Link2, Recycle, Leaf
 } from "lucide-react";
 import { FINANCIAL_YEARS } from "@/lib/utils";
 import { invalidate } from "@/lib/useCache";
 import { buildQuotationHTML as buildHTML } from "@/utils/quotationTemplate";
 import { escapeHtml, escapeHtmlWithLineBreaks } from "@/utils/sanitizeHtml";
 import Modal from "@/components/ui/Modal";
+import LiquidGlassDropdown from "@/components/ui/LiquidGlassDropdown";
 import { QUOTATION_STATUS_CONFIG, QuotationStatusPill } from "@/components/quotations/QuotationStatus";
 import {
   GST_PERCENT_OPTIONS,
@@ -103,7 +104,155 @@ const EMAIL_TEMPLATE_VARIABLES: Record<EmailTemplateVariable, { label: string; t
 
 const CATEGORIES = ["CAT-I", "CAT-II", "CAT-III", "CAT-IV"];
 const TYPES = ["Recycling", "EOL", "Co-processing", "Energy Recovery", "Other"];
+const PRIMARY_TYPES = TYPES.slice(0, 2);
+const MORE_TYPES = TYPES.slice(2);
 const GST_OPTIONS = [...GST_PERCENT_OPTIONS];
+const GST_DROPDOWN_OPTIONS = GST_OPTIONS.map(value => ({ label: `${value}%`, value: String(value) }));
+const FINANCIAL_YEAR_DROPDOWN_OPTIONS = FINANCIAL_YEARS.map(value => ({ label: value, value }));
+
+const CATEGORY_VISUALS: Record<string, { dot: string; badge: string; selected: string; rail: string }> = {
+  "CAT-I": {
+    dot: "bg-blue-500",
+    badge: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-400/25 dark:bg-blue-400/10 dark:text-blue-200",
+    selected: "border-blue-400 bg-blue-50 text-blue-700 shadow-[0_8px_22px_rgba(59,130,246,0.12)] dark:border-blue-400/45 dark:bg-blue-400/15 dark:text-blue-100",
+    rail: "bg-blue-500",
+  },
+  "CAT-II": {
+    dot: "bg-violet-500",
+    badge: "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-400/25 dark:bg-violet-400/10 dark:text-violet-200",
+    selected: "border-violet-400 bg-violet-50 text-violet-700 shadow-[0_8px_22px_rgba(139,92,246,0.12)] dark:border-violet-400/45 dark:bg-violet-400/15 dark:text-violet-100",
+    rail: "bg-violet-500",
+  },
+  "CAT-III": {
+    dot: "bg-amber-500",
+    badge: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200",
+    selected: "border-amber-400 bg-amber-50 text-amber-800 shadow-[0_8px_22px_rgba(245,158,11,0.12)] dark:border-amber-400/45 dark:bg-amber-400/15 dark:text-amber-100",
+    rail: "bg-amber-500",
+  },
+  "CAT-IV": {
+    dot: "bg-teal-500",
+    badge: "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-400/25 dark:bg-teal-400/10 dark:text-teal-200",
+    selected: "border-teal-400 bg-teal-50 text-teal-700 shadow-[0_8px_22px_rgba(20,184,166,0.12)] dark:border-teal-400/45 dark:bg-teal-400/15 dark:text-teal-100",
+    rail: "bg-teal-500",
+  },
+};
+
+const DEFAULT_CATEGORY_VISUAL = {
+  dot: "bg-slate-400",
+  badge: "border-slate-200 bg-slate-50 text-slate-700 dark:border-white/[0.12] dark:bg-white/[0.07] dark:text-slate-200",
+  selected: "border-slate-400 bg-slate-50 text-slate-700 dark:border-white/30 dark:bg-white/[0.10] dark:text-slate-100",
+  rail: "bg-slate-400",
+};
+
+const TYPE_VISUALS: Record<string, { badge: string; selected: string }> = {
+  Recycling: {
+    badge: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-200",
+    selected: "border-emerald-400 bg-emerald-50 text-emerald-700 shadow-[0_8px_22px_rgba(16,185,129,0.12)] dark:border-emerald-400/45 dark:bg-emerald-400/15 dark:text-emerald-100",
+  },
+  EOL: {
+    badge: "border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-400/25 dark:bg-orange-400/10 dark:text-orange-200",
+    selected: "border-orange-400 bg-orange-50 text-orange-700 shadow-[0_8px_22px_rgba(249,115,22,0.12)] dark:border-orange-400/45 dark:bg-orange-400/15 dark:text-orange-100",
+  },
+};
+
+const DEFAULT_TYPE_VISUAL = {
+  badge: "border-slate-200 bg-slate-50 text-slate-700 dark:border-white/[0.12] dark:bg-white/[0.07] dark:text-slate-200",
+  selected: "border-slate-400 bg-slate-50 text-slate-700 dark:border-white/30 dark:bg-white/[0.10] dark:text-slate-100",
+};
+
+const CATEGORY_ACTIVE_TEXT: Record<string, string> = {
+  "CAT-I": "text-blue-700 dark:text-blue-100",
+  "CAT-II": "text-violet-700 dark:text-violet-100",
+  "CAT-III": "text-amber-800 dark:text-amber-100",
+  "CAT-IV": "text-teal-700 dark:text-teal-100",
+};
+
+const TYPE_ACTIVE_TEXT: Record<string, string> = {
+  Recycling: "text-emerald-700 dark:text-emerald-100",
+  EOL: "text-orange-700 dark:text-orange-100",
+};
+
+const getCategoryVisual = (category: string) => CATEGORY_VISUALS[category] || DEFAULT_CATEGORY_VISUAL;
+const getTypeVisual = (type: string) => TYPE_VISUALS[type] || DEFAULT_TYPE_VISUAL;
+
+function TypeMark({ type, className = "h-3.5 w-3.5" }: { type: string; className?: string }) {
+  if (type === "Recycling") return <Recycle aria-hidden="true" className={className} />;
+  if (type === "EOL") return <Leaf aria-hidden="true" className={className} />;
+  return <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />;
+}
+
+function CategoryBadge({ category }: { category: string }) {
+  const visual = getCategoryVisual(category);
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${visual.badge}`}>
+      <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${visual.dot}`} />
+      {category}
+    </span>
+  );
+}
+
+function TypeBadge({ type }: { type: string }) {
+  const visual = getTypeVisual(type);
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${visual.badge}`}>
+      <TypeMark type={type} />
+      {type}
+    </span>
+  );
+}
+
+function PremiumNumberInput({
+  ariaLabel,
+  decimals = 0,
+  disabled = false,
+  onChange,
+  prefix,
+  suffix,
+  value,
+}: {
+  ariaLabel: string;
+  decimals?: number;
+  disabled?: boolean;
+  onChange: (value: number) => void;
+  prefix?: string;
+  suffix?: string;
+  value: number;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value > 0 ? String(value) : "");
+
+  useEffect(() => {
+    if (!editing) setDraft(value > 0 ? String(value) : "");
+  }, [editing, value]);
+
+  const formattedValue = value > 0
+    ? value.toLocaleString("en-IN", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+    : "";
+
+  return (
+    <div className="flex h-11 items-center rounded-xl border border-black/[0.08] bg-white/[0.58] px-3.5 text-sm transition-all duration-200 focus-within:border-brand-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-brand-500/10 dark:border-white/[0.10] dark:bg-white/[0.055] dark:focus-within:bg-white/[0.085] sm:h-11 sm:rounded-2xl">
+      {prefix && <span className="mr-2 shrink-0 font-medium text-faint">{prefix}</span>}
+      <input
+        type="text"
+        inputMode="decimal"
+        aria-label={ariaLabel}
+        className="min-w-0 flex-1 bg-transparent text-right font-mono text-sm font-medium tabular-nums text-default outline-none disabled:cursor-not-allowed disabled:opacity-60"
+        value={editing ? draft : formattedValue}
+        placeholder={decimals > 0 ? "0.00" : "0"}
+        disabled={disabled}
+        onFocus={() => { setEditing(true); setDraft(value > 0 ? String(value) : ""); }}
+        onBlur={() => setEditing(false)}
+        onChange={event => {
+          const next = event.target.value.replace(/,/g, "");
+          if (!/^\d*(?:\.\d*)?$/.test(next)) return;
+          setDraft(next);
+          onChange(Number.parseFloat(next) || 0);
+        }}
+      />
+      {suffix && <span className="ml-2 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-faint">{suffix}</span>}
+    </div>
+  );
+}
 type QuotationTabKey = "editor" | "preview" | "timeline";
 type QuotationTabRect = { left: number; top: number; width: number; height: number };
 type QuotationTabEdges = { left: number; right: number; top: number; bottom: number };
@@ -124,6 +273,12 @@ const quoteSubtleSurface =
   "border border-black/[0.08] bg-[#f5f5f7]/80 dark:border-white/[0.10] dark:bg-white/[0.06]";
 const quoteNestedSurface =
   "border border-black/[0.08] bg-white/70 dark:border-white/[0.10] dark:bg-white/[0.05]";
+const quoteReadOnlyPanel =
+  "border border-black/[0.055] bg-black/[0.025] dark:border-white/[0.065] dark:bg-white/[0.035]";
+const quoteReadOnlyGrid =
+  "overflow-hidden border border-black/[0.055] bg-black/[0.055] dark:border-white/[0.065] dark:bg-white/[0.065]";
+const quoteReadOnlyCell =
+  "bg-white/75 dark:bg-[#202023]/95";
 const quoteControlSurface =
   "border border-black/[0.08] bg-white/[0.72] hover:bg-white dark:border-white/[0.10] dark:bg-white/[0.06] dark:hover:bg-white/[0.10]";
 const quoteActiveSurface =
@@ -132,6 +287,8 @@ const surfaceCard =
   `rounded-[24px] sm:rounded-[32px] ${quoteCardSurface} backdrop-blur-xl`;
 const softInput =
   "h-11 rounded-xl border border-black/[0.08] bg-white/[0.72] px-3.5 text-sm text-default transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10] sm:h-12 sm:rounded-2xl sm:px-4";
+const numberInputNoSpinner =
+  "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 const softTextarea =
   "rounded-[20px] border border-black/[0.08] bg-white/[0.72] px-3.5 py-3 text-sm text-default transition-all duration-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/[0.10] dark:bg-white/[0.07] dark:focus:bg-white/[0.10] sm:rounded-[24px] sm:px-4";
 const appleButton =
@@ -212,6 +369,8 @@ const QUOTATION_TAB_TRAIL_SPRING = { stiffness: 260, damping: 26, mass: 1.5 };
 const QUOTATION_TAB_AXIS_SPRING = { stiffness: 580, damping: 30, mass: 0.6 };
 const QUOTATION_TAB_SQUASH_SPRING = { stiffness: 420, damping: 22, mass: 0.5 };
 const QUOTATION_TAB_REDUCED_SPRING = { stiffness: 300, damping: 40, mass: 1 };
+const QUOTATION_TAB_DOCK_SPRING = { stiffness: 410, damping: 31, mass: 0.82, restDelta: 0.2, restSpeed: 3 };
+const QUOTATION_TAB_DOCK_FOLLOW_SPRING = { stiffness: 520, damping: 42, mass: 0.72, restDelta: 0.15, restSpeed: 2 };
 const QUOTATION_TAB_RECT_EPSILON = 0.5;
 
 function quotationTabEdges(rect: QuotationTabRect): QuotationTabEdges {
@@ -255,10 +414,14 @@ function quotationTabDirectionalSpring(delta: number, leadsWhenPositive: boolean
 }
 
 function QuotationAnimatedTabPill({
+  className = quoteActiveSurface,
   reduced,
+  roundedClassName = "rounded-full",
   targetRect,
 }: {
+  className?: string;
   reduced: boolean;
+  roundedClassName?: string;
   targetRect: QuotationTabRect | null;
 }) {
   const initialEdges = targetRect ? quotationTabEdges(targetRect) : { bottom: 0, left: 0, right: 0, top: 0 };
@@ -362,7 +525,7 @@ function QuotationAnimatedTabPill({
   return (
     <motion.span
       aria-hidden
-      className={`absolute rounded-full ${quoteActiveSurface}`}
+      className={`absolute transition-[background-color,border-color,box-shadow] duration-300 ${roundedClassName} ${className}`}
       style={{
         height,
         left: leftEdge,
@@ -379,17 +542,91 @@ function QuotationAnimatedTabPill({
   );
 }
 
+function QuotationAnimatedSegmentTrack({
+  activeKey,
+  children,
+  className,
+  pillClassName,
+}: {
+  activeKey: string;
+  children: React.ReactNode;
+  className: string;
+  pillClassName: string;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const reducedMotion = useReducedMotion();
+  const [pillRect, setPillRect] = useState<QuotationTabRect | null>(null);
+
+  const measurePill = useCallback(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const activeSegment = track.querySelector<HTMLElement>('[data-segment-active="true"]');
+    if (!activeSegment) return;
+    const trackRect = track.getBoundingClientRect();
+    const segmentRect = activeSegment.getBoundingClientRect();
+    const nextRect = {
+      height: segmentRect.height,
+      left: segmentRect.left - trackRect.left,
+      top: segmentRect.top - trackRect.top,
+      width: segmentRect.width,
+    };
+    setPillRect(previous => quotationTabRectsAreEqual(previous, nextRect) ? previous : nextRect);
+  }, []);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(measurePill);
+    return () => cancelAnimationFrame(frame);
+  }, [activeKey, measurePill]);
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measurePill);
+      return () => window.removeEventListener("resize", measurePill);
+    }
+    const observer = new ResizeObserver(measurePill);
+    observer.observe(track);
+    Array.from(track.children).forEach(child => observer.observe(child));
+    return () => observer.disconnect();
+  }, [measurePill]);
+
+  return (
+    <div ref={trackRef} className={`relative ${className}`}>
+      <QuotationAnimatedTabPill
+        className={pillClassName}
+        reduced={reducedMotion ?? false}
+        roundedClassName="rounded-xl"
+        targetRect={pillRect}
+      />
+      {children}
+    </div>
+  );
+}
+
 function QuotationMainTabs({
   activeTab,
+  headerRef,
   isEditable,
   onTabChange,
 }: {
   activeTab: QuotationTabKey;
+  headerRef: React.RefObject<HTMLDivElement | null>;
   isEditable: boolean;
   onTabChange: (tab: QuotationTabKey) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
+  const stickyMarkerRef = useRef<HTMLDivElement>(null);
+  const isFloatingRef = useRef(false);
+  const naturalWidthRef = useRef(0);
+  const dockTransitionFromRef = useRef<{ left: number; top: number } | null>(null);
+  const dockAnimationControlsRef = useRef<Array<{ stop: () => void }>>([]);
+  const dockX = useMotionValue(0);
+  const dockY = useMotionValue(0);
+  const dockTopTarget = useMotionValue(112);
+  const dockTop = useSpring(dockTopTarget, QUOTATION_TAB_DOCK_FOLLOW_SPRING);
   const reducedMotion = useReducedMotion();
+  const [isFloating, setIsFloating] = useState(false);
   const [pillRect, setPillRect] = useState<QuotationTabRect | null>(null);
   const tabs: Array<{ key: QuotationTabKey; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { key: "editor", label: isEditable ? "Editor" : "Details", icon: FileText },
@@ -433,26 +670,150 @@ function QuotationMainTabs({
     return () => observer.disconnect();
   }, [measurePill]);
 
+  useIsomorphicLayoutEffect(() => {
+    const track = trackRef.current;
+    const marker = stickyMarkerRef.current;
+    if (!track || !marker) return;
+
+    const scrollArea = document.getElementById("dashboard-scroll-area");
+    let frameId = 0;
+
+    const updateFloatingPosition = () => {
+      frameId = 0;
+      const headerBottom = headerRef.current?.getBoundingClientRect().bottom ?? 0;
+      const stickyTop = Math.max(8, Math.ceil(headerBottom + 8));
+      dockTopTarget.set(stickyTop);
+      if (reducedMotion) dockTop.set(stickyTop);
+
+      const markerRect = marker.getBoundingClientRect();
+      const availableWidth = Math.max(0, window.innerWidth - markerRect.left - 12);
+      if (!isFloatingRef.current) {
+        const naturalRect = track.getBoundingClientRect();
+        naturalWidthRef.current = naturalRect.width;
+        marker.style.height = `${Math.ceil(naturalRect.height)}px`;
+      }
+      const floatingWidth = window.innerWidth < 640
+        ? Math.min(markerRect.width, availableWidth)
+        : Math.min(naturalWidthRef.current || track.getBoundingClientRect().width, availableWidth);
+      track.style.setProperty("--quote-tabs-floating-left", `${Math.round(markerRect.left)}px`);
+      track.style.setProperty("--quote-tabs-floating-width", `${Math.round(floatingWidth)}px`);
+
+      // Keep the revision stepper (and any future content between the header and
+      // tabs) in the normal scroll flow. The tabs only dock once their own slot
+      // reaches the space directly below the sticky quotation header.
+      const releaseThreshold = stickyTop + 6;
+      const nextFloating = isFloatingRef.current
+        ? markerRect.top <= releaseThreshold
+        : markerRect.top <= stickyTop;
+      if (isFloatingRef.current !== nextFloating) {
+        const currentRect = track.getBoundingClientRect();
+        dockTransitionFromRef.current = { left: currentRect.left, top: currentRect.top };
+        isFloatingRef.current = nextFloating;
+        setIsFloating(nextFloating);
+      }
+    };
+
+    const scheduleFloatingUpdate = () => {
+      if (frameId) return;
+      frameId = requestAnimationFrame(updateFloatingPosition);
+    };
+
+    updateFloatingPosition();
+    scrollArea?.addEventListener("scroll", scheduleFloatingUpdate, { passive: true });
+    window.addEventListener("scroll", scheduleFloatingUpdate, { passive: true });
+    window.addEventListener("resize", scheduleFloatingUpdate);
+
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleFloatingUpdate);
+    if (headerRef.current) resizeObserver?.observe(headerRef.current);
+    resizeObserver?.observe(marker);
+
+    const headerStyleObserver = headerRef.current ? new MutationObserver(scheduleFloatingUpdate) : null;
+    if (headerRef.current) {
+      headerStyleObserver?.observe(headerRef.current, { attributes: true, attributeFilter: ["style", "class"] });
+    }
+
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      scrollArea?.removeEventListener("scroll", scheduleFloatingUpdate);
+      window.removeEventListener("scroll", scheduleFloatingUpdate);
+      window.removeEventListener("resize", scheduleFloatingUpdate);
+      resizeObserver?.disconnect();
+      headerStyleObserver?.disconnect();
+    };
+  }, [dockTop, dockTopTarget, headerRef, reducedMotion]);
+
+  useIsomorphicLayoutEffect(() => {
+    const track = trackRef.current;
+    const previousPosition = dockTransitionFromRef.current;
+    if (!track || !previousPosition) return;
+
+    dockAnimationControlsRef.current.forEach(control => control.stop());
+    dockAnimationControlsRef.current = [];
+
+    dockX.set(0);
+    dockY.set(0);
+    const nextRect = track.getBoundingClientRect();
+    dockX.set(previousPosition.left - nextRect.left);
+    dockY.set(previousPosition.top - nextRect.top);
+    dockTransitionFromRef.current = null;
+
+    if (reducedMotion) {
+      dockX.set(0);
+      dockY.set(0);
+      return;
+    }
+
+    dockAnimationControlsRef.current = [
+      animate(dockX, 0, { type: "spring", velocity: 0, ...QUOTATION_TAB_DOCK_SPRING }),
+      animate(dockY, 0, { type: "spring", velocity: 0, ...QUOTATION_TAB_DOCK_SPRING }),
+    ];
+
+    return () => {
+      dockAnimationControlsRef.current.forEach(control => control.stop());
+      dockAnimationControlsRef.current = [];
+    };
+  }, [dockX, dockY, isFloating, reducedMotion]);
+
   return (
-    <div ref={trackRef} className={`relative mb-5 grid w-full grid-cols-3 gap-1 overflow-hidden rounded-full p-1 shadow-sm sm:scrollbar-none sm:mb-8 sm:flex sm:w-fit sm:max-w-full sm:p-1.5 ${quoteSubtleSurface}`}>
-      <QuotationAnimatedTabPill reduced={reducedMotion ?? false} targetRect={pillRect} />
-      {tabs.map(({ key, label, icon: Icon }) => {
-        const active = activeTab === key;
-        return (
-          <button
-            key={key}
-            type="button"
-            data-quote-tab={key}
-            onClick={() => onTabChange(key)}
-            className={`relative z-[1] flex min-w-0 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium transition-all duration-200 active:scale-[0.98] sm:gap-2 sm:px-5 sm:py-2.5 sm:text-sm ${
-              active ? "text-default" : "text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.08]"
-            }`}
-          >
-            <Icon className="h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 truncate">{label}</span>
-          </button>
-        );
-      })}
+    <div
+      ref={stickyMarkerRef}
+      className="relative mb-5 h-10 min-h-10 w-full sm:mb-8 sm:h-[52px] sm:min-h-[52px]"
+    >
+      <motion.div
+        ref={trackRef}
+        data-floating={isFloating ? "true" : "false"}
+        className={`${isFloating ? "fixed" : "absolute left-0 top-0"} z-[19] grid w-full grid-cols-3 gap-1 overflow-hidden rounded-full border p-1 transition-[background-color,border-color,box-shadow,backdrop-filter] duration-[420ms] ease-[cubic-bezier(0.22,1,0.36,1)] sm:scrollbar-none sm:flex sm:w-fit sm:max-w-full sm:p-1.5 xl:z-30 ${
+          isFloating
+            ? "border-black/[0.08] bg-white/[0.78] shadow-[0_14px_38px_rgba(0,0,0,0.12)] backdrop-blur-2xl dark:border-white/[0.11] dark:bg-[#1c1c1e]/[0.78] dark:shadow-[0_18px_48px_rgba(0,0,0,0.38)]"
+            : "border-black/[0.08] bg-[#f5f5f7]/80 shadow-sm dark:border-white/[0.10] dark:bg-white/[0.06]"
+        }`}
+        style={{
+          left: isFloating ? "var(--quote-tabs-floating-left, 12px)" : 0,
+          top: isFloating ? dockTop : 0,
+          width: isFloating ? "var(--quote-tabs-floating-width, calc(100vw - 24px))" : undefined,
+          transformOrigin: "50% 50%",
+          willChange: isFloating ? "transform, top" : "transform",
+          x: dockX,
+          y: dockY,
+        }}
+      >
+        <QuotationAnimatedTabPill reduced={reducedMotion ?? false} targetRect={pillRect} />
+        {tabs.map(({ key, label, icon: Icon }) => {
+          const active = activeTab === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              data-quote-tab={key}
+              onClick={() => onTabChange(key)}
+              className={`relative z-[1] flex min-w-0 items-center justify-center gap-1.5 rounded-full px-2 py-2 text-xs font-medium transition-[color,background-color,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-[0.98] sm:shrink-0 sm:gap-2 sm:px-5 sm:py-2.5 sm:text-sm ${active ? "text-default" : "text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.08]"}`}
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" />
+              <span className="whitespace-nowrap">{label}</span>
+            </button>
+          );
+        })}
+      </motion.div>
     </div>
   );
 }
@@ -779,6 +1140,19 @@ const newItem = () => ({
   _id: Math.random().toString(36).slice(2),
 });
 
+const shouldSyncStandardDescription = (description: string) => {
+  const normalized = description.trim();
+  return !normalized
+    || normalized === "EPR Credit Procurement"
+    || STANDARD_SERVICES.some(service => service.description === normalized)
+    || /^CAT-(?:I|II|III|IV) (?:Recycling|EOL|Co-processing|Energy Recovery|Other) Credit Procurement$/.test(normalized);
+};
+
+const getStandardDescription = (category: string, type: string) => {
+  const exactService = STANDARD_SERVICES.find(service => service.category === category && service.type === type);
+  return exactService?.description || `${category} ${type} Credit Procurement`;
+};
+
 export default function QuotationDetailPage() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
@@ -800,9 +1174,47 @@ export default function QuotationDetailPage() {
   const [validityDays, setValidityDays] = useState(30);
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<ReturnType<typeof newItem>[]>([newItem()]);
+  const [openTypeMenuId, setOpenTypeMenuId] = useState<string | null>(null);
+  const [openServiceMenuId, setOpenServiceMenuId] = useState<string | null>(null);
   const [consultationCharges, setConsultationCharges] = useState("0");
   const [consultationGstPercent, setConsultationGstPercent] = useState("18");
   const [governmentFees, setGovernmentFees] = useState("0");
+
+  useEffect(() => {
+    if (!openTypeMenuId) return;
+    const closeTypeMenu = (event: PointerEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape") setOpenTypeMenuId(null);
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest("[data-type-menu]")) setOpenTypeMenuId(null);
+    };
+    document.addEventListener("pointerdown", closeTypeMenu);
+    document.addEventListener("keydown", closeTypeMenu);
+    return () => {
+      document.removeEventListener("pointerdown", closeTypeMenu);
+      document.removeEventListener("keydown", closeTypeMenu);
+    };
+  }, [openTypeMenuId]);
+
+  useEffect(() => {
+    if (!openServiceMenuId) return;
+    const closeServiceMenu = (event: PointerEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape") setOpenServiceMenuId(null);
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest("[data-service-menu]")) setOpenServiceMenuId(null);
+    };
+    document.addEventListener("pointerdown", closeServiceMenu);
+    document.addEventListener("keydown", closeServiceMenu);
+    return () => {
+      document.removeEventListener("pointerdown", closeServiceMenu);
+      document.removeEventListener("keydown", closeServiceMenu);
+    };
+  }, [openServiceMenuId]);
 
   // Autocomplete and selection states
   const [clientSuggestions, setClientSuggestions] = useState<{ clientId: string; companyName: string; gstNumber?: string; address?: string; state?: string }[]>([]);
@@ -902,8 +1314,6 @@ export default function QuotationDetailPage() {
   const mobileHeaderSubtitleY = useTransform(headerMorphProgress, [0, 0.48], [0, -10]);
   const mobileHeaderFyOpacity = useTransform(headerMorphProgress, [0.08, 0.42], [1, 0]);
   const mobileHeaderFyY = useTransform(headerMorphProgress, [0.08, 0.42], [0, -7]);
-  const mobileHeaderValidOpacity = useTransform(headerMorphProgress, [0, 0.58], [1, 0]);
-  const mobileHeaderValidY = useTransform(headerMorphProgress, [0, 0.58], [0, 6]);
 
   // The status badge remains mounted and visible, only tightening toward the title as the card compacts.
   const mobileHeaderBadgeScale = useTransform(headerMorphProgress, [0.2, 1], [1, 0.96]);
@@ -1585,7 +1995,24 @@ export default function QuotationDetailPage() {
   const liveGrand = liveItemsSubtotal + liveItemsGst + liveCC + liveCCGst + liveGF;
 
   const updateItem = (idx: number, field: string, value: string | number) => {
-    setItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item));
+    setItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item;
+      const nextItem = { ...item, [field]: value };
+      if ((field === "category" || field === "type") && shouldSyncStandardDescription(item.description)) {
+        nextItem.description = getStandardDescription(nextItem.category, nextItem.type);
+      }
+      return nextItem;
+    }));
+  };
+
+  const selectStandardService = (idx: number, service: typeof STANDARD_SERVICES[number]) => {
+    setItems(prev => prev.map((item, i) => i === idx ? {
+      ...item,
+      description: service.description,
+      category: service.category,
+      type: service.type,
+    } : item));
+    setOpenServiceMenuId(null);
   };
 
   const isViewingCurrentRev = selectedRevNum === quotation?.currentRevisionNumber;
@@ -2286,7 +2713,6 @@ export default function QuotationDetailPage() {
   ];
   const summaryMetaRows = [
     { label: "Current Revision", value: `Rev ${quotation.currentRevisionNumber}`, mono: true },
-    ...(quotation.validTill ? [{ label: "Valid Till", value: fmtDate(quotation.validTill), mono: false }] : []),
     ...(quotation.sentAt ? [{ label: "Sent", value: fmtDate(quotation.sentAt), mono: false }] : []),
   ];
   const hasBillingAction = quotation?.status === "Accepted";
@@ -2606,9 +3032,6 @@ export default function QuotationDetailPage() {
   const quoteHeaderFyStyle = (isMobileHeader
     ? { ...quoteHeaderSecondaryStyle, opacity: mobileHeaderFyOpacity, y: mobileHeaderFyY, willChange: "opacity, transform" }
     : { ...quoteHeaderSecondaryStyle, ...quoteHeaderNonStatusStyle }) as MotionStyle;
-  const quoteHeaderValidStyle = (isMobileHeader
-    ? { ...quoteHeaderSecondaryStyle, opacity: mobileHeaderValidOpacity, y: mobileHeaderValidY, willChange: "opacity, transform" }
-    : { ...quoteHeaderSecondaryStyle, ...quoteHeaderNonStatusStyle }) as MotionStyle;
   const quoteHeaderStatusStyle = (isMobileHeader
     ? { scale: mobileHeaderBadgeScale, x: mobileHeaderBadgeX, y: mobileHeaderBadgeY, transformOrigin: "left center", willChange: "transform", zIndex: 1 }
     : {}) as MotionStyle;
@@ -2676,14 +3099,6 @@ export default function QuotationDetailPage() {
                 >
                   FY {quotation.financialYear}
                 </motion.span>
-                {quotation.validTill && (
-                  <motion.span
-                    className="inline-block basis-full overflow-hidden whitespace-nowrap align-bottom text-faint md:basis-auto"
-                    style={quoteHeaderValidStyle}
-                  >
-                    Valid till {fmtDate(quotation.validTill)}
-                  </motion.span>
-                )}
                 {savedStatus === "saving" && <motion.span className="animate-pulse text-xs text-muted" style={quoteHeaderSaveStateStyle}>Saving...</motion.span>}
                 {savedStatus === "saved" && <motion.span className="flex items-center gap-1 text-xs text-emerald-500" style={quoteHeaderSaveStateStyle}><CheckCircle2 className="h-3 w-3" />Saved</motion.span>}
               </motion.div>
@@ -2801,7 +3216,7 @@ export default function QuotationDetailPage() {
       )}
 
       {/* ─── MAIN TABS ─── */}
-      <QuotationMainTabs activeTab={activeTab} isEditable={isEditable} onTabChange={setActiveTab} />
+      <QuotationMainTabs activeTab={activeTab} headerRef={stickyHeaderRef} isEditable={isEditable} onTabChange={setActiveTab} />
 
       {/* ─── EDITOR TAB ─── */}
       {activeTab === "editor" && (
@@ -2819,62 +3234,85 @@ export default function QuotationDetailPage() {
 
             {!isEditable && (
               <>
-                <div className={`${surfaceCard} p-4 sm:p-8`}>
-                  <div className="mb-4 sm:mb-6">
-                    <h3 className="flex items-center gap-2 text-xl font-semibold text-default"><Building2 className="h-5 w-5 text-muted" />Quotation Details</h3>
-                    <p className="mt-1 text-sm text-muted">Client and validity information for this quotation.</p>
+                <div className={`${surfaceCard} p-4 sm:p-5`}>
+                  <div className="mb-4 flex items-start justify-between gap-4">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl ${quoteReadOnlyPanel}`}>
+                        <Building2 className="h-4 w-4 text-muted" />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="text-base font-semibold tracking-[-0.01em] text-default">Quotation Details</h3>
+                        <p className="mt-0.5 text-xs leading-relaxed text-muted">Client and validity information for this quotation.</p>
+                      </div>
+                    </div>
+                    {viewedRevision?.finalisedAt && (
+                      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/[0.09] px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                        <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5" />
+                        Finalised
+                      </span>
+                    )}
                   </div>
-                  <div className="divide-y divide-soft">
+                  <div className={`grid grid-cols-1 gap-px rounded-[18px] sm:grid-cols-2 lg:grid-cols-3 ${quoteReadOnlyGrid}`}>
                     {[
-                      { label: "Client Name", value: clientName, wide: true },
+                      { label: "Client Name", value: clientName },
                       { label: "Financial Year", value: financialYear },
+                      { label: "Validity", value: `${validityDays} days` },
                       { label: "Billing Address", value: clientAddress || "Not provided", wide: true },
                       { label: "Client GSTIN", value: clientGst || "Not provided", mono: true },
                       { label: "State", value: clientState || "Not provided" },
-                      { label: "Validity", value: `${validityDays} days` },
-                      ...(viewedRevision?.finalisedAt ? [{ label: "Finalised", value: fmtDate(viewedRevision.finalisedAt) }] : []),
+                      ...(viewedRevision?.finalisedAt ? [{ label: "Finalised On", value: fmtDate(viewedRevision.finalisedAt) }] : []),
                     ].map(({ label, value, wide, mono }) => (
-                      <div key={label} className={`grid gap-2 py-4 first:pt-0 last:pb-0 sm:grid-cols-[160px_minmax(0,1fr)] ${wide ? "sm:items-start" : "sm:items-center"}`}>
+                      <div key={label} className={`min-w-0 px-4 py-3.5 ${quoteReadOnlyCell} ${wide ? "sm:col-span-2 lg:col-span-3" : ""}`}>
                         <p className={sectionEyebrow}>{label}</p>
-                        <p className={`break-words text-sm leading-relaxed text-default ${mono ? "font-mono" : ""}`}>{value}</p>
+                        <p className={`mt-1 break-words text-sm font-medium leading-relaxed text-default ${mono ? "font-mono tabular-nums" : ""}`}>{value}</p>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                <div className={`${surfaceCard} p-4 sm:p-6`}>
-                  <div className="mb-5 flex items-center justify-between gap-4">
-                    <h3 className="flex items-center gap-2 text-base font-semibold text-default"><IndianRupee className="h-4 w-4 text-muted" />Line Items</h3>
-                    <p className="text-xs text-muted">{items.length} {items.length === 1 ? "item" : "items"}</p>
+                <div className={`${surfaceCard} p-4 sm:p-5`}>
+                  <div className="mb-3.5 flex items-center justify-between gap-4 px-0.5">
+                    <div className="flex items-center gap-2.5">
+                      <span className={`grid h-8 w-8 place-items-center rounded-xl ${quoteReadOnlyPanel}`}>
+                        <IndianRupee className="h-3.5 w-3.5 text-muted" />
+                      </span>
+                      <h3 className="text-base font-semibold tracking-[-0.01em] text-default">Line Items</h3>
+                    </div>
+                    <p className="rounded-full bg-black/[0.04] px-2.5 py-1 text-[11px] font-medium text-muted dark:bg-white/[0.055]">{items.length} {items.length === 1 ? "item" : "items"}</p>
                   </div>
                   {items.length > 0 ? (
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       {items.map((item, idx) => {
                         const { gstAmt, total } = calcItem(item);
+                        const categoryVisual = getCategoryVisual(item.category);
                         return (
-                          <article key={item._id} className={`rounded-[20px] p-4 transition duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] dark:hover:bg-white/[0.08] dark:hover:shadow-[0_18px_52px_rgba(0,0,0,0.42)] sm:rounded-[24px] sm:p-6 ${quoteSubtleSurface}`}>
-                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                          <article key={item._id} className={`relative overflow-hidden rounded-[18px] p-4 transition-[border-color,background-color,box-shadow] duration-200 hover:border-black/[0.09] hover:bg-black/[0.035] hover:shadow-[0_12px_36px_rgba(0,0,0,0.05)] dark:hover:border-white/[0.10] dark:hover:bg-white/[0.05] dark:hover:shadow-[0_16px_42px_rgba(0,0,0,0.28)] sm:px-5 sm:py-4 ${quoteReadOnlyPanel}`}>
+                            <span aria-hidden="true" className={`absolute inset-y-3 left-0 w-0.5 rounded-r-full ${categoryVisual.rail}`} />
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                               <div className="min-w-0">
                                 <p className={sectionEyebrow}>Item {idx + 1}</p>
-                                <h4 className="mt-1 text-lg font-semibold leading-snug text-default">{item.description || "EPR Credit Procurement"}</h4>
-                                <p className="mt-2 text-sm leading-relaxed text-muted">{item.category} credit for {item.type} compliance.</p>
+                                <h4 className="mt-0.5 text-base font-semibold leading-snug tracking-[-0.01em] text-default">{item.description || "EPR Credit Procurement"}</h4>
+                                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                  <CategoryBadge category={item.category} />
+                                  <TypeBadge type={item.type} />
+                                </div>
                               </div>
                               <div className="shrink-0 sm:text-right">
                                 <p className={sectionEyebrow}>Total</p>
-                                <p className="mt-1 font-mono text-xl font-semibold tabular-nums text-default">{money(total)}</p>
-                                {item.gstPercent > 0 && <p className="mt-1 text-xs text-muted">Includes GST {money(gstAmt)}</p>}
+                                <p className="mt-0.5 font-mono text-xl font-semibold tracking-[-0.02em] tabular-nums text-default">{money(total)}</p>
+                                {item.gstPercent > 0 && <p className="mt-0.5 text-[11px] text-muted">Includes GST {money(gstAmt)}</p>}
                               </div>
                             </div>
-                            <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+                            <div className={`mt-3.5 grid grid-cols-2 gap-px rounded-2xl md:grid-cols-4 ${quoteReadOnlyGrid}`}>
                               {[
                                 { label: "Category", value: item.category },
                                 { label: "Quantity", value: `${item.quantity.toLocaleString("en-IN")} MT`, mono: true },
                                 { label: "Unit Price", value: money(item.rate), mono: true },
                                 { label: "GST", value: `${item.gstPercent}%`, mono: true },
                               ].map(({ label, value, mono }) => (
-                                <div key={label} className={`rounded-2xl px-3 py-2.5 sm:px-4 sm:py-3 ${quoteNestedSurface}`}>
+                                <div key={label} className={`min-w-0 px-3 py-2.5 sm:px-3.5 ${quoteReadOnlyCell}`}>
                                   <p className={sectionEyebrow}>{label}</p>
-                                  <p className={`mt-1 text-sm font-medium text-default ${mono ? "font-mono tabular-nums" : ""}`}>{value}</p>
+                                  <p className={`mt-0.5 truncate text-sm font-medium text-default ${mono ? "font-mono tabular-nums" : ""}`}>{value}</p>
                                 </div>
                               ))}
                             </div>
@@ -2945,56 +3383,234 @@ export default function QuotationDetailPage() {
                         </div>
                       )}
                     </div>
-                    <div><label className="label">Financial Year</label><select className={`${softInput} w-full`} value={financialYear} onChange={e => setFinancialYear(e.target.value)} disabled={!isEditable}>{FINANCIAL_YEARS.map(y => <option key={y}>{y}</option>)}</select></div>
+                    <div><label className="label">Financial Year</label><LiquidGlassDropdown label="Financial Year" options={FINANCIAL_YEAR_DROPDOWN_OPTIONS} value={financialYear} onChange={setFinancialYear} disabled={!isEditable} variant="soft" portal /></div>
                     <div className="sm:col-span-2"><label className="label">Billing Address</label><input className={`${softInput} w-full`} value={clientAddress} onChange={e => setClientAddress(e.target.value)} disabled={!isEditable} placeholder="Billing street address, state, etc." /></div>
                     <div><label className="label">Client GSTIN</label><input className={`${softInput} w-full font-mono`} value={clientGst} onChange={e => setClientGst(e.target.value.toUpperCase())} disabled={!isEditable} placeholder="GSTIN number" maxLength={15} /></div>
                     <div><label className="label">State Code</label><input className={`${softInput} w-full`} value={clientState} onChange={e => setClientState(e.target.value)} disabled={!isEditable} placeholder="State e.g. Delhi, Maharashtra" /></div>
-                    <div><label className="label">Valid for (days)</label><input type="number" className={`${softInput} w-full`} value={validityDays} onChange={e => setValidityDays(Number(e.target.value))} disabled={!isEditable} min={1} /></div>
+                    <div><label className="label">Valid for (days)</label><input type="number" inputMode="numeric" className={`${softInput} ${numberInputNoSpinner} w-full`} value={validityDays} onChange={e => setValidityDays(Number(e.target.value))} disabled={!isEditable} min={1} /></div>
                   </div>
                 </div>
 
-                <div className={`${surfaceCard} p-4 sm:p-6`}>
-                  <div className="mb-5 flex items-center justify-between gap-4">
-                    <h3 className="flex items-center gap-2 text-base font-semibold text-default"><IndianRupee className="h-4 w-4 text-muted" />Line Items</h3>
+                <div className={`rounded-[24px] p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5 ${quoteCardSurface}`}>
+                  <div className="mb-4 flex items-center justify-between gap-4">
+                    <div>
+                      <h3 className="flex items-center gap-2 text-base font-semibold text-default"><Receipt className="h-4 w-4 text-muted" />Line Items</h3>
+                      <p className="mt-1 hidden text-xs text-faint sm:block">Configure category, recovery route, quantity, and pricing.</p>
+                    </div>
                     <button onClick={() => setItems(prev => [...prev, newItem()])} className="glass-btn glass-btn-primary shrink-0 rounded-full px-3 py-2 transition duration-200 active:scale-[0.98] sm:px-4"><Plus className="h-3.5 w-3.5" /> Add Item</button>
                   </div>
                   <div className="space-y-4">
                     {items.map((item, idx) => {
                       const { gstAmt, total } = calcItem(item);
+                      const categoryVisual = getCategoryVisual(item.category);
+                      const normalizedServiceQuery = item.description.trim().toLowerCase();
+                      const showAllServices = !normalizedServiceQuery
+                        || normalizedServiceQuery === "epr credit procurement"
+                        || STANDARD_SERVICES.some(service => service.description.toLowerCase() === normalizedServiceQuery);
+                      const serviceSuggestions = showAllServices
+                        ? STANDARD_SERVICES
+                        : STANDARD_SERVICES.filter(service => `${service.label} ${service.category} ${service.type}`.toLowerCase().includes(normalizedServiceQuery));
                       return (
-                        <article key={item._id} className={`rounded-[20px] p-4 transition duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] dark:hover:bg-white/[0.08] dark:hover:shadow-[0_18px_52px_rgba(0,0,0,0.42)] sm:rounded-[24px] sm:p-6 ${quoteSubtleSurface}`}>
-                          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <article key={item._id} className={`relative overflow-visible rounded-[20px] p-4 transition duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_18px_48px_rgba(0,0,0,0.06)] dark:hover:bg-white/[0.075] dark:hover:shadow-[0_18px_52px_rgba(0,0,0,0.42)] sm:rounded-[22px] sm:p-5 ${quoteSubtleSurface}`}>
+                          <span aria-hidden="true" className={`absolute inset-y-3 left-0 w-0.5 rounded-full shadow-[0_0_12px_currentColor] ${categoryVisual.rail}`} />
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                             <div className="min-w-0 flex-1">
-                              <div className="mb-2 flex items-center justify-between gap-3"><label className={sectionEyebrow}>Product / Service</label><span className="text-xs text-faint">Item {idx + 1}</span></div>
-                              <input list={`services-list-${item._id}`} className={`${softInput} w-full`} value={item.description} onChange={e => { const val = e.target.value; updateItem(idx, "description", val); const matched = STANDARD_SERVICES.find(s => s.description === val); if (matched) { updateItem(idx, "category", matched.category); updateItem(idx, "type", matched.type); } }} disabled={!isEditable} />
-                              <datalist id={`services-list-${item._id}`}>{STANDARD_SERVICES.map(s => <option key={s.label} value={s.description}>{s.category} - {s.type}</option>)}</datalist>
-                              <div className="scrollbar-none mt-3 flex gap-1.5 overflow-x-auto pb-1">{STANDARD_SERVICES.slice(0, 4).map(service => <button key={service.label} type="button" onClick={() => { updateItem(idx, "description", service.description); updateItem(idx, "category", service.category); updateItem(idx, "type", service.type); }} disabled={!isEditable} className="shrink-0 rounded-full border border-transparent bg-white/60 px-2.5 py-1 text-[11px] font-medium text-faint transition duration-200 hover:-translate-y-0.5 hover:border-black/[0.08] hover:bg-[#f5f5f7] hover:text-muted active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white/[0.06] dark:hover:border-white/[0.12] dark:hover:bg-white/[0.10]">{service.category} {service.type}</button>)}</div>
+                              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                                <label className={sectionEyebrow}>Product / Service</label>
+                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                  <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full border border-black/[0.08] bg-white/[0.55] px-2 font-mono text-[10px] font-semibold text-faint dark:border-white/[0.10] dark:bg-white/[0.06]">#{String(idx + 1).padStart(2, "0")}</span>
+                                  <CategoryBadge category={item.category} />
+                                  <TypeBadge type={item.type} />
+                                </div>
+                              </div>
+                              <div className="relative" data-service-menu>
+                                <input
+                                  role="combobox"
+                                  aria-autocomplete="list"
+                                  aria-expanded={openServiceMenuId === item._id}
+                                  aria-controls={`service-menu-${item._id}`}
+                                  className={`${softInput} w-full pr-10 font-medium`}
+                                  value={item.description}
+                                  onFocus={() => setOpenServiceMenuId(item._id)}
+                                  onChange={e => {
+                                    const value = e.target.value;
+                                    updateItem(idx, "description", value);
+                                    setOpenServiceMenuId(item._id);
+                                    const matched = STANDARD_SERVICES.find(service => service.description === value);
+                                    if (matched) selectStandardService(idx, matched);
+                                  }}
+                                  disabled={!isEditable}
+                                />
+                                <Search aria-hidden="true" className="pointer-events-none absolute right-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+                                <AnimatePresence>
+                                  {openServiceMenuId === item._id && serviceSuggestions.length > 0 && (
+                                    <motion.div
+                                      id={`service-menu-${item._id}`}
+                                      role="listbox"
+                                      aria-label="Standard products and services"
+                                      initial={{ opacity: 0, y: -6, scale: 0.99 }}
+                                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                                      exit={{ opacity: 0, y: -4, scale: 0.99 }}
+                                      transition={{ duration: 0.14, ease: "easeOut" }}
+                                      className="absolute left-0 right-0 top-full z-50 mt-2 max-h-64 overflow-y-auto rounded-2xl border border-black/[0.10] bg-white/95 p-1.5 shadow-[0_18px_52px_rgba(0,0,0,0.18)] backdrop-blur-2xl dark:border-white/[0.14] dark:bg-[#242426]/95 dark:shadow-[0_22px_60px_rgba(0,0,0,0.58)]"
+                                    >
+                                      <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">Standard services</div>
+                                      {serviceSuggestions.map(service => {
+                                        const serviceCategoryVisual = getCategoryVisual(service.category);
+                                        return (
+                                          <button
+                                            key={service.label}
+                                            type="button"
+                                            role="option"
+                                            aria-selected={item.description === service.description}
+                                            onClick={() => selectStandardService(idx, service)}
+                                            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.07]"
+                                          >
+                                            <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${serviceCategoryVisual.dot}`} />
+                                            <span className="min-w-0 flex-1">
+                                              <span className="block truncate text-xs font-medium text-default">{service.description}</span>
+                                              <span className="mt-0.5 block text-[10px] text-faint">{service.category} · {service.type}</span>
+                                            </span>
+                                            {item.description === service.description && <Check aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-brand-500" />}
+                                          </button>
+                                        );
+                                      })}
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
                             </div>
-                            <div className="flex items-start justify-between gap-3 sm:block sm:min-w-40 sm:text-right">
-                              <div><p className={sectionEyebrow}>Total</p><p className="mt-1 font-mono text-xl font-semibold tabular-nums text-default">{money(total)}</p>{item.gstPercent > 0 && <p className="mt-1 text-xs text-muted">GST {money(gstAmt)}</p>}</div>
-                              <button onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))} disabled={items.length === 1} className="rounded-full p-2 text-faint transition hover:bg-red-50 hover:text-red-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-red-900/20" title="Remove item"><Trash2 className="h-4 w-4" /></button>
+                            <div className="flex items-center justify-between gap-3 sm:min-w-40 sm:flex-col sm:items-end">
+                              <div className="sm:text-right"><p className={sectionEyebrow}>Line total</p><p className="mt-0.5 font-mono text-2xl font-semibold tracking-tight tabular-nums text-default">{money(total)}</p>{item.gstPercent > 0 && <p className="mt-0.5 text-[11px] text-muted">Includes GST {money(gstAmt)}</p>}</div>
+                              <button onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))} disabled={items.length === 1} className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-transparent text-faint transition hover:border-red-200 hover:bg-red-50 hover:text-red-500 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-25 dark:hover:border-red-400/20 dark:hover:bg-red-500/10" title="Remove item" aria-label={`Remove item ${idx + 1}`}><Trash2 className="h-3.5 w-3.5" /></button>
                             </div>
                           </div>
-                          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                            <div><label className="label">Category</label><select className={`${softInput} w-full`} value={item.category} onChange={e => updateItem(idx, "category", e.target.value)} disabled={!isEditable}>{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div>
-                            <div><label className="label">Type</label><select className={`${softInput} w-full`} value={item.type} onChange={e => updateItem(idx, "type", e.target.value)} disabled={!isEditable}>{TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
-                            <div><label className="label">Quantity (MT)</label><input type="number" min="0" className={`${softInput} w-full font-mono text-right tabular-nums`} value={item.quantity || ""} onChange={e => updateItem(idx, "quantity", Number(e.target.value))} disabled={!isEditable} /></div>
-                            <div><label className="label">Unit Price</label><input type="number" min="0" step="0.01" className={`${softInput} w-full font-mono text-right tabular-nums`} value={item.rate || ""} onChange={e => updateItem(idx, "rate", Number(e.target.value))} disabled={!isEditable} placeholder="0.00" /></div>
-                            <div><label className="label">GST</label><select className={`${softInput} w-full`} value={item.gstPercent} onChange={e => updateItem(idx, "gstPercent", Number(e.target.value))} disabled={!isEditable}>{GST_OPTIONS.map(g => <option key={g} value={g}>{g}%</option>)}</select></div>
+                          <div className="mt-3 space-y-3">
+                            <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+                              <fieldset>
+                                <legend className="label">Category</legend>
+                                <QuotationAnimatedSegmentTrack
+                                  activeKey={item.category}
+                                  pillClassName={categoryVisual.selected}
+                                  className="grid grid-cols-2 gap-1 rounded-2xl border border-black/[0.08] bg-black/[0.025] p-1 dark:border-white/[0.09] dark:bg-black/[0.12] sm:grid-cols-4 xl:grid-cols-2 2xl:grid-cols-4"
+                                >
+                                  {CATEGORIES.map(category => {
+                                    const visual = getCategoryVisual(category);
+                                    const isSelected = item.category === category;
+                                    return (
+                                      <button
+                                        key={category}
+                                        type="button"
+                                        aria-pressed={isSelected}
+                                        data-segment-active={isSelected ? "true" : undefined}
+                                        onClick={() => updateItem(idx, "category", category)}
+                                        disabled={!isEditable}
+                                        className={`relative z-[1] flex h-9 items-center justify-center gap-2 rounded-xl border border-transparent px-3 text-xs font-semibold transition-colors duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 sm:h-10 ${isSelected ? CATEGORY_ACTIVE_TEXT[category] : "text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.07]"}`}
+                                      >
+                                        <span aria-hidden="true" className={`h-2 w-2 rounded-full ${visual.dot}`} />
+                                        {category}
+                                      </button>
+                                    );
+                                  })}
+                                </QuotationAnimatedSegmentTrack>
+                              </fieldset>
+                              <fieldset>
+                                <legend className="label">Type</legend>
+                                <QuotationAnimatedSegmentTrack
+                                  activeKey={MORE_TYPES.includes(item.type) ? "More" : item.type}
+                                  pillClassName={MORE_TYPES.includes(item.type) ? DEFAULT_TYPE_VISUAL.selected : getTypeVisual(item.type).selected}
+                                  className="grid grid-cols-3 gap-1 rounded-2xl border border-black/[0.08] bg-black/[0.025] p-1 dark:border-white/[0.09] dark:bg-black/[0.12]"
+                                >
+                                  {PRIMARY_TYPES.map(type => {
+                                    const isSelected = item.type === type;
+                                    return (
+                                      <button
+                                        key={type}
+                                        type="button"
+                                        aria-pressed={isSelected}
+                                        data-segment-active={isSelected ? "true" : undefined}
+                                        onClick={() => updateItem(idx, "type", type)}
+                                        disabled={!isEditable}
+                                        className={`relative z-[1] flex h-9 items-center justify-center gap-1.5 rounded-xl border border-transparent px-2.5 text-center text-xs font-semibold leading-tight transition-colors duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 sm:h-10 ${isSelected ? TYPE_ACTIVE_TEXT[type] : "text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.07]"}`}
+                                      >
+                                        <TypeMark type={type} />
+                                        {type}
+                                      </button>
+                                    );
+                                  })}
+                                  <div className="relative z-[1] min-w-0" data-type-menu>
+                                    <button
+                                      type="button"
+                                      aria-haspopup="listbox"
+                                      aria-expanded={openTypeMenuId === item._id}
+                                      data-segment-active={MORE_TYPES.includes(item.type) ? "true" : undefined}
+                                      onClick={() => setOpenTypeMenuId(current => current === item._id ? null : item._id)}
+                                      disabled={!isEditable}
+                                      className={`flex h-9 w-full items-center justify-between gap-1.5 rounded-xl border border-transparent py-0 pl-3 pr-2.5 text-left text-xs font-semibold outline-none transition-colors duration-200 focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-50 sm:h-10 ${MORE_TYPES.includes(item.type) ? "text-default" : "text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.07]"}`}
+                                    >
+                                      <span className="flex min-w-0 items-center gap-1.5">
+                                        <MoreHorizontal aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                                        <span className="truncate">{MORE_TYPES.includes(item.type) ? item.type : "More"}</span>
+                                      </span>
+                                      <ChevronDown aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 text-faint transition-transform duration-200 ${openTypeMenuId === item._id ? "rotate-180" : ""}`} />
+                                    </button>
+                                    <AnimatePresence>
+                                      {openTypeMenuId === item._id && (
+                                        <motion.div
+                                          initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                                          exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                                          transition={{ duration: 0.14, ease: "easeOut" }}
+                                          role="listbox"
+                                          aria-label="More credit types"
+                                          className="absolute right-0 top-full z-50 mt-2 min-w-[190px] overflow-hidden rounded-2xl border border-black/[0.10] bg-white/95 p-1.5 shadow-[0_18px_52px_rgba(0,0,0,0.18)] backdrop-blur-2xl dark:border-white/[0.14] dark:bg-[#242426]/95 dark:shadow-[0_22px_60px_rgba(0,0,0,0.58)]"
+                                        >
+                                          <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">Other types</div>
+                                          {MORE_TYPES.map(type => {
+                                            const isSelected = item.type === type;
+                                            return (
+                                              <button
+                                                key={type}
+                                                type="button"
+                                                role="option"
+                                                aria-selected={isSelected}
+                                                onClick={() => { updateItem(idx, "type", type); setOpenTypeMenuId(null); }}
+                                                className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-medium transition-colors ${isSelected ? "bg-black/[0.06] text-default dark:bg-white/[0.10]" : "text-muted hover:bg-black/[0.04] hover:text-default dark:hover:bg-white/[0.07]"}`}
+                                              >
+                                                <span className="flex items-center gap-2">
+                                                  <TypeMark type={type} />
+                                                  {type}
+                                                </span>
+                                                {isSelected && <Check aria-hidden="true" className="h-3.5 w-3.5 text-brand-500" />}
+                                              </button>
+                                            );
+                                          })}
+                                        </motion.div>
+                                      )}
+                                    </AnimatePresence>
+                                  </div>
+                                </QuotationAnimatedSegmentTrack>
+                              </fieldset>
+                            </div>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                              <div><label className="label">Quantity</label><PremiumNumberInput ariaLabel={`Quantity for item ${idx + 1}`} value={item.quantity} onChange={value => updateItem(idx, "quantity", value)} suffix="MT" disabled={!isEditable} /></div>
+                              <div><label className="label">Unit Price</label><PremiumNumberInput ariaLabel={`Unit price for item ${idx + 1}`} value={item.rate} onChange={value => updateItem(idx, "rate", value)} prefix="₹" decimals={2} disabled={!isEditable} /></div>
+                              <div><label className="label">GST</label><LiquidGlassDropdown label={`GST for item ${idx + 1}`} options={GST_DROPDOWN_OPTIONS} value={String(item.gstPercent)} onChange={value => updateItem(idx, "gstPercent", Number(value))} disabled={!isEditable} variant="soft" portal /></div>
+                            </div>
                           </div>
                         </article>
                       );
                     })}
                   </div>
-                  <button onClick={() => setItems(prev => [...prev, newItem()])} className={`${appleButton} mt-4 border border-base bg-surface text-default hover:bg-card`}><Plus className="mr-2 h-4 w-4" />Add Item</button>
+                  <button onClick={() => setItems(prev => [...prev, newItem()])} className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-black/[0.12] bg-black/[0.015] px-4 py-3 text-xs font-semibold text-muted transition-all duration-200 hover:border-brand-400/50 hover:bg-brand-50/50 hover:text-brand-700 active:scale-[0.995] dark:border-white/[0.12] dark:bg-white/[0.025] dark:hover:border-brand-400/40 dark:hover:bg-brand-400/[0.08] dark:hover:text-brand-200"><Plus className="h-3.5 w-3.5" />Add another line item</button>
                 </div>
 
                 <div className={`${surfaceCard} p-4 sm:p-8`}>
                   <div className="mb-4 sm:mb-6"><h3 className="flex items-center gap-2 text-xl font-semibold text-default"><Receipt className="h-5 w-5 text-muted" />Additional charges</h3><p className="mt-1 text-sm text-muted">Consultation, tax, and statutory fees.</p></div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <div><label className="label">Consultation Charges</label><input type="number" min="0" step="0.01" className={`${softInput} w-full font-mono tabular-nums`} value={consultationCharges} onChange={e => setConsultationCharges(e.target.value)} disabled={!isEditable} /></div>
-                    <div><label className="label">Consultation GST %</label><select className={`${softInput} w-full`} value={consultationGstPercent} onChange={e => setConsultationGstPercent(e.target.value)} disabled={!isEditable}>{GST_OPTIONS.map(g => <option key={g} value={g}>{g}%</option>)}</select></div>
-                    <div><label className="label">Government Fees</label><input type="number" min="0" step="0.01" className={`${softInput} w-full font-mono tabular-nums`} value={governmentFees} onChange={e => setGovernmentFees(e.target.value)} disabled={!isEditable} /><p className="mt-2 text-xs text-faint">CPCB / SPCB / portal charges.</p></div>
+                    <div><label className="label">Consultation Charges</label><input type="number" inputMode="decimal" min="0" step="0.01" className={`${softInput} ${numberInputNoSpinner} w-full font-mono tabular-nums`} value={consultationCharges} onChange={e => setConsultationCharges(e.target.value)} disabled={!isEditable} /></div>
+                    <div><label className="label">Consultation GST %</label><LiquidGlassDropdown label="Consultation GST percentage" options={GST_DROPDOWN_OPTIONS} value={consultationGstPercent} onChange={setConsultationGstPercent} disabled={!isEditable} variant="soft" portal /></div>
+                    <div><label className="label">Government Fees</label><input type="number" inputMode="decimal" min="0" step="0.01" className={`${softInput} ${numberInputNoSpinner} w-full font-mono tabular-nums`} value={governmentFees} onChange={e => setGovernmentFees(e.target.value)} disabled={!isEditable} /><p className="mt-2 text-xs text-faint">CPCB / SPCB / portal charges.</p></div>
                   </div>
                 </div>
 

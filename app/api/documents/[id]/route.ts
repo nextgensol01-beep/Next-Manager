@@ -36,14 +36,43 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const previousDocument = await Document.findById(id);
     if (!previousDocument) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    const updatedDocument = await Document.findByIdAndUpdate(
-      id,
-      {
+    const documentKind = body.documentKind === "epr-certificate"
+      ? "epr-certificate"
+      : body.documentKind === "target-screenshot"
+        ? "target-screenshot"
+        : "general";
+    const financialYear = typeof body.financialYear === "string" ? body.financialYear.trim() : "";
+    if (documentKind === "target-screenshot") {
+      if (!financialYear) {
+        return NextResponse.json({ error: "Financial year is required for a target screenshot." }, { status: 400 });
+      }
+      if (previousDocument.mimeType && !previousDocument.mimeType.startsWith("image/")) {
+        return NextResponse.json({ error: "Only an image can be marked as a target screenshot." }, { status: 415 });
+      }
+      const existingScreenshot = await Document.exists({
+        _id: { $ne: previousDocument._id },
+        clientId: previousDocument.clientId,
+        documentKind: "target-screenshot",
+        financialYear,
+      });
+      if (existingScreenshot) {
+        return NextResponse.json({ error: `A target screenshot already exists for FY ${financialYear}.` }, { status: 409 });
+      }
+    }
+    const documentUpdate = {
+      $set: {
         documentName,
         driveLink,
         category,
+        documentKind,
+        ...(documentKind === "target-screenshot" ? { financialYear } : {}),
         ...(uploadedDate ? { uploadedDate } : {}),
       },
+      ...(documentKind === "target-screenshot" ? {} : { $unset: { financialYear: 1 } }),
+    };
+    const updatedDocument = await Document.findByIdAndUpdate(
+      id,
+      documentUpdate,
       { new: true }
     );
 
@@ -51,6 +80,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const changes = [
       previousDocument.documentName !== documentName ? `renamed from ${previousDocument.documentName}` : "",
       previousDocument.category !== category ? `category changed from ${previousDocument.category || "Other"} to ${category}` : "",
+      previousDocument.documentKind !== documentKind ? `purpose changed to ${documentKind.replace(/-/g, " ")}` : "",
+      documentKind === "target-screenshot" && previousDocument.financialYear !== financialYear ? `financial year changed to ${financialYear}` : "",
       previousDocument.driveLink !== driveLink ? "Drive link updated" : "",
     ].filter(Boolean);
     await recordActivityEvent({
@@ -65,6 +96,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       entityId: String(updatedDocument._id),
       entityType: "document",
       relatedEntityIds: [String(updatedDocument._id)],
+      financialYear: updatedDocument.financialYear || undefined,
     }, session);
     return NextResponse.json(updatedDocument);
   } catch (error) {

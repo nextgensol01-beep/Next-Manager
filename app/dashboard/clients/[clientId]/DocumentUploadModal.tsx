@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Check,
@@ -66,6 +66,8 @@ async function filesFromEntry(entry: FileSystemEntry, prefix = ""): Promise<Arra
 function sendItem(
   item: UploadItem,
   clientId: string,
+  documentKind: "general" | "target-screenshot",
+  financialYear: string | undefined,
   onProgress: (progress: number) => void
 ): Promise<Document> {
   return new Promise((resolve, reject) => {
@@ -91,6 +93,8 @@ function sendItem(
     form.append("clientId", clientId);
     form.append("category", item.category);
     form.append("relativePath", item.relativePath);
+    form.append("documentKind", documentKind);
+    if (financialYear) form.append("financialYear", financialYear);
     xhr.send(form);
   });
 }
@@ -100,19 +104,26 @@ export default function DocumentUploadModal({
   clientId,
   onClose,
   onUploaded,
+  purpose = "general",
+  financialYear,
 }: {
   open: boolean;
   clientId: string;
   onClose: () => void;
   onUploaded: (documents: Document[]) => void;
+  purpose?: "general" | "target-screenshot";
+  financialYear?: string;
 }) {
   const reduceMotion = useReducedMotion();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<UploadItem[]>([]);
   const [batchCategory, setBatchCategory] = useState<DocumentCategory>("compliance");
+  const [uploadPurpose, setUploadPurpose] = useState<"general" | "target-screenshot">(purpose);
   const [dragging, setDragging] = useState(false);
   const [message, setMessage] = useState("");
+  const targetScreenshot = uploadPurpose === "target-screenshot";
+  const purposeLocked = purpose === "target-screenshot";
   const uploading = items.some((item) => item.status === "uploading");
   const completed = items.filter((item) => item.status === "complete").length;
   const failed = items.filter((item) => item.status === "failed").length;
@@ -122,12 +133,35 @@ export default function DocumentUploadModal({
     return Math.round(items.reduce((sum, item) => sum + item.progress, 0) / items.length);
   }, [items]);
 
+  useEffect(() => {
+    if (!open) return;
+    setItems([]);
+    setMessage("");
+    setBatchCategory("compliance");
+    setUploadPurpose(purpose);
+  }, [financialYear, open, purpose]);
+
+  const changeUploadPurpose = (nextPurpose: "general" | "target-screenshot") => {
+    setUploadPurpose(nextPurpose);
+    setMessage("");
+    if (nextPurpose !== "target-screenshot") return;
+
+    setBatchCategory("compliance");
+    setItems((current) => {
+      const images = current.filter((item) => item.file.type.startsWith("image/")).slice(0, 1);
+      if (images.length !== current.length) {
+        setMessage("Target screenshot mode keeps one image only. Other selected files were removed.");
+      }
+      return images.map((item) => ({ ...item, category: "compliance" }));
+    });
+  };
+
   const addFiles = (entries: Array<{ file: File; path: string }>) => {
     setMessage("");
     setItems((current) => {
       const known = new Set(current.map((item) => item.id));
       const valid = entries
-        .filter(({ file }) => file.size <= MAX_SIZE)
+        .filter(({ file }) => file.size <= MAX_SIZE && (!targetScreenshot || file.type.startsWith("image/")))
         .map(({ file, path }) => ({
           id: itemId(file, path),
           file,
@@ -137,9 +171,13 @@ export default function DocumentUploadModal({
           status: "ready" as const,
         }))
         .filter((item) => !known.has(item.id));
-      const next = [...current, ...valid].slice(0, MAX_FILES);
+      const maxItems = targetScreenshot ? 1 : MAX_FILES;
+      const next = [...current, ...valid].slice(0, maxItems);
+      if (targetScreenshot && entries.some(({ file }) => !file.type.startsWith("image/"))) {
+        setMessage("The target screenshot must be an image file.");
+      }
       if (entries.some(({ file }) => file.size > MAX_SIZE)) setMessage("Files larger than 25 MB were skipped.");
-      else if (current.length + valid.length > MAX_FILES) setMessage("Only the first 100 files were added.");
+      else if (current.length + valid.length > maxItems) setMessage(targetScreenshot ? "Only one target screenshot is allowed per financial year." : "Only the first 100 files were added.");
       return next;
     });
   };
@@ -174,7 +212,7 @@ export default function DocumentUploadModal({
   const uploadOne = async (item: UploadItem) => {
     patchItem(item.id, { status: "uploading", error: undefined, progress: 2 });
     try {
-      const document = await sendItem(item, clientId, (progress) => patchItem(item.id, { progress }));
+      const document = await sendItem(item, clientId, uploadPurpose, financialYear, (progress) => patchItem(item.id, { progress }));
       patchItem(item.id, { status: "complete", progress: 100 });
       onUploaded([document]);
       return true;
@@ -204,8 +242,34 @@ export default function DocumentUploadModal({
   };
 
   return (
-    <Modal open={open} onClose={close} title="Upload documents" subtitle="Files are stored in the client's Google Drive folder." size="lg">
+    <Modal
+      open={open}
+      onClose={close}
+      title={purposeLocked ? `Upload target screenshot · FY ${financialYear}` : "Upload documents"}
+      subtitle={targetScreenshot ? "This image will be identified as the target screenshot for the selected financial year." : "Files are stored in the client's Google Drive folder."}
+      size="lg"
+    >
       <div className="document-uploader">
+        {!purposeLocked && financialYear && (
+          <div className="document-upload-purpose">
+            <label>
+              <span>Identify this upload as</span>
+              <select
+                value={uploadPurpose}
+                disabled={uploading || completed > 0}
+                onChange={(event) => changeUploadPurpose(event.target.value as "general" | "target-screenshot")}
+              >
+                <option value="general">Regular document</option>
+                <option value="target-screenshot">Target screenshot · FY {financialYear}</option>
+              </select>
+            </label>
+            <p>
+              {targetScreenshot
+                ? `The requirement card for FY ${financialYear} will be updated after upload.`
+                : "Choose target screenshot here when uploading it from the main Upload button."}
+            </p>
+          </div>
+        )}
         <motion.div
           className="document-upload-dropzone"
           data-active={dragging}
@@ -224,17 +288,19 @@ export default function DocumentUploadModal({
           >
             <UploadCloud className="h-7 w-7" />
           </motion.span>
-          <strong>{dragging ? "Drop files or folders here" : "Drag files or folders to upload"}</strong>
-          <p>Up to 100 files per batch, 25 MB per file</p>
+          <strong>{dragging ? "Drop files here" : targetScreenshot ? "Drag the target screenshot to upload" : "Drag files or folders to upload"}</strong>
+          <p>{targetScreenshot ? "One image, up to 25 MB" : "Up to 100 files per batch, 25 MB per file"}</p>
           <div className="document-upload-picker-actions">
             <button type="button" className="client-profile-primary-button" onClick={() => fileInputRef.current?.click()}>
               <File className="h-4 w-4" /> Choose files
             </button>
-            <button type="button" className="client-profile-secondary-button" onClick={() => folderInputRef.current?.click()}>
-              <FolderOpen className="h-4 w-4" /> Choose folder
-            </button>
+            {!targetScreenshot && (
+              <button type="button" className="client-profile-secondary-button" onClick={() => folderInputRef.current?.click()}>
+                <FolderOpen className="h-4 w-4" /> Choose folder
+              </button>
+            )}
           </div>
-          <input ref={fileInputRef} className="sr-only" type="file" multiple onChange={(event) => readInput(event.target.files)} />
+          <input ref={fileInputRef} className="sr-only" type="file" accept={targetScreenshot ? "image/*" : undefined} multiple={!targetScreenshot} onChange={(event) => readInput(event.target.files)} />
           <input
             ref={folderInputRef}
             className="sr-only"
@@ -246,6 +312,9 @@ export default function DocumentUploadModal({
         </motion.div>
 
         <div className="document-upload-toolbar">
+          {targetScreenshot ? (
+            <strong>Target screenshot · FY {financialYear}</strong>
+          ) : (
           <label>
             <span>Default category</span>
             <select
@@ -260,6 +329,7 @@ export default function DocumentUploadModal({
               {CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
+          )}
           <span>{items.length} selected · {displaySize(items.reduce((sum, item) => sum + item.file.size, 0))}</span>
         </div>
 
@@ -299,14 +369,18 @@ export default function DocumentUploadModal({
                         <div className="document-upload-progress"><motion.span animate={{ width: `${item.progress}%` }} /></div>
                       )}
                     </div>
-                    <select
-                      aria-label={`Category for ${item.file.name}`}
-                      value={item.category}
-                      disabled={item.status === "uploading" || item.status === "complete"}
-                      onChange={(event) => patchItem(item.id, { category: event.target.value as DocumentCategory })}
-                    >
-                      {CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                    </select>
+                    {targetScreenshot ? (
+                      <span className="document-upload-kind-badge">Target · FY {financialYear}</span>
+                    ) : (
+                      <select
+                        aria-label={`Category for ${item.file.name}`}
+                        value={item.category}
+                        disabled={item.status === "uploading" || item.status === "complete"}
+                        onChange={(event) => patchItem(item.id, { category: event.target.value as DocumentCategory })}
+                      >
+                        {CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    )}
                     {item.status === "failed" ? (
                       <button type="button" className="client-profile-icon-button" onClick={() => void uploadOne(item)} aria-label={`Retry ${item.file.name}`}>
                         <RotateCcw className="h-4 w-4" />
@@ -366,7 +440,7 @@ export default function DocumentUploadModal({
               >
                 <div className="min-w-0 flex-1">
                   <div>
-                    <span>{uploading ? `${completed} of ${items.length} uploaded` : failed ? `${failed} failed · retry available` : "Ready to upload"}</span>
+                    <span>{uploading ? `${completed} of ${items.length} uploaded` : failed ? `${failed} failed · retry available` : targetScreenshot ? `Ready as target screenshot · FY ${financialYear}` : "Ready to upload"}</span>
                     <strong>{overallProgress}%</strong>
                   </div>
                   <div className="document-upload-overall"><motion.span animate={{ width: `${overallProgress}%` }} /></div>

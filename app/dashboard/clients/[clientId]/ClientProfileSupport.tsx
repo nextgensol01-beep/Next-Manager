@@ -126,6 +126,8 @@ export interface Document {
   documentName: string;
   driveLink: string;
   category?: DocumentCategory;
+  documentKind?: "general" | "epr-certificate" | "target-screenshot";
+  financialYear?: string;
   storageType?: "legacy-link" | "google-drive";
   driveFileId?: string;
   driveRelativePath?: string;
@@ -135,6 +137,33 @@ export interface Document {
   source?: "manual-link" | "website-upload" | "migration";
   migrationStatus?: "legacy" | "pending" | "migrated" | "permission-required" | "unsupported" | "failed";
   uploadedDate: string;
+}
+
+export interface ClientNote {
+  _id: string;
+  clientId: string;
+  financialYear?: string;
+  body: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClientWorkItem {
+  _id: string;
+  clientId: string;
+  financialYear?: string;
+  kind: "task" | "reminder" | "follow_up" | "call" | "meeting";
+  title: string;
+  details?: string;
+  status: "open" | "completed" | "cancelled";
+  priority: "low" | "normal" | "high";
+  ownerEmail?: string;
+  dueAt?: string;
+  completedAt?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type DocumentCategory = "compliance" | "financial" | "invoices" | "certificates" | "other";
@@ -154,9 +183,10 @@ export interface ActivityItem {
   badge?: string;
   badgeColor?: string;
   entityId?: string;
-  entityType?: "billing" | "payment" | "financial-year" | "annual-return" | "invoice" | "upload" | "quotation" | "document" | "email" | "trash";
+  entityType?: "client" | "billing" | "payment" | "financial-year" | "annual-return" | "invoice" | "upload" | "quotation" | "document" | "email" | "note" | "work-item" | "trash";
   recordType?: string;
   actionSearch?: string;
+  actorEmail?: string;
 }
 
 export interface ActivityResponse {
@@ -165,6 +195,7 @@ export interface ActivityResponse {
   hasMore: boolean;
   nextOffset: number;
   latestEmailActivity: ActivityItem | null;
+  latestActivity: ActivityItem | null;
 }
 
 export interface PersonEntry {
@@ -362,7 +393,8 @@ export const activityIcon = (type: string) => {
   if (type === "target_achieved") return <ArrowDownLeft className="w-3.5 h-3.5" />;
   if (type === "target_set") return <Target className="w-3.5 h-3.5" />;
   if (type === "credits_set") return <Zap className="w-3.5 h-3.5" />;
-  if (type === "billing_created") return <Receipt className="w-3.5 h-3.5" />;
+  if (type === "fy_data_created" || type === "fy_data_updated") return <Target className="w-3.5 h-3.5" />;
+  if (type === "billing_created" || type === "billing_updated") return <Receipt className="w-3.5 h-3.5" />;
   if (type === "quotation_updated") return <Receipt className="w-3.5 h-3.5" />;
   if (type === "annual_return_updated") return <ClipboardCheck className="w-3.5 h-3.5" />;
   if (type === "invoice_tracking_updated") return <FileText className="w-3.5 h-3.5" />;
@@ -372,7 +404,10 @@ export const activityIcon = (type: string) => {
   if (type === "document_migrated" || type === "document_restored") return <FolderOpen className="w-3.5 h-3.5" />;
   if (type === "document_updated") return <Pencil className="w-3.5 h-3.5" />;
   if (type === "document_deleted" || type === "document_permanently_deleted") return <Trash2 className="w-3.5 h-3.5" />;
-  if (type === "payment_received" || type === "advance_payment_received") return <Wallet className="w-3.5 h-3.5" />;
+  if (type === "payment_received" || type === "advance_payment_received" || type === "payment_updated") return <Wallet className="w-3.5 h-3.5" />;
+  if (type === "client_updated") return <Pencil className="w-3.5 h-3.5" />;
+  if (type.startsWith("client_note")) return <FileText className="w-3.5 h-3.5" />;
+  if (/^(task|reminder|follow_up|call|meeting)_/.test(type)) return <ClipboardCheck className="w-3.5 h-3.5" />;
   if (type === "email_draft") return <MailCheck className="w-3.5 h-3.5" />;
   if (type === "email_sent") return <Send className="w-3.5 h-3.5" />;
   if (type.startsWith("deleted_")) return <Trash2 className="w-3.5 h-3.5" />;

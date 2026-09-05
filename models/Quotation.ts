@@ -21,6 +21,9 @@ export interface IQuotation extends Document {
   validityDays: number;
   validTill?: Date;
   sentAt?: Date;
+  acceptedAt?: Date;
+  rejectedAt?: Date;
+  revisionRequestedAt?: Date;
   activities: IQuotationActivity[];
   createdAt: Date;
   updatedAt: Date;
@@ -53,6 +56,9 @@ const QuotationSchema = new Schema<IQuotation>(
     validityDays: { type: Number, default: 30 },
     validTill: { type: Date, default: null },
     sentAt: { type: Date, default: null },
+    acceptedAt: { type: Date, default: null },
+    rejectedAt: { type: Date, default: null },
+    revisionRequestedAt: { type: Date, default: null },
     activities: { type: [ActivitySchema], default: [] },
   },
   { timestamps: true }
@@ -62,6 +68,7 @@ QuotationSchema.index({ financialYear: 1, status: 1 });
 QuotationSchema.index({ clientName: 1 });
 QuotationSchema.index({ createdAt: -1 });
 QuotationSchema.index({ clientId: 1, financialYear: 1, updatedAt: -1 });
+QuotationSchema.index({ clientId: 1, financialYear: 1, status: 1, sentAt: -1 });
 QuotationSchema.index(
   { quotationNumber: 1 },
   {

@@ -7,6 +7,7 @@ import {
   getClientWithContacts,
   updateClientRecord,
 } from "@/lib/server/client-contact-service";
+import { recordActivityEvent } from "@/lib/server/activity-events";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ clientId: string }> }) {
   const session = await getServerSession(authOptions);
@@ -37,6 +38,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ clie
     if (!client) {
       return NextResponse.json({ error: "Client not found" }, { status: 404 });
     }
+
+    await recordActivityEvent({
+      clientId,
+      category: "system",
+      type: "client_updated",
+      label: "Client Profile Updated",
+      detail: "Company, contact or portal details were updated",
+      color: "violet",
+      badge: "Updated",
+      entityId: String(client._id || clientId),
+      entityType: "client",
+      relatedEntityIds: [String(client._id || clientId)],
+    }, session);
 
     return NextResponse.json(client);
   } catch (error: unknown) {

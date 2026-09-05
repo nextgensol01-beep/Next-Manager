@@ -1,13 +1,11 @@
 ﻿"use client";
 import { useEffect, useMemo, useState } from "react";
-import PageHeader from "@/components/ui/PageHeader";
-import { Download, SlidersHorizontal } from "lucide-react";
+import dynamic from "next/dynamic";
 import toast from "react-hot-toast";
-import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearState } from "@/app/providers";
 import { useCache } from "@/lib/useCache";
 import type { ClientCustomFieldDefinition } from "@/lib/clientCustomFields";
-import CustomExportModal from "./CustomExportModal";
+import ReportStudio from "./ReportStudio";
 import {
   CUSTOM_CLIENT_EXPORT_FIELDS,
   REPORT_FILE_PREFIX,
@@ -22,7 +20,6 @@ import {
 import {
   CUSTOM_EXPORT_USER_PRESETS_KEY,
   DEFAULT_CUSTOM_FIELDS,
-  REPORT_TYPES,
   arraysEqual,
   sameMembers,
   type AdvancedCustomExportSection,
@@ -39,8 +36,15 @@ const groupCustomExportFields = (fields: CustomClientExportFieldDefinition[]) =>
   }, new Map<string, CustomClientExportFieldDefinition[]>())
 );
 
+const CustomExportModal = dynamic(() => import("./CustomExportModal"), {
+  ssr: false,
+  loading: () => null,
+});
+
+const SENSITIVE_EXPORT_FIELD_PATTERN = /(password|passcode|secret|token|credential|one[-_ ]?time|otp|\bpin\b)/i;
+
 export default function ReportsPage() {
-  const [fy, setFy] = useFinancialYearState();
+  const [fy, setFy, financialYearReady] = useFinancialYearState();
   const [downloading, setDownloading] = useState<ReportType[]>([]);
   const [customExportOpen, setCustomExportOpen] = useState(false);
   const [customDownloading, setCustomDownloading] = useState(false);
@@ -64,11 +68,17 @@ export default function ReportsPage() {
   const [presetName, setPresetName] = useState("");
   const [showAdvancedControls, setShowAdvancedControls] = useState(false);
   const [activeAdvancedSection, setActiveAdvancedSection] = useState<AdvancedCustomExportSection>("presets");
-  const { data: clientCustomFields } = useCache<ClientCustomFieldDefinition[]>("/api/client-custom-fields", { initialData: [] });
+  const { data: clientCustomFields } = useCache<ClientCustomFieldDefinition[]>("/api/client-custom-fields", {
+    enabled: customExportOpen,
+    initialData: [],
+  });
   const allCustomExportFields = useMemo(() => [
     ...CUSTOM_CLIENT_EXPORT_FIELDS,
     ...clientCustomFields
-      .filter((field) => field.key !== "legalName")
+      .filter((field) => (
+        field.key !== "legalName" &&
+        !SENSITIVE_EXPORT_FIELD_PATTERN.test(`${field.key} ${field.label}`)
+      ))
       .map((field) => ({
         id: `custom:${field.key}`,
         label: field.label,
@@ -445,60 +455,17 @@ export default function ReportsPage() {
   };
 
   return (
-    <div>
-      <PageHeader
-        title="Reports"
-        description="Export operational data as Excel files for analysis, sharing, and records"
-        action={(
-          <button className="glass-btn" onClick={openCustomExport}>
-            <SlidersHorizontal className="w-4 h-4" />
-            Custom Export
-          </button>
-        )}
+    <div className="reports-page">
+      <ReportStudio
+        fy={fy}
+        ready={financialYearReady}
+        onFyChange={setFy}
+        onOpenCustomExport={openCustomExport}
+        onDownloadQuickReport={downloadReport}
+        quickDownloading={downloading}
       />
 
-      <FYTabBar value={fy} onChange={setFy} />
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-        {REPORT_TYPES.map(({ id, label, description, icon: Icon, color, darkColor }) => (
-          <div key={id} className="bg-card border border-base rounded-2xl p-5 shadow-sm hover:shadow-md transition-all group">
-            <div className={`w-11 h-11 rounded-xl flex items-center justify-center mb-4 ${color} ${darkColor}`}>
-              <Icon className="w-5 h-5" />
-            </div>
-            <h3 className="font-semibold text-default mb-1">{label}</h3>
-            <p className="text-xs text-muted mb-4 leading-relaxed">{description}</p>
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xs font-medium text-faint bg-surface px-2 py-0.5 rounded-full">FY {fy}</span>
-              <span className="text-xs text-faint">&bull;</span>
-              <span className="text-xs text-faint">Excel .xlsx</span>
-            </div>
-            <button
-              onClick={() => downloadReport(id)}
-              disabled={downloading.includes(id)}
-              className="btn-primary w-full justify-center"
-            >
-              <Download className="w-4 h-4" />
-              {downloading.includes(id) ? "Generating..." : "Download"}
-            </button>
-          </div>
-        ))}
-      </div>
-
-      <div className="bg-card border border-base rounded-2xl p-5 transition-colors">
-        <h4 className="font-semibold text-default mb-3 flex items-center gap-2">
-          <span className="w-5 h-5 bg-brand-100 dark:bg-brand-900/40 text-brand-600 rounded flex items-center justify-center text-xs">i</span>
-          About Exports
-        </h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs text-muted">
-          {REPORT_TYPES.map((report) => (
-            <div key={`${report.id}-about`}>
-              <strong className="text-default">{report.label}</strong> - {report.summary}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <CustomExportModal
+      {customExportOpen && <CustomExportModal
         customExportOpen={customExportOpen}
         customDownloading={customDownloading}
         allCustomExportFields={allCustomExportFields}
@@ -553,7 +520,7 @@ export default function ReportsPage() {
         toggleCategory={toggleCategory}
         toggleClientSelection={toggleClientSelection}
         downloadCustomExport={downloadCustomExport}
-      />
+      />}
     </div>
   );
 }

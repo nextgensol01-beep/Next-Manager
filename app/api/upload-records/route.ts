@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import UploadRecord from "@/models/UploadRecord";
 import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
+import { recordActivityEvent } from "@/lib/server/activity-events";
 
 const cleanUploadPayload = (body: Record<string, unknown>) => ({
   clientId: String(body.clientId || "").trim(),
@@ -50,6 +51,20 @@ export async function POST(req: NextRequest) {
     const result = await UploadRecord.collection.insertOne(payload);
     const record = await UploadRecord.collection.findOne({ _id: result.insertedId });
     await syncAnnualReturnStatus(payload.clientId, payload.financialYear);
+    const totalQuantity = payload.cat1 + payload.cat2 + payload.cat3 + payload.cat4;
+    await recordActivityEvent({
+      clientId: payload.clientId,
+      category: "compliance",
+      type: "cpcb_upload_recorded",
+      label: "CPCB Upload Recorded",
+      detail: `${payload.uploadType === "purchase" ? "Purchase" : "Sale"} data · ${totalQuantity.toLocaleString("en-IN")} MT`,
+      color: "violet",
+      badge: `${totalQuantity.toLocaleString("en-IN")} MT`,
+      financialYear: payload.financialYear,
+      entityId: String(result.insertedId),
+      entityType: "upload",
+      relatedEntityIds: [String(result.insertedId)],
+    }, session);
     return NextResponse.json(record, { status: 201 });
   } catch (error) {
     console.error("POST /api/upload-records:", error);

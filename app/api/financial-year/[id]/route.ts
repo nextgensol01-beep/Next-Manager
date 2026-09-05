@@ -5,6 +5,7 @@ import { connectDB } from "@/lib/mongoose";
 import FinancialYear from "@/models/FinancialYear";
 import DeletedRecord from "@/models/DeletedRecord";
 import type { ITargetEntry } from "@/models/FinancialYear";
+import { validateReviewedTargetImport } from "@/lib/server/financial-year-entry-validation";
 
 const VALID_TYPES = new Set(["RECYCLING", "EOL"]);
 const CAT_KEYS = ["1", "2", "3", "4"] as const;
@@ -57,7 +58,13 @@ export async function PUT(
   const body = await req.json();
   const { id } = await params;
 
+  if (body.targetImportReviewConfirmed === true) {
+    const validationError = validateReviewedTargetImport(body.targets);
+    if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
+  }
+
   let update = { ...body };
+  delete update.targetImportReviewConfirmed;
 
   if (Array.isArray(body.generated)) {
     const generated = normaliseEntries(body.generated);

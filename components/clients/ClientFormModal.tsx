@@ -20,7 +20,20 @@ import type {
   ClientCustomFieldValues,
 } from "@/lib/clientCustomFields";
 import { customFieldValueIsEmpty } from "@/lib/clientCustomFields";
-import { Wand2, RefreshCw, Lock, UserPlus, AlertCircle, X, Users, ClipboardList, CheckCircle2, Eye, EyeOff, ExternalLink } from "lucide-react";
+import { AlertCircle, Building2, Calendar, CheckCircle2, ClipboardList, ExternalLink, Eye, EyeOff, FileText, Hash, Lock, Mail, MapPin, Phone, RefreshCw, Shield, User, UserPlus, Users, Wand2, X } from "lucide-react";
+
+const CUSTOM_GROUP_ICON_COMPONENTS: Record<NonNullable<ClientCustomFieldGroupDefinition["icon"]>, React.ElementType> = {
+  fileText: FileText,
+  building: Building2,
+  hash: Hash,
+  user: User,
+  mapPin: MapPin,
+  phone: Phone,
+  mail: Mail,
+  calendar: Calendar,
+  lock: Lock,
+  shield: Shield,
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -207,6 +220,7 @@ function FieldRow({
 // ── InsetGroup ────────────────────────────────────────────────────────────────
 function InsetGroup({
   title,
+  icon,
   children,
   footer,
   animDelay = 0,
@@ -214,6 +228,7 @@ function InsetGroup({
   sectionRef,
 }: {
   title?: string;
+  icon?: React.ReactNode;
   children: React.ReactNode;
   footer?: string;
   animDelay?: number;
@@ -224,10 +239,11 @@ function InsetGroup({
     <div ref={sectionRef} className="cfm-section" style={{ animationDelay: `${animDelay}ms` }}>
       {title && (
         <p
-          className="text-[11px] font-semibold uppercase tracking-wider px-1 mb-1.5"
+          className="flex items-center gap-1.5 px-1 mb-1.5 text-[11px] font-semibold uppercase tracking-wider"
           style={{ color: "var(--color-text-faint)" }}
         >
-          {title}
+          {icon && <span className="inline-flex [&>svg]:h-3.5 [&>svg]:w-3.5">{icon}</span>}
+          <span>{title}</span>
         </p>
       )}
       <div
@@ -1341,12 +1357,18 @@ export default function ClientFormModal({
     .filter((group) => group.formTab === tab && (group.formSection || (tab === "portal" ? "portalCredentials" : "company")) === section)
     .sort((left, right) => (left.order || 0) - (right.order || 0))
     .map((group, index) => {
+      const GroupIcon = CUSTOM_GROUP_ICON_COMPONENTS[group.icon || "fileText"] || FileText;
       const groupFields = visibleCustomFields
         .filter((field) => field.groupId === group._id)
         .sort((left, right) => (left.order || 0) - (right.order || 0));
       if (groupFields.length === 0) return null;
       return (
-        <InsetGroup key={group._id || group.key} title={group.label} animDelay={140 + (index * 20)}>
+        <InsetGroup
+          key={group._id || group.key}
+          title={group.label}
+          icon={group.showIcon !== false ? <GroupIcon /> : undefined}
+          animDelay={140 + (index * 20)}
+        >
           {group.description && <p className="px-4 pt-3 text-[11px] leading-relaxed text-faint">{group.description}</p>}
           {renderCustomFieldRows(groupFields)}
         </InsetGroup>

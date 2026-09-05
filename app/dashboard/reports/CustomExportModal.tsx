@@ -20,6 +20,7 @@ import {
   type ClientOption,
   type CustomExportPreview,
 } from "./ReportsSupport";
+import ReportSelect from "./ReportSelect";
 
 type CustomExportModalProps = {
   customExportOpen: boolean;
@@ -458,18 +459,7 @@ export default function CustomExportModal({
                       <div className="space-y-4">
                 <label className="block">
                   <span className="text-xs text-muted mb-2 block">Financial Year</span>
-                  <select
-                    value={customFy}
-                    onChange={(e) => setCustomFy(e.target.value)}
-                    className="w-full rounded-xl border border-base bg-surface px-3 py-2.5 text-sm text-default outline-none focus:border-brand-500"
-                    disabled={customDownloading}
-                  >
-                    {FINANCIAL_YEARS.map((year) => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    ))}
-                  </select>
+                  <ReportSelect value={customFy} onChange={setCustomFy} ariaLabel="Custom export financial year" disabled={customDownloading} options={FINANCIAL_YEARS.map((year) => ({ value: year, label: year }))} buttonClassName="text-sm" />
                 </label>
     
                 <div>
@@ -639,18 +629,7 @@ export default function CustomExportModal({
     
                 <label className="block">
                   <span className="text-xs text-muted mb-2 block">Sort By</span>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as CustomExportSortBy)}
-                    className="w-full rounded-xl border border-base bg-surface px-3 py-2.5 text-sm text-default outline-none focus:border-brand-500"
-                    disabled={customDownloading}
-                  >
-                    {CUSTOM_EXPORT_SORT_OPTIONS.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <ReportSelect value={sortBy} onChange={(value) => setSortBy(value as CustomExportSortBy)} ariaLabel="Custom export sort" disabled={customDownloading} options={CUSTOM_EXPORT_SORT_OPTIONS.map((option) => ({ value: option.id, label: option.label }))} buttonClassName="text-sm" />
                   <div className="text-xs text-muted mt-2">
                     {CUSTOM_EXPORT_SORT_OPTIONS.find((option) => option.id === sortBy)?.description}
                   </div>

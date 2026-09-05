@@ -1,5 +1,5 @@
 "use client";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
 import Modal from "@/components/ui/Modal";
@@ -10,10 +10,11 @@ import TableWrapper from "@/components/ui/TableWrapper";
 import EmptyState from "@/components/ui/EmptyState";
 import FYTabBar from "@/components/ui/FYTabBar";
 import { FINANCIAL_YEARS } from "@/lib/utils";
-import { Plus, Pencil, Trash2, BarChart2, ChevronDown, Search, X, Recycle, Leaf } from "lucide-react";
+import { Plus, Pencil, Trash2, BarChart2, ChevronDown, Search, X, Recycle, Leaf, ScanText } from "lucide-react";
 import { useCache, invalidate } from "@/lib/useCache";
 import { useFinancialYearPreference, useFinancialYearState } from "@/app/providers";
 import FinancialYearInsightsModal from "./FinancialYearInsightsModal";
+import TargetScreenshotImporter from "./TargetScreenshotImporter";
 
 import {
   RemainingTooltip,
@@ -137,6 +138,9 @@ export default function FinancialYearPage() {
   const [expandedFY, setExpandedFY] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const targetDeepLinkHandled = useRef(false);
+  const [screenshotImporterOpen, setScreenshotImporterOpen] = useState(false);
+  const [screenshotImportConfirmed, setScreenshotImportConfirmed] = useState(false);
 
   // Form state - generated fields (PWP) + targets[] (PIBO)
   const [genForm, setGenForm] = useState(() => createEmptyGeneratedForm(effectiveFinancialYear));
@@ -145,7 +149,7 @@ export default function FinancialYearPage() {
 
   const { data: records, loading: recLoading, refetch: refetchRecords } =
     useCache<FYRecord[]>(`/api/financial-year?fy=${fy}`, { enabled: financialYearLoaded, initialData: [] });
-  const { data: clients } = useCache<Client[]>("/api/clients", { initialData: [] });
+  const { data: clients, loading: clientsLoading } = useCache<Client[]>("/api/clients", { initialData: [] });
 
   const clientMap = useMemo(() => new Map(clients.map((client) => [client.clientId, client])), [clients]);
   const getCategory = (id: string) => clientMap.get(id)?.category || "";
@@ -169,6 +173,7 @@ export default function FinancialYearPage() {
 
   const openAdd = () => {
     setEditRecord(null);
+    setScreenshotImportConfirmed(false);
     setGenForm(createEmptyGeneratedForm(fy));
     setGenerated([emptyTarget()]);
     setTargets([emptyTarget()]);
@@ -182,6 +187,7 @@ export default function FinancialYearPage() {
 
   const openEdit = (rec: FYRecord) => {
     setEditRecord(rec);
+    setScreenshotImportConfirmed(false);
     setGenForm({
       clientId: rec.clientId,
       financialYear: rec.financialYear,
@@ -205,6 +211,80 @@ export default function FinancialYearPage() {
 
     setModalOpen(true);
   };
+
+  const openScreenshotImporter = () => {
+    if (!genForm.clientId || !genForm.financialYear) {
+      toast.error("Select a client and financial year first.");
+      return;
+    }
+    setScreenshotImportConfirmed(false);
+    setModalOpen(false);
+    setScreenshotImporterOpen(true);
+  };
+
+  const closeScreenshotImporter = () => {
+    setScreenshotImporterOpen(false);
+    setModalOpen(true);
+  };
+
+  const confirmScreenshotTargets = (reviewedTargets: TargetEntry[]) => {
+    setTargets(reviewedTargets);
+    setScreenshotImportConfirmed(true);
+    setScreenshotImporterOpen(false);
+    setModalOpen(true);
+    toast.success("Verified screenshot values added to the form. Click Save Record to update the database.");
+  };
+
+  useEffect(() => {
+    if (!financialYearLoaded || targetDeepLinkHandled.current) return;
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("open") !== "targets") {
+      targetDeepLinkHandled.current = true;
+      return;
+    }
+
+    const linkedClientId = params.get("clientId")?.trim();
+    const linkedFy = params.get("fy")?.trim();
+    if (!linkedClientId || !linkedFy) {
+      targetDeepLinkHandled.current = true;
+      return;
+    }
+
+    if (linkedFy !== fy) {
+      setFy(linkedFy);
+      return;
+    }
+    if (recLoading || clientsLoading) return;
+
+    setSearch(linkedClientId);
+    const record = records.find((entry) => entry.clientId === linkedClientId && entry.financialYear === linkedFy);
+    if (record) {
+      setEditRecord(record);
+      setGenForm({ clientId: record.clientId, financialYear: record.financialYear });
+
+      const recordGenerated = activeEntries(record.generated ?? []);
+      setGenerated(recordGenerated.length > 0
+        ? recordGenerated.map((entry) => ({ ...entry }))
+        : ensureEditableRows(migratedLegacyEntries(record, "generated") as GeneratedEntry[]));
+
+      const recordTargets = activeEntries(record.targets ?? []);
+      setTargets(recordTargets.length > 0
+        ? recordTargets.map((entry) => ({ ...entry }))
+        : ensureEditableRows(migratedLegacyEntries(record, "targets")));
+      setModalOpen(true);
+    } else if (clientMap.has(linkedClientId)) {
+      setEditRecord(null);
+      setGenForm({ clientId: linkedClientId, financialYear: linkedFy });
+      setGenerated([emptyTarget()]);
+      setTargets([emptyTarget()]);
+      setModalOpen(true);
+    } else {
+      toast.error("The linked client could not be found.");
+    }
+
+    targetDeepLinkHandled.current = true;
+  }, [clientMap, clientsLoading, financialYearLoaded, fy, recLoading, records, setFy]);
 
   // -- Target row mutations ------------------------------------------------
 
@@ -296,6 +376,7 @@ export default function FinancialYearPage() {
         // Include targets[] - backend derives flat cat1Target...cat4Target
         payload.generated = [];
         payload.targets = targetsToSave;
+        if (screenshotImportConfirmed) payload.targetImportReviewConfirmed = true;
       }
 
       const url = editRecord ? `/api/financial-year/${editRecord._id}` : "/api/financial-year";
@@ -309,6 +390,7 @@ export default function FinancialYearPage() {
       toast.success(editRecord ? "Updated!" : "Saved!");
       invalidate("/api/financial-year", "/api/dashboard");
       setModalOpen(false);
+      setScreenshotImportConfirmed(false);
       refetchRecords();
     } catch {
       toast.error("Something went wrong saving the record");
@@ -728,7 +810,10 @@ export default function FinancialYearPage() {
               <select
                 className="input-field"
                 value={genForm.clientId}
-                onChange={(e) => setGenForm({ ...genForm, clientId: e.target.value })}
+                onChange={(e) => {
+                  setScreenshotImportConfirmed(false);
+                  setGenForm({ ...genForm, clientId: e.target.value });
+                }}
                 required
                 disabled={!!editRecord}
               >
@@ -745,7 +830,10 @@ export default function FinancialYearPage() {
               <select
                 className="input-field"
                 value={genForm.financialYear}
-                onChange={(e) => setGenForm({ ...genForm, financialYear: e.target.value })}
+                onChange={(e) => {
+                  setScreenshotImportConfirmed(false);
+                  setGenForm({ ...genForm, financialYear: e.target.value });
+                }}
                 required
               >
                 {FINANCIAL_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
@@ -833,14 +921,27 @@ export default function FinancialYearPage() {
           {/* -- PIBO: EPR Targets (multi-row with type) -- */}
           {selectedCat && !isPWP && !isSIMP && (
             <div>
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <p className="text-xs font-semibold text-muted uppercase tracking-wide">
                   EPR Targets - Category &amp; Type
                 </p>
-                <span className="text-[10px] text-faint">
-                  Same category can have both types
-                </span>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <span className="text-[10px] text-faint">Same category can have both types</span>
+                  <button
+                    type="button"
+                    onClick={openScreenshotImporter}
+                    className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-2.5 text-[11px] font-semibold text-brand-600 transition-colors hover:border-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20"
+                  >
+                    <ScanText className="h-3.5 w-3.5" /> Import from Screenshot
+                  </button>
+                </div>
               </div>
+
+              {screenshotImportConfirmed && (
+                <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
+                  Screenshot values were reviewed and added to this form. Nothing changes in the database until you click Save Record.
+                </div>
+              )}
 
               {/* Column headers */}
               <div className="grid grid-cols-[1fr_1.7fr_1fr_26px] items-center gap-2 px-2 mb-1.5
@@ -946,6 +1047,15 @@ export default function FinancialYearPage() {
           </div>
         </form>
       </Modal>
+
+      <TargetScreenshotImporter
+        open={screenshotImporterOpen}
+        clientId={genForm.clientId}
+        financialYear={genForm.financialYear}
+        existingTargets={targets}
+        onClose={closeScreenshotImporter}
+        onConfirm={confirmScreenshotTargets}
+      />
     </div>
   );
 }

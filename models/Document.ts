@@ -5,6 +5,8 @@ export interface IDocument extends MongoDoc {
   documentName: string;
   driveLink: string;
   category?: "compliance" | "financial" | "invoices" | "certificates" | "other";
+  documentKind: "general" | "epr-certificate" | "target-screenshot";
+  financialYear?: string;
   storageType: "legacy-link" | "google-drive";
   driveFileId?: string;
   driveRelativePath?: string;
@@ -27,6 +29,13 @@ const DocumentSchema = new Schema<IDocument>(
       enum: ["compliance", "financial", "invoices", "certificates", "other"],
       index: true,
     },
+    documentKind: {
+      type: String,
+      enum: ["general", "epr-certificate", "target-screenshot"],
+      default: "general",
+      index: true,
+    },
+    financialYear: { type: String, trim: true },
     storageType: { type: String, enum: ["legacy-link", "google-drive"], default: "legacy-link" },
     driveFileId: { type: String },
     driveRelativePath: { type: String },
@@ -45,6 +54,16 @@ const DocumentSchema = new Schema<IDocument>(
 );
 
 DocumentSchema.index({ clientId: 1, uploadedDate: -1 });
+DocumentSchema.index(
+  { clientId: 1, financialYear: 1, documentKind: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      documentKind: "target-screenshot",
+      financialYear: { $type: "string" },
+    },
+  }
+);
 
 export default mongoose.models.Document ||
   mongoose.model<IDocument>("Document", DocumentSchema);

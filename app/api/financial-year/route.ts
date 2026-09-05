@@ -4,7 +4,9 @@ import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import FinancialYear from "@/models/FinancialYear";
 import CreditTransaction from "@/models/CreditTransaction";
+import { recordActivityEvent } from "@/lib/server/activity-events";
 import type { ITargetEntry, IGeneratedEntry } from "@/models/FinancialYear";
+import { validateReviewedTargetImport } from "@/lib/server/financial-year-entry-validation";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -260,6 +262,11 @@ export async function POST(req: NextRequest) {
   await connectDB();
   const body = await req.json();
 
+  if (body.targetImportReviewConfirmed === true) {
+    const validationError = validateReviewedTargetImport(body.targets);
+    if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
+  }
+
   // Normalise generated[]
   const generated: IGeneratedEntry[] = Array.isArray(body.generated)
     ? normaliseEntries(body.generated)
@@ -292,11 +299,51 @@ export async function POST(req: NextRequest) {
     ...flatTgtRenamed,
   };
 
+  const previous = await FinancialYear.findOne({
+    clientId: payload.clientId,
+    financialYear: payload.financialYear,
+  }).lean() as Record<string, unknown> | null;
   const record = await FinancialYear.findOneAndUpdate(
     { clientId: payload.clientId, financialYear: payload.financialYear },
     payload,
     { upsert: true, new: true }
   );
+  const sumEntries = (entries: IGeneratedEntry[] | ITargetEntry[]) =>
+    entries.reduce((sum, entry) => sum + Number(entry.value || 0), 0);
+  const previousGenerated = Array.isArray(previous?.generated)
+    ? sumEntries(normaliseEntries(previous.generated as unknown[]))
+    : Number(previous?.cat1Generated || 0) + Number(previous?.cat2Generated || 0) +
+      Number(previous?.cat3Generated || 0) + Number(previous?.cat4Generated || 0);
+  const previousTarget = Array.isArray(previous?.targets)
+    ? sumEntries(normaliseEntries(previous.targets as unknown[]))
+    : Number(previous?.cat1Target || 0) + Number(previous?.cat2Target || 0) +
+      Number(previous?.cat3Target || 0) + Number(previous?.cat4Target || 0);
+  const nextGenerated = sumEntries(generated);
+  const nextTarget = sumEntries(targets);
+  const changes = [
+    previousGenerated !== nextGenerated
+      ? `generated credits ${previousGenerated.toLocaleString("en-IN")} to ${nextGenerated.toLocaleString("en-IN")} MT`
+      : "",
+    previousTarget !== nextTarget
+      ? `target ${previousTarget.toLocaleString("en-IN")} to ${nextTarget.toLocaleString("en-IN")} MT`
+      : "",
+  ].filter(Boolean);
+  await recordActivityEvent({
+    clientId: payload.clientId,
+    category: "compliance",
+    type: previous ? "fy_data_updated" : "fy_data_created",
+    label: previous ? "FY Data Updated" : "FY Data Added",
+    detail: changes.length ? changes.join(" · ") : `FY ${payload.financialYear} saved with no quantity change`,
+    color: previous ? "violet" : "amber",
+    badge: previous ? "Updated" : "Added",
+    badgeColor: previous
+      ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300"
+      : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+    financialYear: payload.financialYear,
+    entityId: String(record._id),
+    entityType: "financial-year",
+    relatedEntityIds: [String(record._id)],
+  }, session);
   return NextResponse.json(record, { status: 201 });
   } catch (error) {
     console.error("POST /api/financial-year:", error);

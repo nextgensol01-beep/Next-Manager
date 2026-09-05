@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Send } from "lucide-react";
+import { Send, UploadCloud } from "lucide-react";
 import { formatCurrency, FINANCIAL_YEARS, PAYMENT_MODES } from "@/lib/utils";
 import { CategoryBreakdown } from "@/components/ui/CategoryBreakdown";
 import Modal from "@/components/ui/Modal";
@@ -18,7 +18,13 @@ import {
 
 type SetState<T> = React.Dispatch<React.SetStateAction<T>>;
 
-type DocForm = { documentName: string; driveLink: string; category: DocumentCategory };
+type DocForm = {
+  documentName: string;
+  driveLink: string;
+  category: DocumentCategory;
+  documentKind: "general" | "epr-certificate" | "target-screenshot";
+  financialYear: string;
+};
 type BillingForm = {
   financialYear: string;
   govtCharges: string;
@@ -57,6 +63,7 @@ interface ClientProfileModalsProps {
   docForm: DocForm;
   setDocForm: SetState<DocForm>;
   closeDocumentModal: () => void;
+  openDocumentUpload: () => void;
   saveDocument: (event: React.FormEvent) => void;
   fyModal: boolean;
   fyForm: FyForm;
@@ -111,6 +118,7 @@ export default function ClientProfileModals({
   docForm,
   setDocForm,
   closeDocumentModal,
+  openDocumentUpload,
   saveDocument,
   fyModal,
   fyForm,
@@ -156,8 +164,17 @@ export default function ClientProfileModals({
 
   return (
     <>
-      <Modal open={docModal} onClose={closeDocumentModal} title={docModalMode === "edit" ? "Edit Document" : "Add Document"}>
+      <Modal open={docModal} onClose={closeDocumentModal} title={docModalMode === "edit" ? "Edit Document" : "Add Drive link"}>
         <form onSubmit={saveDocument} className="space-y-4">
+          {docModalMode === "create" && (
+            <button
+              type="button"
+              className="client-profile-secondary-button w-full justify-center"
+              onClick={openDocumentUpload}
+            >
+              <UploadCloud className="h-4 w-4" /> Upload a file instead
+            </button>
+          )}
           <div><label className="label">Document Name *</label><input className="input-field" value={docForm.documentName} onChange={(e) => setDocForm({ ...docForm, documentName: e.target.value })} required placeholder="e.g. Registration Certificate" /></div>
           <div>
             <label className="label">Website Category *</label>
@@ -169,9 +186,38 @@ export default function ClientProfileModals({
               <option value="other">Other</option>
             </select>
           </div>
+          <div>
+            <label className="label">Document purpose *</label>
+            <select
+              className="input-field"
+              value={docForm.documentKind}
+              onChange={(e) => setDocForm({
+                ...docForm,
+                documentKind: e.target.value as DocForm["documentKind"],
+              })}
+            >
+              <option value="general">Regular document</option>
+              <option value="epr-certificate">EPR certificate</option>
+              <option value="target-screenshot">Target screenshot</option>
+            </select>
+          </div>
+          {docForm.documentKind === "target-screenshot" && (
+            <div>
+              <label className="label">Target financial year *</label>
+              <select
+                className="input-field"
+                value={docForm.financialYear}
+                onChange={(e) => setDocForm({ ...docForm, financialYear: e.target.value })}
+                required
+              >
+                {FINANCIAL_YEARS.map((year) => <option key={year} value={year}>FY {year}</option>)}
+              </select>
+              <p className="mt-1 text-xs text-faint">This updates the target-screenshot requirement card for the selected FY.</p>
+            </div>
+          )}
           <div><label className="label">Google Drive Link *</label><input className="input-field" type="url" value={docForm.driveLink} onChange={(e) => setDocForm({ ...docForm, driveLink: e.target.value })} required placeholder="https://drive.google.com/..." /></div>
           <div className="flex gap-2 pt-2">
-            <button type="submit" className="btn-primary flex-1 justify-center" disabled={inlineSaving}>{inlineSaving ? "Saving..." : docModalMode === "edit" ? "Save Changes" : "Add Document"}</button>
+            <button type="submit" className="btn-primary flex-1 justify-center" disabled={inlineSaving}>{inlineSaving ? "Saving..." : docModalMode === "edit" ? "Save Changes" : "Add link"}</button>
             <button type="button" className="btn-secondary" onClick={closeDocumentModal}>Cancel</button>
           </div>
         </form>

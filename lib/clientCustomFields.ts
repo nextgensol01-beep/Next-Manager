@@ -13,6 +13,7 @@ export type ClientCustomFieldIcon =
   | "phone"
   | "mail"
   | "calendar"
+  | "lock"
   | "shield";
 
 export type ClientCustomFieldValue = string | boolean;
@@ -48,6 +49,7 @@ export type ClientCustomFieldGroupDefinition = {
   label: string;
   description?: string;
   icon?: ClientCustomFieldIcon;
+  showIcon?: boolean;
   active: boolean;
   applicableCategories?: string[];
   formTab: ClientCustomFieldFormTab;
@@ -112,6 +114,7 @@ export const CLIENT_CUSTOM_FIELD_ICONS: Array<{ id: ClientCustomFieldIcon; label
   { id: "phone", label: "Phone" },
   { id: "mail", label: "Email" },
   { id: "calendar", label: "Date" },
+  { id: "lock", label: "Password" },
   { id: "shield", label: "Credential" },
 ];
 
@@ -143,6 +146,7 @@ export const isClientCustomFieldIcon = (value: unknown): value is ClientCustomFi
   value === "phone" ||
   value === "mail" ||
   value === "calendar" ||
+  value === "lock" ||
   value === "shield";
 
 export function customFieldKeyFromLabel(label: string) {

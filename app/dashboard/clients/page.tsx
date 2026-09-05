@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import useSWRInfinite from "swr/infinite";
+import { motion, useMotionValue, useReducedMotion, useSpring, useTransform, type MotionStyle, type MotionValue } from "framer-motion";
 import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
@@ -99,6 +100,10 @@ interface ClientsPageResponse {
 }
 
 const CLIENT_PAGE_SIZE = 30;
+const CLIENT_HEADER_MORPH_START = 18;
+const CLIENT_HEADER_MORPH_END = 202;
+const CLIENT_HEADER_MORPH_RANGE = CLIENT_HEADER_MORPH_END - CLIENT_HEADER_MORPH_START;
+const CLIENT_HEADER_SNAP_SPLIT = 112;
 const CATEGORY_FILTERS = [
   { value: "all", label: "All Categories" },
   ...CATEGORIES.map((category) => ({ value: category, label: category })),
@@ -107,6 +112,11 @@ const STATE_FILTERS = [
   { value: "all", label: "All States" },
   ...STATES.map((state) => ({ value: state, label: state })),
 ];
+
+const useInterpolatedPx = (progress: MotionValue<number>, from: number, to: number) => useTransform(
+  progress,
+  (value) => `${from + (to - from) * value}px`
+);
 
 const ClientControlButton = React.forwardRef<HTMLButtonElement, LiquidGlassButtonProps>(
   function ClientControlButton({ children, className, ...props }, ref) {
@@ -527,6 +537,7 @@ function MorphingClientHeader({
   isMobileViewport,
   loading,
   loadedClients,
+  morphProgress,
   onAddClient,
   onSearchInputChange,
   openFilters,
@@ -553,6 +564,7 @@ function MorphingClientHeader({
   isMobileViewport: boolean;
   loading: boolean;
   loadedClients: number;
+  morphProgress: MotionValue<number>;
   onAddClient: () => void;
   onSearchInputChange: (value: string) => void;
   openFilters: () => void;
@@ -562,6 +574,65 @@ function MorphingClientHeader({
   setDraftStateFilter: (value: string) => void;
   totalClients: number;
 }) {
+  const headerRef = useRef<HTMLElement | null>(null);
+  const [headerWidth, setHeaderWidth] = useState(1480);
+
+  useLayoutEffect(() => {
+    const node = headerRef.current;
+    if (!node) return;
+
+    const updateWidth = () => setHeaderWidth(Math.max(320, Math.round(node.getBoundingClientRect().width)));
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const narrowDesktop = headerWidth <= 1080;
+  const compactHeaderWidth = Math.min(headerWidth, narrowDesktop ? 920 : 980);
+  const expandedSearchWidth = Math.min(680, Math.max(360, headerWidth * 0.5));
+  const compactSearchWidth = Math.min(
+    narrowDesktop ? 420 : 540,
+    Math.max(230, compactHeaderWidth - (narrowDesktop ? 330 : 420))
+  );
+  const compactSearchLeft = narrowDesktop ? 160 : 182;
+
+  const innerWidth = useInterpolatedPx(morphProgress, headerWidth, compactHeaderWidth);
+  const innerHeight = useInterpolatedPx(morphProgress, narrowDesktop ? 154 : 168, 70);
+  const innerRadius = useInterpolatedPx(morphProgress, 30, 35);
+  const copyLeft = useInterpolatedPx(morphProgress, narrowDesktop ? 20 : 24, 18);
+  const copyTop = useInterpolatedPx(morphProgress, narrowDesktop ? 20 : 24, 25);
+  const titleScale = useTransform(morphProgress, (value) => 1 - value * 0.5);
+  const searchTop = useInterpolatedPx(morphProgress, narrowDesktop ? 86 : 92, 13);
+  const searchWidth = useInterpolatedPx(morphProgress, expandedSearchWidth, compactSearchWidth);
+  const searchTranslateX = useInterpolatedPx(morphProgress, -expandedSearchWidth / 2, compactSearchLeft - compactHeaderWidth / 2);
+  const searchHeight = useInterpolatedPx(morphProgress, 52, 44);
+  const searchRadius = useInterpolatedPx(morphProgress, 20, 24);
+  const actionsTop = useInterpolatedPx(morphProgress, narrowDesktop ? 20 : 24, 14);
+  const actionsRight = useInterpolatedPx(morphProgress, narrowDesktop ? 20 : 24, 12);
+  const controlHeight = useInterpolatedPx(morphProgress, 46, 42);
+  const supportingOpacity = useTransform(morphProgress, [0, 0.46, 0.78, 1], [1, 0.8, 0, 0]);
+  const supportingShift = useInterpolatedPx(morphProgress, 0, -10);
+
+  const morphStyle = {
+    "--clients-morph-inner-width": innerWidth,
+    "--clients-morph-inner-height": innerHeight,
+    "--clients-morph-inner-radius": innerRadius,
+    "--clients-morph-copy-left": copyLeft,
+    "--clients-morph-copy-top": copyTop,
+    "--clients-morph-title-scale": titleScale,
+    "--clients-morph-search-top": searchTop,
+    "--clients-morph-search-width": searchWidth,
+    "--clients-morph-search-x": searchTranslateX,
+    "--clients-morph-search-height": searchHeight,
+    "--clients-morph-search-radius": searchRadius,
+    "--clients-morph-actions-top": actionsTop,
+    "--clients-morph-actions-right": actionsRight,
+    "--clients-morph-control-height": controlHeight,
+    "--clients-morph-support-opacity": supportingOpacity,
+    "--clients-morph-support-y": supportingShift,
+  } as unknown as MotionStyle;
+
   const totalLabel = loading
     ? "Loading clients"
     : `${totalClients.toLocaleString("en-IN")} ${isFiltered ? "matching" : "total"}`;
@@ -588,9 +659,12 @@ function MorphingClientHeader({
   );
 
   return (
-    <section
+    <motion.section
+      ref={headerRef}
       className="clients-floating-header"
       data-compact={compact ? "true" : "false"}
+      data-scroll-morph="true"
+      style={morphStyle}
       aria-label="Client directory controls"
     >
       <div className="clients-floating-header-inner">
@@ -673,7 +747,7 @@ function MorphingClientHeader({
           <Plus className="h-5 w-5" />
         </ClientControlButton>
       </div>
-    </section>
+    </motion.section>
   );
 }
 
@@ -972,6 +1046,15 @@ export default function ClientsPage() {
   const [draftRegisteredThisFyFilter, setDraftRegisteredThisFyFilter] = useState(initialRegisteredThisFy);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [toolbarCompact, setToolbarCompact] = useState(false);
+  const prefersReducedMotion = useReducedMotion();
+  const headerMorphTarget = useMotionValue(0);
+  const headerMorphProgress = useSpring(headerMorphTarget, {
+    stiffness: 390,
+    damping: 44,
+    mass: 0.82,
+    restDelta: 0.001,
+    restSpeed: 0.001,
+  });
   const [mobileActionsClient, setMobileActionsClient] = useState<Client | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleteClient, setDeleteClient] = useState<Client | null>(null);
@@ -979,6 +1062,11 @@ export default function ClientsPage() {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const filterPanelRef = useRef<HTMLDivElement | null>(null);
   const filterPopoverRef = useRef<HTMLDivElement | null>(null);
+  const filterOpenRef = useRef(filterOpen);
+
+  useEffect(() => {
+    filterOpenRef.current = filterOpen;
+  }, [filterOpen]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
@@ -1009,25 +1097,80 @@ export default function ClientsPage() {
     if (!scrollArea) return;
 
     let frame = 0;
-    const isNativeMobileScroll = () => window.matchMedia("(max-width: 767px)").matches;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    let releaseTimer: ReturnType<typeof setTimeout> | null = null;
+    let snapActive = false;
+    const mobileMedia = window.matchMedia("(max-width: 767px)");
+    const supportsNativeScrollEnd = "onscrollend" in scrollArea;
+    const isNativeMobileScroll = () => mobileMedia.matches;
     const getScrollTop = () => isNativeMobileScroll() ? window.scrollY : scrollArea.scrollTop;
-    const getThresholds = () => window.matchMedia("(max-width: 767px)").matches
-      ? { compactAt: 118, expandBelow: 34 }
-      : { compactAt: 190, expandBelow: 82 };
-    let thresholds = getThresholds();
-    let compact = getScrollTop() >= thresholds.compactAt;
-    let lastScrollTop = getScrollTop();
+    let compact = getScrollTop() >= CLIENT_HEADER_MORPH_END - 14;
     setToolbarCompact(compact);
 
-    const updateCompactState = () => {
+    const clearSettleTimer = () => {
+      if (!settleTimer) return;
+      clearTimeout(settleTimer);
+      settleTimer = null;
+    };
+
+    const releaseSnap = () => {
+      snapActive = false;
+      scrollArea.removeEventListener("scrollend", releaseSnap);
+      if (releaseTimer) {
+        clearTimeout(releaseTimer);
+        releaseTimer = null;
+      }
+    };
+
+    const settleMorphingHeader = () => {
+      settleTimer = null;
+      if (snapActive || filterOpenRef.current || isNativeMobileScroll()) return;
+
+      const currentScrollTop = scrollArea.scrollTop;
+
+      // Settle only while the header itself is morphing. Scroll positions
+      // below the transition continue to behave like ordinary page scroll.
+      if (currentScrollTop <= 1.5 || currentScrollTop >= CLIENT_HEADER_MORPH_END - 1.5) return;
+
+      const targetScrollTop = currentScrollTop <= CLIENT_HEADER_SNAP_SPLIT
+        ? 0
+        : CLIENT_HEADER_MORPH_END;
+
+      snapActive = true;
+      scrollArea.addEventListener("scrollend", releaseSnap, { once: true });
+      scrollArea.scrollTo({
+        top: targetScrollTop,
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+      });
+
+      if (prefersReducedMotion) {
+        releaseSnap();
+      } else {
+        releaseTimer = setTimeout(releaseSnap, 900);
+      }
+    };
+
+    const scheduleHeaderSettle = () => {
+      if (snapActive || isNativeMobileScroll()) return;
+      clearSettleTimer();
+      settleTimer = setTimeout(settleMorphingHeader, 120);
+    };
+
+    const updateMorphState = () => {
       frame = 0;
-      thresholds = getThresholds();
       const nextScrollTop = getScrollTop();
-      const scrollingDown = nextScrollTop >= lastScrollTop;
-      lastScrollTop = nextScrollTop;
+      const mobile = isNativeMobileScroll();
+      const rawProgress = mobile
+        ? (nextScrollTop >= 118 ? 1 : nextScrollTop <= 34 ? 0 : compact ? 1 : 0)
+        : Math.max(0, Math.min(1, (nextScrollTop - CLIENT_HEADER_MORPH_START) / CLIENT_HEADER_MORPH_RANGE));
+      const nextProgress = prefersReducedMotion ? (rawProgress >= 0.5 ? 1 : 0) : rawProgress;
+      if (Math.abs(headerMorphTarget.get() - nextProgress) > 0.001) {
+        headerMorphTarget.set(nextProgress);
+      }
+
       const nextCompact = compact
-        ? !(nextScrollTop <= thresholds.expandBelow && !scrollingDown)
-        : nextScrollTop >= thresholds.compactAt && scrollingDown;
+        ? nextProgress > 0.08
+        : nextProgress >= 0.94;
 
       if (nextCompact !== compact) {
         compact = nextCompact;
@@ -1035,21 +1178,48 @@ export default function ClientsPage() {
       }
     };
     const handleScroll = () => {
+      if (!frame) {
+        frame = window.requestAnimationFrame(updateMorphState);
+      }
+      scheduleHeaderSettle();
+    };
+    const handleResize = () => {
+      clearSettleTimer();
       if (frame) return;
-      frame = window.requestAnimationFrame(updateCompactState);
+      frame = window.requestAnimationFrame(updateMorphState);
+    };
+    const handleScrollEnd = () => {
+      clearSettleTimer();
+      if (!snapActive) settleMorphingHeader();
+    };
+    const handleDirectInput = () => {
+      clearSettleTimer();
+      if (snapActive) releaseSnap();
     };
 
-    updateCompactState();
+    updateMorphState();
     scrollArea.addEventListener("scroll", handleScroll, { passive: true });
+    if (supportsNativeScrollEnd) {
+      scrollArea.addEventListener("scrollend", handleScrollEnd);
+    }
     window.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("resize", handleScroll, { passive: true });
+    window.addEventListener("resize", handleResize, { passive: true });
+    mobileMedia.addEventListener("change", handleResize);
+    scrollArea.addEventListener("wheel", handleDirectInput, { passive: true });
+    scrollArea.addEventListener("touchstart", handleDirectInput, { passive: true });
     return () => {
+      clearSettleTimer();
+      releaseSnap();
       scrollArea.removeEventListener("scroll", handleScroll);
+      scrollArea.removeEventListener("scrollend", handleScrollEnd);
       window.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("resize", handleScroll);
+      window.removeEventListener("resize", handleResize);
+      mobileMedia.removeEventListener("change", handleResize);
+      scrollArea.removeEventListener("wheel", handleDirectInput);
+      scrollArea.removeEventListener("touchstart", handleDirectInput);
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [headerMorphTarget, prefersReducedMotion]);
 
   const { data: customFieldDefinitions } = useCache<ClientCustomFieldDefinition[]>(
     "/api/client-custom-fields",
@@ -1515,6 +1685,7 @@ export default function ClientsPage() {
           isMobileViewport={isMobileViewport}
           loading={loading}
           loadedClients={clients.length}
+          morphProgress={headerMorphProgress}
           onAddClient={openAdd}
           onSearchInputChange={setSearchInput}
           openFilters={openFilters}

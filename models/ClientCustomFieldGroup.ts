@@ -12,6 +12,7 @@ export interface IClientCustomFieldGroup extends Document {
   label: string;
   description: string;
   icon: ClientCustomFieldIcon;
+  showIcon: boolean;
   active: boolean;
   applicableCategories: string[];
   formTab: ClientCustomFieldFormTab;
@@ -32,9 +33,10 @@ const ClientCustomFieldGroupSchema = new Schema<IClientCustomFieldGroup>(
     description: { type: String, default: "", trim: true },
     icon: {
       type: String,
-      enum: ["fileText", "building", "hash", "user", "mapPin", "phone", "mail", "calendar", "shield"],
+      enum: ["fileText", "building", "hash", "user", "mapPin", "phone", "mail", "calendar", "lock", "shield"],
       default: "fileText",
     },
+    showIcon: { type: Boolean, default: true },
     active: { type: Boolean, default: true },
     applicableCategories: { type: [String], default: [] },
     formTab: { type: String, enum: ["basic", "portal"], default: "basic" },
@@ -50,7 +52,13 @@ const ClientCustomFieldGroupSchema = new Schema<IClientCustomFieldGroup>(
 
 ClientCustomFieldGroupSchema.index({ active: 1, order: 1 });
 
-if (mongoose.models.ClientCustomFieldGroup && !mongoose.models.ClientCustomFieldGroup.schema.path("formSection")) {
+const cachedClientCustomFieldGroup = mongoose.models.ClientCustomFieldGroup;
+const cachedClientCustomFieldGroupIcon = cachedClientCustomFieldGroup?.schema.path("icon") as { enumValues?: string[] } | undefined;
+if (cachedClientCustomFieldGroup && (
+  !cachedClientCustomFieldGroup.schema.path("formSection") ||
+  !cachedClientCustomFieldGroup.schema.path("showIcon") ||
+  !cachedClientCustomFieldGroupIcon?.enumValues?.includes("lock")
+)) {
   delete mongoose.models.ClientCustomFieldGroup;
 }
 

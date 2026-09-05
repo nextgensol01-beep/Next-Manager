@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
       label,
       description: typeof body.description === "string" ? body.description.trim() : "",
       icon: isClientCustomFieldIcon(body.icon) ? body.icon : "fileText",
+      showIcon: body.showIcon !== false,
       active: body.active !== false,
       applicableCategories: cleanCategories(body.applicableCategories),
       formTab: isClientCustomFieldFormTab(body.formTab) ? body.formTab : "basic",

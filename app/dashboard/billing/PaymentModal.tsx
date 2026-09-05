@@ -10,6 +10,7 @@ type PaymentModalTarget = false | "advance" | Billing;
 
 type PaymentForm = {
   clientId: string;
+  billingId?: string;
   financialYear: string;
   paymentType: "billing" | "advance";
   amountPaid: string;
@@ -35,6 +36,7 @@ function formForTarget(target: PaymentModalTarget, fy: string): PaymentForm {
   if (target && target !== "advance") {
     return {
       clientId: target.clientId,
+      billingId: target._id,
       financialYear: target.financialYear,
       paymentType: "billing",
       amountPaid: "",
@@ -74,6 +76,7 @@ export default function PaymentModal({ target, clients, fy, effectiveFinancialYe
     setSaving(true);
     const rollback = onOptimisticPayment({
       clientId: form.clientId,
+      billingId: form.paymentType === "billing" ? form.billingId : undefined,
       financialYear: form.financialYear,
       amountPaid: Number(form.amountPaid),
       paymentType: form.paymentType,
@@ -117,7 +120,7 @@ export default function PaymentModal({ target, clients, fy, effectiveFinancialYe
           <p className="text-xs text-faint mt-1">
             {isAdvancePayment
               ? "Advance payments stay separate until you apply them to a billing record."
-              : "Billing payments are applied against the selected client and financial year."}
+              : "This payment is applied directly to the selected billing, regardless of when it is received."}
           </p>
         </div>
         {isAdvancePayment ? (

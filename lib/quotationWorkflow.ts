@@ -1,5 +1,4 @@
 import type { Types } from "mongoose";
-import Quotation from "@/models/Quotation";
 import {
   canChangeQuotationStatus,
   isTerminalQuotationStatus,
@@ -16,6 +15,9 @@ type MutableQuotation = {
   _id: Types.ObjectId | string;
   status: QuotationStatus;
   sentAt?: Date | null;
+  acceptedAt?: Date | null;
+  rejectedAt?: Date | null;
+  revisionRequestedAt?: Date | null;
   validTill?: Date | null;
   activities: ActivityEntry[];
 };
@@ -46,9 +48,13 @@ export function applyQuotationStatusChange(
   }
 
   quotation.status = nextStatus;
-  if (nextStatus === "Sent") quotation.sentAt = quotation.sentAt || new Date();
+  const changedAt = new Date();
+  if (nextStatus === "Sent") quotation.sentAt = quotation.sentAt || changedAt;
+  if (nextStatus === "Accepted") quotation.acceptedAt = quotation.acceptedAt || changedAt;
+  if (nextStatus === "Rejected") quotation.rejectedAt = quotation.rejectedAt || changedAt;
+  if (nextStatus === "RevisionRequested") quotation.revisionRequestedAt = quotation.revisionRequestedAt || changedAt;
   quotation.activities.push({
-    timestamp: new Date(),
+    timestamp: changedAt,
     action: `Status changed to ${nextStatus}`,
     detail: reason || `From: ${previousStatus}`,
   });
@@ -56,24 +62,9 @@ export function applyQuotationStatusChange(
 }
 
 export async function expireStaleQuotations(filter: Record<string, unknown> = {}) {
-  const now = new Date();
-  const staleQuotations = await Quotation.find({
-    ...filter,
-    status: { $in: ["Sent", "Finalized"] },
-    validTill: { $lt: now, $ne: null },
-  });
-
-  for (const quotation of staleQuotations) {
-    quotation.status = "Expired";
-    quotation.activities.push({
-      timestamp: now,
-      action: "Quotation expired",
-      detail: quotation.validTill
-        ? `Valid till ${quotation.validTill.toLocaleDateString("en-IN")}`
-        : "Validity period ended",
-    });
-    await quotation.save();
-  }
-
-  return staleQuotations.length;
+  // Retained as a compatibility hook for existing callers. Quotations are no
+  // longer changed automatically from a date: work can remain active across
+  // financial years and completion is represented by an explicit status.
+  void filter;
+  return 0;
 }

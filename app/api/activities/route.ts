@@ -28,9 +28,10 @@ type ActivityRecord = {
   badge?: string;
   badgeColor?: string;
   entityId?: string;
-  entityType?: "billing" | "payment" | "financial-year" | "annual-return" | "invoice" | "upload" | "quotation" | "document" | "email" | "trash";
+  entityType?: "client" | "billing" | "payment" | "financial-year" | "annual-return" | "invoice" | "upload" | "quotation" | "document" | "email" | "note" | "work-item" | "trash";
   recordType?: string;
   actionSearch?: string;
+  actorEmail?: string;
 };
 
 type ActivityRange = "7d" | "30d" | "year";
@@ -258,6 +259,7 @@ export async function GET(req: NextRequest) {
         entityType: event.entityType as ActivityRecord["entityType"] | undefined,
         recordType: event.recordType || undefined,
         actionSearch: event.actionSearch || undefined,
+        actorEmail: event.actorEmail || undefined,
       });
     });
 
@@ -303,17 +305,19 @@ export async function GET(req: NextRequest) {
       const fyRecord = fy as unknown as Record<string, unknown>;
       const financialYear = extractFinancialYear(fyRecord.financialYear);
       const totalTarget = (
-        Number(fyRecord.targetCat1 || 0) +
-        Number(fyRecord.targetCat2 || 0) +
-        Number(fyRecord.targetCat3 || 0) +
-        Number(fyRecord.targetCat4 || 0)
+        Number(fyRecord.cat1Target || fyRecord.targetCat1 || 0) +
+        Number(fyRecord.cat2Target || fyRecord.targetCat2 || 0) +
+        Number(fyRecord.cat3Target || fyRecord.targetCat3 || 0) +
+        Number(fyRecord.cat4Target || fyRecord.targetCat4 || 0)
       ) || Number(fyRecord.targetAmount || 0);
       const totalCredits = (
-        Number(fyRecord.creditsCat1 || 0) +
-        Number(fyRecord.creditsCat2 || 0) +
-        Number(fyRecord.creditsCat3 || 0) +
-        Number(fyRecord.creditsCat4 || 0)
+        Number(fyRecord.cat1Generated || fyRecord.creditsCat1 || 0) +
+        Number(fyRecord.cat2Generated || fyRecord.creditsCat2 || 0) +
+        Number(fyRecord.cat3Generated || fyRecord.creditsCat3 || 0) +
+        Number(fyRecord.cat4Generated || fyRecord.creditsCat4 || 0)
       ) || Number(fyRecord.availableCredits || 0);
+
+      if (persistedRelatedIds.has(String(fyRecord._id || ""))) return;
 
       if (totalTarget > 0) {
         activities.push({
@@ -322,7 +326,7 @@ export async function GET(req: NextRequest) {
           type: "target_set",
           label: "Target Set",
           detail: `${totalTarget.toLocaleString("en-IN")} units${financialYear ? ` - FY ${financialYear}` : ""}`,
-          date: readDate(fyRecord.createdAt || fyRecord.updatedAt),
+          date: readDate(fyRecord.updatedAt || fyRecord.createdAt),
           color: "amber",
           financialYear,
           badge: financialYear,
@@ -339,7 +343,7 @@ export async function GET(req: NextRequest) {
           type: "credits_set",
           label: "Credits Allocated",
           detail: `${totalCredits.toLocaleString("en-IN")} units${financialYear ? ` - FY ${financialYear}` : ""}`,
-          date: readDate(fyRecord.createdAt || fyRecord.updatedAt),
+          date: readDate(fyRecord.updatedAt || fyRecord.createdAt),
           color: "brand",
           financialYear,
           badge: financialYear,
@@ -352,6 +356,7 @@ export async function GET(req: NextRequest) {
 
     annualReturns.forEach((record) => {
       const item = record as unknown as Record<string, unknown>;
+      if (persistedRelatedIds.has(String(item._id || ""))) return;
       const financialYear = extractFinancialYear(item.financialYear);
       const status = typeof item.status === "string" ? item.status : "Not Started";
       activities.push({
@@ -374,6 +379,7 @@ export async function GET(req: NextRequest) {
 
     invoices.forEach((record) => {
       const item = record as unknown as Record<string, unknown>;
+      if (persistedRelatedIds.has(String(item._id || ""))) return;
       const financialYear = extractFinancialYear(item.financialYear);
       const invoiceType = item.invoiceType === "purchase" ? "Purchase" : "Sale";
       const status = typeof item.status === "string" ? item.status : "Received";
@@ -395,6 +401,7 @@ export async function GET(req: NextRequest) {
 
     uploads.forEach((record) => {
       const item = record as unknown as Record<string, unknown>;
+      if (persistedRelatedIds.has(String(item._id || ""))) return;
       const financialYear = extractFinancialYear(item.financialYear);
       const quantity = sumCreditCategories(item);
       activities.push({
@@ -461,6 +468,7 @@ export async function GET(req: NextRequest) {
 
     billings.forEach((billing) => {
       const billingRecord = billing as unknown as Record<string, unknown>;
+      if (persistedRelatedIds.has(String(billingRecord._id || ""))) return;
       const financialYear = extractFinancialYear(billingRecord.financialYear);
       const paymentStatus = typeof billingRecord.paymentStatus === "string" ? billingRecord.paymentStatus : "";
       activities.push({
@@ -485,6 +493,7 @@ export async function GET(req: NextRequest) {
 
     payments.forEach((payment) => {
       const paymentRecord = payment as unknown as Record<string, unknown>;
+      if (persistedRelatedIds.has(String(paymentRecord._id || ""))) return;
       const financialYear = extractFinancialYear(paymentRecord.financialYear);
       const isAdvancePayment = paymentRecord.paymentType === "advance";
       activities.push({
@@ -493,7 +502,7 @@ export async function GET(req: NextRequest) {
         type: isAdvancePayment ? "advance_payment_received" : "payment_received",
         label: isAdvancePayment ? "Advance Payment Received" : "Payment Received",
         detail: `${isAdvancePayment ? "Advance of " : ""}${formatAmount(paymentRecord.amountPaid)} via ${String(paymentRecord.paymentMode || "-")}${paymentRecord.referenceNumber ? ` · Ref: ${String(paymentRecord.referenceNumber)}` : ""}`,
-        date: readDate(paymentRecord.paymentDate || paymentRecord.createdAt),
+        date: readDate(paymentRecord.updatedAt || paymentRecord.paymentDate || paymentRecord.createdAt),
         color: "emerald",
         financialYear,
         badge: financialYear,
@@ -593,6 +602,10 @@ export async function GET(req: NextRequest) {
 
     activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     const latestEmailActivity = activities.find((activity) => activity.category === "communications") || null;
+    const latestActivity = applyActivityFilters(activities, {
+      financialYear,
+      range,
+    })[0] || null;
     const filteredActivities = applyActivityFilters(activities, { category, financialYear, range });
     const items = filteredActivities.slice(offset, offset + limit);
 
@@ -602,6 +615,7 @@ export async function GET(req: NextRequest) {
       hasMore: offset + items.length < filteredActivities.length,
       nextOffset: offset + items.length,
       latestEmailActivity,
+      latestActivity,
     });
   } catch (error) {
     console.error("GET /api/activities:", error);

@@ -21,6 +21,7 @@ interface LiquidGlassDropdownProps {
   disabled?: boolean;
   icon?: React.ReactNode;
   portal?: boolean;
+  variant?: "glass" | "soft";
 }
 
 export default function LiquidGlassDropdown({
@@ -31,6 +32,7 @@ export default function LiquidGlassDropdown({
   onChange,
   options,
   portal = false,
+  variant = "glass",
   value,
 }: LiquidGlassDropdownProps) {
   const listboxId = useId();
@@ -197,6 +199,8 @@ export default function LiquidGlassDropdown({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -5, scale: 0.982 }}
       transition={reducedMotion ? { duration: 0.1 } : { type: "spring", stiffness: 420, damping: 30, mass: 0.62 }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
       style={{
         transformOrigin: "top center",
         ...(portal ? menuPosition ?? { position: "fixed", visibility: "hidden" } : null),
@@ -257,7 +261,10 @@ export default function LiquidGlassDropdown({
         onPointerLeave={triggerLight.onPointerLeave}
         onPointerMove={triggerLight.onPointerMove}
         className={cn(
-          "liquid-glass-control liquid-glass-trigger surrounding-light flex h-11 w-full items-center gap-2.5 rounded-[18px] px-3.5 text-left text-sm font-medium text-default",
+          "flex h-11 w-full items-center gap-2.5 rounded-[18px] px-3.5 text-left text-sm font-medium text-default transition-all duration-200",
+          variant === "glass"
+            ? "liquid-glass-control liquid-glass-trigger surrounding-light"
+            : "border border-black/[0.08] bg-white/[0.58] hover:border-black/[0.14] hover:bg-white/[0.78] dark:border-white/[0.10] dark:bg-white/[0.055] dark:hover:border-white/[0.18] dark:hover:bg-white/[0.085]",
           "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
           "disabled:pointer-events-none disabled:opacity-50",
           open && "border-brand-400 shadow-[0_0_0_1px_rgba(0,113,227,0.18),0_0_24px_rgba(0,113,227,0.12)]"

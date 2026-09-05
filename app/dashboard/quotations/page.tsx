@@ -12,6 +12,7 @@ import { FINANCIAL_YEARS, formatCurrency } from "@/lib/utils";
 import { useFinancialYearPreference } from "@/app/providers";
 import { canCreateQuotationEmailDraft, canCreateQuotationRevision, type QuotationStatus } from "@/lib/quotationRules";
 import Modal from "@/components/ui/Modal";
+import LiquidGlassDropdown from "@/components/ui/LiquidGlassDropdown";
 import { QUOTATION_STATUS_CONFIG, QuotationStatusPill } from "@/components/quotations/QuotationStatus";
 
 interface QuotationRow {
@@ -35,6 +36,9 @@ const QUICK_FILTERS = [
   { key: "Accepted", label: "Accepted", icon: BadgeCheck },
   { key: "RevisionRequested", label: "Needs Revision", mobileLabel: "Revision", icon: RefreshCw },
 ];
+
+const FINANCIAL_YEAR_OPTIONS = [...FINANCIAL_YEARS].reverse().map(value => ({ label: value, value }));
+const FINANCIAL_YEAR_FILTER_OPTIONS = [{ label: "All Years", value: "all" }, ...FINANCIAL_YEAR_OPTIONS];
 
 export default function QuotationsPage() {
   const router = useRouter();
@@ -217,15 +221,6 @@ export default function QuotationsPage() {
   const accepted = quotations.filter(q => q.status === "Accepted").length;
   const totalValue = quotations.filter(q => q.status === "Accepted").reduce((s, q) => s + q.grandTotal, 0);
 
-  function formatDaysLeft(validTill?: string) {
-    if (!validTill) return null;
-    const days = Math.ceil((new Date(validTill).getTime() - Date.now()) / 86400000);
-    if (days < 0) return null;
-    if (days === 0) return <span className="text-xs text-red-500 font-medium">Expires today</span>;
-    if (days <= 5) return <span className="text-xs text-amber-500 font-medium">Expires in {days}d</span>;
-    return null;
-  }
-
   const clearFilters = () => {
     setSearch("");
     setDebouncedSearch("");
@@ -326,9 +321,7 @@ export default function QuotationsPage() {
                 </div>
               )}
             </div>
-            <select className="input-field h-11 sm:w-44" value={newFy} onChange={e => setNewFy(e.target.value)}>
-              {[...FINANCIAL_YEARS].reverse().map(y => <option key={y}>{y}</option>)}
-            </select>
+            <LiquidGlassDropdown className="sm:w-44" label="Financial Year" options={FINANCIAL_YEAR_OPTIONS} value={newFy} onChange={setNewFy} portal />
             <div className="grid grid-cols-2 gap-2 sm:flex">
               <button onClick={createQuotation} disabled={creating} className="btn-primary h-11 justify-center px-5">
                 {creating ? "Creating..." : "Create"}
@@ -389,18 +382,15 @@ export default function QuotationsPage() {
           </div>
 
           {/* FY Filter */}
-          <div className="relative">
-            <Filter className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-faint" />
-            <select
-              className="input-field h-11 w-full text-sm sm:h-9"
-              style={{ paddingLeft: "2.25rem", paddingRight: "2rem" }}
-              value={fyFilter}
-              onChange={e => setFyFilter(e.target.value)}
-            >
-              <option value="all">All Years</option>
-              {[...FINANCIAL_YEARS].reverse().map(y => <option key={y}>{y}</option>)}
-            </select>
-          </div>
+          <LiquidGlassDropdown
+            className="[&>button]:h-11 sm:[&>button]:h-9 sm:[&>button]:rounded-xl"
+            label="Filter by financial year"
+            options={FINANCIAL_YEAR_FILTER_OPTIONS}
+            value={fyFilter}
+            onChange={setFyFilter}
+            icon={<Filter className="h-3.5 w-3.5" />}
+            portal
+          />
         </div>
       </div>
 
@@ -468,19 +458,12 @@ export default function QuotationsPage() {
                     <span className="rounded-full border border-base bg-card px-2.5 py-1 text-[11px] font-mono font-medium text-muted">
                       Rev {q.currentRevisionNumber}
                     </span>
-                    {formatDaysLeft(q.validTill)}
                   </div>
 
-                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3 rounded-2xl border border-base bg-card/80 p-3">
+                  <div className="mt-3 rounded-2xl border border-base bg-card/80 p-3">
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold uppercase text-muted">Amount</p>
                       <p className="mt-0.5 truncate text-lg font-bold text-default">{formatCurrency(q.grandTotal)}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[10px] font-semibold uppercase text-muted">Valid Till</p>
-                      <p className="mt-0.5 text-xs font-medium text-default">
-                        {q.validTill ? new Date(q.validTill).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "-"}
-                      </p>
                     </div>
                   </div>
 
@@ -498,7 +481,7 @@ export default function QuotationsPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-black/[0.05] dark:border-white/[0.05]">
-                  {["Quote No.", "Client", "FY", "Amount", "Status", "Rev", "Valid Till", ""].map((h, i) => (
+                  {["Quote No.", "Client", "FY", "Amount", "Status", "Rev", ""].map((h, i) => (
                     <th key={h || `col-${i}`} className="text-left px-5 py-3.5 text-xs font-semibold text-muted uppercase tracking-wide whitespace-nowrap">
                       {h}
                     </th>
@@ -539,14 +522,6 @@ export default function QuotationsPage() {
                       <span className="text-xs font-mono bg-surface border border-base px-2 py-0.5 rounded-md text-muted">
                         Rev {q.currentRevisionNumber}
                       </span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-xs text-muted">
-                          {q.validTill ? new Date(q.validTill).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "-"}
-                        </span>
-                        {formatDaysLeft(q.validTill)}
-                      </div>
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-1 justify-end">

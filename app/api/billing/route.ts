@@ -6,6 +6,7 @@ import { connectDB } from "@/lib/mongoose";
 import Billing from "@/models/Billing";
 import Payment from "@/models/Payment";
 import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
+import { recordActivityEvent } from "@/lib/server/activity-events";
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -200,6 +201,19 @@ export async function POST(req: NextRequest) {
       );
       const full = await fetchBillingAggregated(existing._id);
       await syncAnnualReturnStatus(body.clientId, body.financialYear);
+      await recordActivityEvent({
+        clientId: body.clientId,
+        category: "financial",
+        type: "billing_updated",
+        label: "Billing Updated",
+        detail: `Total changed from INR ${Number(existing.totalAmount || 0).toLocaleString("en-IN")} to INR ${Number(body.totalAmount || 0).toLocaleString("en-IN")}`,
+        color: "violet",
+        badge: "Updated",
+        financialYear: body.financialYear,
+        entityId: String(existing._id),
+        entityType: "billing",
+        relatedEntityIds: [String(existing._id)],
+      }, session);
       return NextResponse.json(full);
     }
 
@@ -207,6 +221,19 @@ export async function POST(req: NextRequest) {
     const result = await Billing.collection.insertOne(insertedBilling);
     const full = await fetchBillingAggregated(result.insertedId);
     await syncAnnualReturnStatus(body.clientId, body.financialYear);
+    await recordActivityEvent({
+      clientId: body.clientId,
+      category: "financial",
+      type: "billing_created",
+      label: "Billing Created",
+      detail: `Total INR ${Number(body.totalAmount || 0).toLocaleString("en-IN")}`,
+      color: "brand",
+      badge: "Created",
+      financialYear: body.financialYear,
+      entityId: String(result.insertedId),
+      entityType: "billing",
+      relatedEntityIds: [String(result.insertedId)],
+    }, session);
     return NextResponse.json(full, { status: 201 });
   } catch (error) {
     console.error("POST /api/billing:", error);

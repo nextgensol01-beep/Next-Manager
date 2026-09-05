@@ -14,9 +14,12 @@ import {
 import {
   ArrowLeft,
   Calendar,
+  CheckCircle2,
   ChevronDown,
+  CircleAlert,
   ExternalLink,
   FileText,
+  Image as ImageIcon,
   Lock,
   Mail,
   MapPin,
@@ -29,18 +32,20 @@ import {
   Shield,
   Smartphone,
   StickyNote,
+  Target,
   Trash2,
   UploadCloud,
   User,
 } from "lucide-react";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
-import { formatDate } from "@/lib/utils";
+import { FINANCIAL_YEARS, formatDate } from "@/lib/utils";
 import {
   CopyButton,
   formatDateTime,
   getContactEmails,
   getContactPhones,
   type Client,
+  type ClientNote,
   type Contact,
   type Document,
 } from "./ClientProfileSupport";
@@ -82,7 +87,7 @@ export type ClientProfileCustomFieldGroup = {
   id: string;
   label: string;
   description?: string;
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   profileDisplay: "subsection" | "card";
   profileCluster: "company" | "contact" | "compliance" | "additional";
   collapsible?: boolean;
@@ -332,6 +337,7 @@ type CompanyOverviewProps = {
 
 type DocumentsSectionProps = {
   documents: Document[];
+  showRequirementSummary: boolean;
   open: boolean;
   busyAction: string | null;
   hasLinkedContacts: boolean;
@@ -343,12 +349,17 @@ type DocumentsSectionProps = {
   onDelete: (document: Document) => void;
   onMigrate: (document: Document) => void;
   onLinkContact: () => void;
+  selectedFy: string;
+  hasEprCertificate: boolean;
+  targetDataAdded: boolean;
+  hasTargetScreenshot: boolean;
+  onUploadTargetScreenshot: () => void;
 };
 
 type NotesSectionProps = {
-  notes?: string;
-  updatedAt: string;
-  onEditBilling: () => void;
+  notes: ClientNote[];
+  onAdd: () => void;
+  onDelete: (note: ClientNote) => void;
 };
 
 type EmptyProfileStateProps = {
@@ -384,12 +395,14 @@ const actionToneClass = (tone: ClientProfileQuickAction["tone"] = "neutral") => 
 function CollapsibleHeader({
   title,
   subtitle,
+  icon,
   open,
   onToggle,
   trailing,
 }: {
   title: string;
   subtitle?: string;
+  icon?: React.ReactNode;
   open: boolean;
   onToggle: () => void;
   trailing?: React.ReactNode;
@@ -400,6 +413,7 @@ function CollapsibleHeader({
         <motion.span animate={{ rotate: open ? 0 : -90 }} transition={{ duration: 0.16 }}>
           <ChevronDown className="h-4 w-4" />
         </motion.span>
+        {icon && <span className="client-profile-field-icon">{icon}</span>}
         <span className="min-w-0">
           <span className="block text-sm font-semibold text-default">{title}</span>
           {subtitle && <span className="block text-xs text-faint">{subtitle}</span>}
@@ -1161,13 +1175,17 @@ export function CompanyOverview({
     const fields = customFields.filter((field) => field.groupId === group.id);
     if (fields.length === 0) return null;
     const open = group.collapsible === false ? true : (openCustomGroups[group.id] ?? group.defaultExpanded !== false);
-    const content = <div className="client-profile-field-grid">{renderCustomFields(fields)}</div>;
+    const content = (
+      <div className={`client-profile-field-grid ${asCard ? "" : "client-profile-custom-group-fields"}`}>
+        {renderCustomFields(fields)}
+      </div>
+    );
     if (asCard) {
       return (
         <section key={group.id} className="client-profile-card">
           <div className="client-profile-card-header">
             <div className="flex min-w-0 items-center gap-3">
-              <span className="client-profile-field-icon">{group.icon}</span>
+              {group.icon && <span className="client-profile-field-icon">{group.icon}</span>}
               <div className="min-w-0"><p className="client-profile-kicker">Custom section</p><h2>{group.label}</h2>{group.description && <p className="text-xs text-faint">{group.description}</p>}</div>
             </div>
             {group.collapsible !== false && (
@@ -1182,7 +1200,7 @@ export function CompanyOverview({
     }
     return (
       <div key={group.id} className="client-profile-subsection">
-        <CollapsibleHeader title={group.label} subtitle={group.description} open={open} onToggle={() => group.collapsible !== false && setOpenCustomGroups((current) => ({ ...current, [group.id]: !open }))} />
+        <CollapsibleHeader icon={group.icon} title={group.label} subtitle={group.description} open={open} onToggle={() => group.collapsible !== false && setOpenCustomGroups((current) => ({ ...current, [group.id]: !open }))} />
         <AnimatePresence initial={false}>{open && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">{content}</motion.div>}</AnimatePresence>
       </div>
     );
@@ -1432,8 +1450,159 @@ export function CompanyOverview({
   );
 }
 
+type DocumentCardProps = Pick<
+  DocumentsSectionProps,
+  "busyAction" | "canManageDocuments" | "onEdit" | "onDelete" | "onMigrate"
+> & {
+  document: Document;
+};
+
+function DocumentCard({
+  document,
+  busyAction,
+  canManageDocuments,
+  onEdit,
+  onDelete,
+  onMigrate,
+}: DocumentCardProps) {
+  return (
+    <article className="client-profile-document-card">
+      <div className="client-profile-document-preview">
+        <FileText className="h-5 w-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-default">{document.documentName}</p>
+        <div className="client-profile-document-meta">
+          <span>{document.category || "Other"}</span>
+          {document.documentKind === "target-screenshot" && document.financialYear ? <span>FY {document.financialYear}</span> : null}
+          {document.fileSize ? <span>{document.fileSize < 1048576 ? `${Math.round(document.fileSize / 1024)} KB` : `${(document.fileSize / 1048576).toFixed(1)} MB`}</span> : null}
+          <span>{formatDate(document.uploadedDate)}</span>
+        </div>
+        {document.driveRelativePath && document.driveRelativePath !== document.documentName && (
+          <p className="client-profile-document-path" title={document.driveRelativePath}>{document.driveRelativePath}</p>
+        )}
+      </div>
+      <div className="client-profile-document-actions">
+        {canManageDocuments && document.storageType !== "google-drive" && (
+          <button
+            type="button"
+            disabled={busyAction === `document-migrate-${document._id}`}
+            onClick={() => onMigrate(document)}
+            className="client-profile-icon-button"
+            title="Copy into managed Drive storage"
+            aria-label={`Migrate ${document.documentName}`}
+          >
+            <RefreshCw className={`h-4 w-4 ${busyAction === `document-migrate-${document._id}` ? "animate-spin" : ""}`} />
+          </button>
+        )}
+        <a
+          href={document.driveLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="client-profile-icon-button"
+          aria-label={`Open ${document.documentName}`}
+        >
+          <ExternalLink className="h-4 w-4" />
+        </a>
+        {canManageDocuments && (
+          <>
+            <button type="button" onClick={() => onEdit(document)} className="client-profile-icon-button" aria-label={`Edit ${document.documentName}`}>
+              <Pencil className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              disabled={busyAction === `document-${document._id}`}
+              onClick={() => onDelete(document)}
+              className="client-profile-icon-button client-profile-danger-icon"
+              aria-label={`Delete ${document.documentName}`}
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function TargetScreenshotCard({
+  document,
+  busyAction,
+  canManageDocuments,
+  onEdit,
+  onDelete,
+  onMigrate,
+}: DocumentCardProps) {
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const canPreview = document.storageType === "google-drive"
+    && Boolean(document.driveFileId)
+    && Boolean(document.mimeType?.startsWith("image/"))
+    && !previewFailed;
+
+  return (
+    <article className="client-profile-target-card">
+      <a
+        href={document.driveLink}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="client-profile-target-thumbnail"
+        aria-label={`Open ${document.documentName}`}
+      >
+        {canPreview ? (
+          <img
+            src={`/api/documents/${document._id}/preview`}
+            alt=""
+            loading="lazy"
+            onError={() => setPreviewFailed(true)}
+          />
+        ) : (
+          <span><ImageIcon className="h-5 w-5" /></span>
+        )}
+        <i><ExternalLink className="h-3 w-3" /> View</i>
+      </a>
+
+      {canManageDocuments && (
+        <div className="client-profile-target-card-actions">
+          {document.storageType !== "google-drive" && (
+            <button
+              type="button"
+              disabled={busyAction === `document-migrate-${document._id}`}
+              onClick={() => onMigrate(document)}
+              aria-label={`Migrate ${document.documentName}`}
+              title="Copy into managed Drive storage"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${busyAction === `document-migrate-${document._id}` ? "animate-spin" : ""}`} />
+            </button>
+          )}
+          <button type="button" onClick={() => onEdit(document)} aria-label={`Edit ${document.documentName}`}>
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            disabled={busyAction === `document-${document._id}`}
+            onClick={() => onDelete(document)}
+            aria-label={`Delete ${document.documentName}`}
+            data-danger="true"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      <div className="client-profile-target-card-copy">
+        <p title={document.documentName}>{document.documentName}</p>
+        <span>
+          {formatDate(document.uploadedDate)}
+          {document.fileSize ? ` · ${document.fileSize < 1048576 ? `${Math.round(document.fileSize / 1024)} KB` : `${(document.fileSize / 1048576).toFixed(1)} MB`}` : ""}
+        </span>
+      </div>
+    </article>
+  );
+}
+
 export function DocumentsSection({
   documents,
+  showRequirementSummary,
   open,
   busyAction,
   hasLinkedContacts,
@@ -1445,6 +1614,11 @@ export function DocumentsSection({
   onDelete,
   onMigrate,
   onLinkContact,
+  selectedFy,
+  hasEprCertificate,
+  targetDataAdded,
+  hasTargetScreenshot,
+  onUploadTargetScreenshot,
 }: DocumentsSectionProps) {
   const [search, setSearch] = useState("");
   const filteredDocuments = useMemo(() => {
@@ -1490,6 +1664,34 @@ export function DocumentsSection({
             transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
             className="overflow-hidden"
           >
+            {showRequirementSummary && (
+            <div className="mb-4 grid gap-2 md:grid-cols-2">
+              <div className="rounded-xl border border-base bg-surface/60 p-3">
+                <div className="flex items-start gap-3">
+                  {hasEprCertificate ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /> : <CircleAlert className="mt-0.5 h-4 w-4 text-amber-600" />}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-default">EPR Certificate</p>
+                    <p className="text-xs text-muted">{hasEprCertificate ? "Required document added" : "Required for every client"}</p>
+                  </div>
+                </div>
+              </div>
+              {targetDataAdded && (
+                <div className="rounded-xl border border-base bg-surface/60 p-3">
+                  <div className="flex items-start gap-3">
+                    {hasTargetScreenshot ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /> : <CircleAlert className="mt-0.5 h-4 w-4 text-amber-600" />}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-default">Target screenshot · FY {selectedFy}</p>
+                      <p className="text-xs text-muted">{hasTargetScreenshot ? "Screenshot added for this FY" : "Required because target data is recorded"}</p>
+                      {!hasTargetScreenshot && canManageDocuments && (
+                        <button type="button" className="mt-2 text-xs font-semibold text-brand-600" onClick={onUploadTargetScreenshot}>Upload screenshot</button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            )}
+
             {documents.length > 3 && (
               <div className="client-profile-search">
                 <Search className="h-4 w-4" />
@@ -1531,61 +1733,15 @@ export function DocumentsSection({
             ) : (
               <div className="client-profile-document-grid">
                 {filteredDocuments.map((document) => (
-                  <article key={document._id} className="client-profile-document-card">
-                    <div className="client-profile-document-preview">
-                      <FileText className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-default">{document.documentName}</p>
-                      <div className="client-profile-document-meta">
-                        <span>{document.category || "Other"}</span>
-                        {document.fileSize ? <span>{document.fileSize < 1048576 ? `${Math.round(document.fileSize / 1024)} KB` : `${(document.fileSize / 1048576).toFixed(1)} MB`}</span> : null}
-                        <span>{formatDate(document.uploadedDate)}</span>
-                      </div>
-                      {document.driveRelativePath && document.driveRelativePath !== document.documentName && (
-                        <p className="client-profile-document-path" title={document.driveRelativePath}>{document.driveRelativePath}</p>
-                      )}
-                    </div>
-                    <div className="client-profile-document-actions">
-                      {canManageDocuments && document.storageType !== "google-drive" && (
-                        <button
-                          type="button"
-                          disabled={busyAction === `document-migrate-${document._id}`}
-                          onClick={() => onMigrate(document)}
-                          className="client-profile-icon-button"
-                          title="Copy into managed Drive storage"
-                          aria-label={`Migrate ${document.documentName}`}
-                        >
-                          <RefreshCw className={`h-4 w-4 ${busyAction === `document-migrate-${document._id}` ? "animate-spin" : ""}`} />
-                        </button>
-                      )}
-                      <a
-                        href={document.driveLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="client-profile-icon-button"
-                        aria-label={`Open ${document.documentName}`}
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
-                      {canManageDocuments && (
-                        <>
-                          <button type="button" onClick={() => onEdit(document)} className="client-profile-icon-button" aria-label={`Edit ${document.documentName}`}>
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busyAction === `document-${document._id}`}
-                            onClick={() => onDelete(document)}
-                            className="client-profile-icon-button client-profile-danger-icon"
-                            aria-label={`Delete ${document.documentName}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </article>
+                  <DocumentCard
+                    key={document._id}
+                    document={document}
+                    busyAction={busyAction}
+                    canManageDocuments={canManageDocuments}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    onMigrate={onMigrate}
+                  />
                 ))}
                 {filteredDocuments.length === 0 && (
                   <p className="col-span-full py-6 text-center text-sm text-faint">No documents match this search.</p>
@@ -1599,7 +1755,177 @@ export function DocumentsSection({
   );
 }
 
-export function NotesSection({ notes, updatedAt, onEditBilling }: NotesSectionProps) {
+type TargetScreenshotsSectionProps = Pick<
+  DocumentsSectionProps,
+  "busyAction" | "canManageDocuments" | "onEdit" | "onDelete" | "onMigrate"
+> & {
+  documents: Document[];
+  selectedFy: string;
+  onUpload: (financialYear: string) => void;
+  targetsHref: (financialYear: string) => string;
+};
+
+const financialYearStart = (financialYear: string) => {
+  const match = financialYear.match(/^(\d{4})/);
+  return match ? Number(match[1]) : -1;
+};
+
+export function TargetScreenshotsSection({
+  documents,
+  selectedFy,
+  busyAction,
+  canManageDocuments,
+  onUpload,
+  targetsHref,
+  onEdit,
+  onDelete,
+  onMigrate,
+}: TargetScreenshotsSectionProps) {
+  const groups = useMemo(() => {
+    const byFinancialYear = new Map<string, Document[]>();
+    documents
+      .filter((document) => document.documentKind === "target-screenshot")
+      .forEach((document) => {
+        const financialYear = document.financialYear || "Unassigned";
+        byFinancialYear.set(financialYear, [...(byFinancialYear.get(financialYear) || []), document]);
+      });
+
+    return Array.from(byFinancialYear.entries())
+      .map(([financialYear, entries]) => ({
+        financialYear,
+        documents: [...entries].sort((left, right) => (
+          new Date(right.uploadedDate).getTime() - new Date(left.uploadedDate).getTime()
+        )),
+      }))
+      .sort((left, right) => (
+        financialYearStart(right.financialYear) - financialYearStart(left.financialYear)
+        || right.financialYear.localeCompare(left.financialYear)
+      ));
+  }, [documents]);
+  const screenshotCount = groups.reduce((total, group) => total + group.documents.length, 0);
+  const latestFy = groups[0]?.financialYear;
+  const availableUploadYears = useMemo(() => {
+    const existingYears = new Set(groups.map((group) => group.financialYear));
+    const selectedStart = financialYearStart(selectedFy);
+    return FINANCIAL_YEARS
+      .filter((financialYear) => !existingYears.has(financialYear))
+      .sort((left, right) => {
+        const leftStart = financialYearStart(left);
+        const rightStart = financialYearStart(right);
+        const leftIsFuture = leftStart > selectedStart;
+        const rightIsFuture = rightStart > selectedStart;
+        if (leftIsFuture !== rightIsFuture) return leftIsFuture ? 1 : -1;
+        return leftIsFuture ? leftStart - rightStart : rightStart - leftStart;
+      });
+  }, [groups, selectedFy]);
+  const [uploadFy, setUploadFy] = useState(selectedFy);
+
+  useEffect(() => {
+    setUploadFy((current) => {
+      if (availableUploadYears.includes(current)) return current;
+      if (availableUploadYears.includes(selectedFy)) return selectedFy;
+      return availableUploadYears[0] || "";
+    });
+  }, [availableUploadYears, selectedFy]);
+
+  return (
+    <section className="client-profile-card client-profile-targets-card">
+      <div className="client-profile-card-header">
+        <div>
+          <p className="client-profile-kicker">Documents</p>
+          <h2>Target Screenshots</h2>
+          <p className="mt-1 text-xs text-faint">
+            {screenshotCount === 0
+              ? "Screenshots are organized here by financial year."
+              : `${screenshotCount} screenshot${screenshotCount === 1 ? "" : "s"} across ${groups.length} financial year${groups.length === 1 ? "" : "s"}`}
+          </p>
+        </div>
+        {canManageDocuments && (
+          availableUploadYears.length > 0 ? (
+            <div className="client-profile-target-upload-controls">
+              <label>
+                <span className="sr-only">Financial year for target screenshot</span>
+                <select value={uploadFy} onChange={(event) => setUploadFy(event.target.value)}>
+                  {availableUploadYears.map((financialYear) => (
+                    <option key={financialYear} value={financialYear}>FY {financialYear}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => onUpload(uploadFy)}
+                className="client-profile-primary-button"
+                disabled={!uploadFy}
+              >
+                <UploadCloud className="h-4 w-4" />
+                <span>Upload</span>
+              </button>
+            </div>
+          ) : (
+            <span className="client-profile-target-all-added"><CheckCircle2 className="h-3.5 w-3.5" /> All FYs added</span>
+          )
+        )}
+      </div>
+
+      {groups.length === 0 ? (
+        <div className="client-profile-document-empty">
+          <span className="client-profile-empty-icon"><Target className="h-5 w-5" /></span>
+          <p className="font-semibold text-default">No target screenshots yet</p>
+          <p className="text-xs text-faint">Choose a financial year and upload its screenshot to start the timeline.</p>
+          {canManageDocuments && (
+            <button type="button" className="client-profile-primary-button" onClick={() => onUpload(uploadFy || selectedFy)}>
+              <UploadCloud className="h-4 w-4" />
+              <span>Upload FY {uploadFy || selectedFy}</span>
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="client-profile-target-year-list">
+          {groups.map((group) => (
+            <section key={group.financialYear} className="client-profile-target-year">
+              <div className="client-profile-target-year-header">
+                <div>
+                  <span className="client-profile-target-year-icon"><Calendar className="h-4 w-4" /></span>
+                  <div>
+                    <h3>{group.financialYear === "Unassigned" ? "Financial year unassigned" : `FY ${group.financialYear}`}</h3>
+                    <p>{group.documents.length} target screenshot{group.documents.length === 1 ? "" : "s"}</p>
+                  </div>
+                </div>
+                {group.financialYear !== "Unassigned" && (
+                  <div className="client-profile-target-year-actions">
+                    {group.financialYear === latestFy && (
+                      <span className="client-profile-target-latest">Latest FY</span>
+                    )}
+                    <a href={targetsHref(group.financialYear)} className="client-profile-target-open-fy">
+                      <Target className="h-3.5 w-3.5" />
+                      <span>FY Targets</span>
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                )}
+              </div>
+              <div className="client-profile-target-gallery">
+                {group.documents.map((document) => (
+                  <TargetScreenshotCard
+                    key={document._id}
+                    document={document}
+                    busyAction={busyAction}
+                    canManageDocuments={canManageDocuments}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    onMigrate={onMigrate}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function NotesSection({ notes, onAdd, onDelete }: NotesSectionProps) {
   return (
     <section className="client-profile-card client-profile-notes-card">
       <div className="client-profile-card-header">
@@ -1607,23 +1933,34 @@ export function NotesSection({ notes, updatedAt, onEditBilling }: NotesSectionPr
           <p className="client-profile-kicker">Support</p>
           <h2>Internal Notes</h2>
         </div>
-        <button type="button" onClick={onEditBilling} className="client-profile-secondary-button">
-          <Pencil className="h-4 w-4" />
-          <span>Edit Billing Notes</span>
+        <button type="button" onClick={onAdd} className="client-profile-secondary-button">
+          <Plus className="h-4 w-4" />
+          <span>Add note</span>
         </button>
       </div>
-      {notes ? (
-        <div className="client-profile-note-body">
-          <StickyNote className="mt-0.5 h-4 w-4 text-faint" />
-          <p>{notes}</p>
+      {notes.length > 0 ? (
+        <div className="space-y-3">
+          {notes.map((note) => (
+            <div key={note._id} className="client-profile-note-body">
+              <StickyNote className="mt-0.5 h-4 w-4 text-faint" />
+              <div className="min-w-0 flex-1">
+                <p className="whitespace-pre-wrap">{note.body}</p>
+                <p className="mt-2 text-xs text-faint">
+                  {note.createdBy || "Team member"} · {formatDateTime(note.createdAt)}{note.financialYear ? ` · FY ${note.financialYear}` : ""}
+                </p>
+              </div>
+              <button type="button" className="client-profile-icon-button client-profile-danger-icon" onClick={() => onDelete(note)} aria-label="Delete note">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
         </div>
       ) : (
         <div className="client-profile-empty-inline">
           <StickyNote className="h-4 w-4" />
-          <p>No internal billing notes for this financial year.</p>
+          <p>No internal notes yet.</p>
         </div>
       )}
-      {updatedAt && <p className="mt-4 text-xs text-faint">Last profile update {formatDateTime(updatedAt)}</p>}
     </section>
   );
 }

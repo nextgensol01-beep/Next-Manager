@@ -4,6 +4,7 @@ import ExcelJS from "exceljs";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import { buildCustomClientExportData, getFieldConfig } from "@/lib/server/custom-client-export";
+import { finaliseReadableReportSheet } from "@/lib/server/excel-report-style";
 
 const HEADER_COLOR = "FF2D47E2";
 
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
       applyDataStyle(row, index);
     });
 
+    finaliseReadableReportSheet(worksheet, { freezeColumns: 1 });
     const buffer = await workbook.xlsx.writeBuffer();
     const stamp = new Date().toISOString().slice(0, 10);
     return new NextResponse(buffer as unknown as BodyInit, {

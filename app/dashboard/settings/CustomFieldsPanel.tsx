@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback, type FormEvent } from "react"
 import { createPortal } from "react-dom";
 import {
   Plus, Trash2, Building2, Calendar, FileText,
-  Hash, Mail, MapPin, Phone, Shield, User, ChevronRight,
+  Hash, LockKeyhole, Mail, MapPin, Phone, Shield, User, ChevronRight,
   AlertTriangle, Info, Check
 } from "lucide-react";
 import toast from "react-hot-toast";
@@ -56,6 +56,7 @@ const emptyGroupForm = {
   key: "",
   description: "",
   icon: "fileText" as ClientCustomFieldIcon,
+  showIcon: true,
   active: true,
   applicableCategories: [] as string[],
   formTab: "basic" as ClientCustomFieldFormTab,
@@ -76,6 +77,7 @@ const FIELD_ICON_COMPONENTS: Record<ClientCustomFieldIcon, React.ElementType> = 
   phone: Phone,
   mail: Mail,
   calendar: Calendar,
+  lock: LockKeyhole,
   shield: Shield,
 };
 
@@ -89,6 +91,7 @@ const ICON_COLORS: Record<ClientCustomFieldIcon, { bg: string; fg: string }> = {
   phone:     { bg: "#30B0C7", fg: "#fff" }, // Teal (was duplicate green)
   mail:      { bg: "#32ADE6", fg: "#fff" }, // Light Blue (was duplicate blue)
   calendar:  { bg: "#FF2D55", fg: "#fff" }, // Pink (was duplicate red)
+  lock:      { bg: "#AF52DE", fg: "#fff" }, // Violet
   shield:    { bg: "#636366", fg: "#fff" }, // Gray (was duplicate purple)
 };
 
@@ -369,6 +372,38 @@ type IconSpringState = {
   magnetY: number; magnetYV: number;
 };
 
+/** Packs items into centered rows whose widths follow a circular silhouette. */
+function buildCircularHoneycombRows<T>(items: T[]) {
+  if (items.length <= 4) return [items];
+
+  const rowCount = Math.max(3, Math.round(Math.sqrt(items.length)));
+  const midpoint = (rowCount - 1) / 2;
+  const radius = rowCount / 2;
+  const weights = Array.from({ length: rowCount }, (_, index) => {
+    const normalizedY = (index - midpoint) / radius;
+    return Math.sqrt(Math.max(0.25, 1 - (normalizedY * normalizedY)));
+  });
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const exactLengths = weights.map((weight) => (weight / weightTotal) * items.length);
+  const rowLengths = exactLengths.map((length) => Math.max(1, Math.floor(length)));
+
+  let remaining = items.length - rowLengths.reduce((sum, length) => sum + length, 0);
+  const allocationOrder = exactLengths
+    .map((length, index) => ({ index, fraction: length - Math.floor(length) }))
+    .sort((left, right) => right.fraction - left.fraction || Math.abs(left.index - midpoint) - Math.abs(right.index - midpoint));
+
+  for (let index = 0; remaining > 0; index += 1, remaining -= 1) {
+    rowLengths[allocationOrder[index % allocationOrder.length].index] += 1;
+  }
+
+  let cursor = 0;
+  return rowLengths.map((length) => {
+    const row = items.slice(cursor, cursor + length);
+    cursor += length;
+    return row;
+  });
+}
+
 function AppleIconGridPicker({
   value,
   onChange,
@@ -392,12 +427,8 @@ function AppleIconGridPicker({
   const SelectedIcon = FIELD_ICON_COMPONENTS[value] || FileText;
   const selectedColors = ICON_COLORS[value] || { bg: "#007AFF", fg: "#fff" };
 
-  const allIcons = CLIENT_CUSTOM_FIELD_ICONS; // flat array of 9
-  const rows = [
-    allIcons.slice(0, 3),
-    allIcons.slice(3, 6),
-    allIcons.slice(6, 9),
-  ];
+  const allIcons = CLIENT_CUSTOM_FIELD_ICONS;
+  const rows = buildCircularHoneycombRows(allIcons);
 
   // ── Physics constants ──
   const MAX_DIST = 150;       // Radius of influence (px)
@@ -759,6 +790,49 @@ function AppleIconGridPicker({
 
 /* ─── Add / Edit sheet (premium animation, drag‑to‑dismiss) ──────────────── */
 
+const SHEET_EXIT_DURATION_MS = 290;
+const sheetExitDuration = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : SHEET_EXIT_DURATION_MS;
+const getSheetBackground = () => document.getElementById("dashboard-scroll-area");
+
+function useSheetBackgroundRecession(visible: boolean, closing: boolean) {
+  useEffect(() => {
+    const background = getSheetBackground();
+    if (!background) return;
+    if (visible && !closing && window.innerWidth < 768) background.setAttribute("data-sheet-open", "true");
+    else background.removeAttribute("data-sheet-open");
+    return () => {
+      background.removeAttribute("data-sheet-open");
+      background.style.transition = "";
+      background.style.transform = "";
+      background.style.filter = "";
+      background.style.borderRadius = "";
+    };
+  }, [visible, closing]);
+}
+
+function pauseSheetBackgroundRecession() {
+  const background = getSheetBackground();
+  if (background && window.innerWidth < 768) background.style.transition = "none";
+}
+
+function updateSheetBackgroundRecession(progress: number) {
+  const background = getSheetBackground();
+  if (!background || window.innerWidth >= 768) return;
+  const clamped = Math.max(0, Math.min(1, progress));
+  background.style.transform = `perspective(1200px) rotateX(${0.8 * (1 - clamped)}deg) scale(${0.974 + (0.026 * clamped)}) translateY(${-4 + (4 * clamped)}px)`;
+  background.style.filter = `brightness(${0.9 + (0.1 * clamped)})`;
+  background.style.borderRadius = `${12 * (1 - clamped)}px`;
+}
+
+function releaseSheetBackgroundRecession() {
+  const background = getSheetBackground();
+  if (!background || window.innerWidth >= 768) return;
+  background.style.transition = "";
+  background.style.transform = "";
+  background.style.filter = "";
+  background.style.borderRadius = "";
+}
+
 function FieldSheet({
   open,
   editingField,
@@ -815,21 +889,12 @@ function FieldSheet({
       setVisible(false);
       setClosing(false);
       onClose();
-    }, 340);
+    }, sheetExitDuration());
     return () => clearTimeout(timeout);
   }, [closing, onClose]);
 
   /* ── Background recession ── */
-  useEffect(() => {
-    const el = document.getElementById("dashboard-scroll-area");
-    if (!el) return;
-    // Only apply background scale if it's a mobile screen and not closing
-    if (visible && !closing && window.innerWidth < 768) {
-      el.setAttribute("data-sheet-open", "true");
-    } else {
-      el.removeAttribute("data-sheet-open");
-    }
-  }, [visible, closing]);
+  useSheetBackgroundRecession(visible, closing);
 
   /* ── Portal Mounting ── */
   const [mounted, setMounted] = useState(false);
@@ -843,7 +908,7 @@ function FieldSheet({
       setVisible(false);
       setClosing(false);
       onClose();
-    }, 340);
+    }, sheetExitDuration());
     return () => clearTimeout(t);
   }, [closing, onClose]);
 
@@ -870,10 +935,7 @@ function FieldSheet({
       sheetRef.current.style.transition = "none";
       sheetRef.current.style.willChange = "transform";
     }
-    const bgEl = document.getElementById("dashboard-scroll-area");
-    if (bgEl && window.innerWidth < 768) {
-      bgEl.style.transition = "none";
-    }
+    pauseSheetBackgroundRecession();
   }, []);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
@@ -891,18 +953,7 @@ function FieldSheet({
       backdropRef.current.style.opacity = String(Math.max(0, 1 - progress));
     }
 
-    const bgEl = document.getElementById("dashboard-scroll-area");
-    if (bgEl && window.innerWidth < 768) {
-      const scale = 0.974 + (1 - 0.974) * progress;
-      const rotateX = 0.8 - (0.8 * progress);
-      const transY = -4 + (4 * progress);
-      const brightness = 0.9 + (0.1 * progress);
-      const radius = 12 - (12 * progress);
-      
-      bgEl.style.transform = `perspective(1200px) rotateX(${rotateX}deg) scale(${scale}) translateY(${transY}px)`;
-      bgEl.style.filter = `brightness(${brightness})`;
-      bgEl.style.borderRadius = `${radius}px`;
-    }
+    updateSheetBackgroundRecession(progress);
   }, []);
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
@@ -913,14 +964,7 @@ function FieldSheet({
     const elapsed = Date.now() - dragState.current.startTime;
     const velocity = (delta / Math.max(elapsed, 1)) * 1000;
 
-    const bgEl = document.getElementById("dashboard-scroll-area");
-    if (bgEl && window.innerWidth < 768) {
-      // Clear inline styles to let CSS take over the final animation
-      bgEl.style.transition = "";
-      bgEl.style.transform = "";
-      bgEl.style.filter = "";
-      bgEl.style.borderRadius = "";
-    }
+    releaseSheetBackgroundRecession();
 
     if (delta > 120 || velocity > 800) {
       /* Dismiss — accelerate out */
@@ -937,7 +981,7 @@ function FieldSheet({
         setVisible(false);
         setClosing(false);
         onClose();
-      }, 290);
+      }, sheetExitDuration());
     } else {
       /* Spring back */
       if (sheetRef.current) {
@@ -1186,7 +1230,11 @@ function FieldSheet({
             <CustomFieldPlacementPreview
               label={form.label}
               icon={<FieldIconSquare iconKey={form.icon} size={18} />}
+              groupIcon={selectedGroup ? <FieldIconSquare iconKey={selectedGroup.icon || "fileText"} size={18} /> : undefined}
               groupLabel={selectedGroup?.label}
+              showGroupIcon={selectedGroup?.showIcon !== false}
+              collapsible={selectedGroup?.collapsible}
+              defaultExpanded={selectedGroup?.defaultExpanded}
               formTab={selectedGroup?.formTab || form.formTab}
               formSection={selectedGroup?.formSection || form.formSection}
               profileDisplay={selectedGroup?.profileDisplay || form.profileDisplay}
@@ -1462,8 +1510,9 @@ function FieldGroupSheet({
           formSection: editingGroup.formSection || (editingGroup.formTab === "portal" ? "portalCredentials" : "company"),
           profileDisplay: editingGroup.profileDisplay || "subsection",
           profileCluster: editingGroup.profileCluster || "additional",
+          showIcon: editingGroup.showIcon !== false,
           collapsible: editingGroup.collapsible !== false,
-          defaultExpanded: Boolean(editingGroup.defaultExpanded),
+          defaultExpanded: editingGroup.defaultExpanded !== false,
           order: String(editingGroup.order || ""),
         });
         setKeyTouched(true);
@@ -1473,6 +1522,8 @@ function FieldGroupSheet({
       }
     }
   }, [editingGroup, open]);
+
+  useSheetBackgroundRecession(visible, closing);
 
   useEffect(() => {
     if (firstRenderRef.current) { firstRenderRef.current = false; return; }
@@ -1504,7 +1555,7 @@ function FieldGroupSheet({
       setVisible(false);
       setClosing(false);
       onClose();
-    }, 290);
+    }, sheetExitDuration());
   }, [closing, onClose]);
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -1524,6 +1575,7 @@ function FieldGroupSheet({
       sheetRef.current.style.willChange = "transform";
     }
     if (backdropRef.current) backdropRef.current.style.transition = "none";
+    pauseSheetBackgroundRecession();
   }, []);
 
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -1533,10 +1585,11 @@ function FieldGroupSheet({
     dragState.current.currentY = event.clientY;
 
     if (sheetRef.current) sheetRef.current.style.transform = `translateY(${delta}px)`;
+    const progress = Math.min(1, delta / Math.max(window.innerHeight * 0.8, 600));
     if (backdropRef.current) {
-      const progress = Math.min(1, delta / Math.max(window.innerHeight * 0.8, 600));
       backdropRef.current.style.opacity = String(1 - progress);
     }
+    updateSheetBackgroundRecession(progress);
   }, []);
 
   const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -1549,6 +1602,7 @@ function FieldGroupSheet({
     const delta = Math.max(0, dragState.current.currentY - dragState.current.startY);
     const elapsed = Date.now() - dragState.current.startTime;
     const velocity = (delta / Math.max(elapsed, 1)) * 1000;
+    releaseSheetBackgroundRecession();
 
     if (delta > 120 || velocity > 800) {
       if (sheetRef.current) {
@@ -1564,7 +1618,7 @@ function FieldGroupSheet({
         setVisible(false);
         setClosing(false);
         onClose();
-      }, 290);
+      }, sheetExitDuration());
       return;
     }
 
@@ -1646,14 +1700,18 @@ function FieldGroupSheet({
         </div>
         <div className={`field-sheet-body ${!closing ? "field-sheet-content-enter" : "field-sheet-content-exit"}`}>
           <div className="field-sheet-preview">
-            <FieldIconSquare iconKey={form.icon} size={56} />
+            {form.showIcon && <FieldIconSquare iconKey={form.icon} size={56} />}
             <span className="field-sheet-preview-label">{form.label || "Section Name"}</span>
             <span className="field-sheet-preview-key">{form.key || "sectionKey"}</span>
           </div>
           <CustomFieldPlacementPreview
             label="First field"
-            icon={<FieldIconSquare iconKey={form.icon} size={18} />}
+            icon={<FieldIconSquare iconKey="fileText" size={18} />}
+            groupIcon={<FieldIconSquare iconKey={form.icon} size={18} />}
             groupLabel={form.label || "Custom Section"}
+            showGroupIcon={form.showIcon}
+            collapsible={form.collapsible}
+            defaultExpanded={form.defaultExpanded}
             formTab={form.formTab}
             formSection={form.formSection}
             profileDisplay={form.profileDisplay}
@@ -1674,7 +1732,8 @@ function FieldGroupSheet({
             <AppleInputRow label="Description"><input className="apple-text-input" value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} placeholder="Optional supporting text" /></AppleInputRow>
           </AppleSection>
           <AppleSection header="APPEARANCE">
-            <AppleIconGridPicker value={form.icon} onChange={(icon) => setForm((current) => ({ ...current, icon }))} isOpen={openPicker === "icon"} onToggle={() => setOpenPicker((current) => current === "icon" ? null : "icon")} />
+            <AppleToggle checked={form.showIcon} onChange={(showIcon) => { if (!showIcon) setOpenPicker(null); setForm((current) => ({ ...current, showIcon })); }} label="Show Group Icon" subtitle="Display the selected icon beside this group heading" />
+            {form.showIcon && <><div className="apple-separator" /><AppleIconGridPicker value={form.icon} onChange={(icon) => setForm((current) => ({ ...current, icon }))} isOpen={openPicker === "icon"} onToggle={() => setOpenPicker((current) => current === "icon" ? null : "icon")} /></>}
             <div className="apple-separator" />
             <AppleInputRow label="Order"><input className="apple-text-input apple-text-input--mono apple-text-input--right" type="number" value={form.order} onChange={(event) => setForm((current) => ({ ...current, order: event.target.value }))} placeholder="Auto" /></AppleInputRow>
           </AppleSection>
@@ -2022,7 +2081,7 @@ function GroupRow({
   return (
     <div className={`apple-field-row ${!group.active ? "apple-field-row--inactive" : ""}`}>
       <button type="button" className="apple-field-row-main" onClick={onEdit}>
-        <FieldIconSquare iconKey={group.icon || "fileText"} size={32} />
+        {group.showIcon !== false && <FieldIconSquare iconKey={group.icon || "fileText"} size={32} />}
         <span className="apple-field-row-text">
           <span className="apple-field-row-label">{group.label}</span>
           <span className="apple-field-row-meta">
@@ -2848,10 +2907,6 @@ const appleStyles = `
   gap: 12px;
   position: relative; /* Allow z-index to work */
 }
-.honeycomb-row:nth-child(even) {
-  padding-left: 60px; /* Offset without creating stacking context */
-}
-
 .honeycomb-item {
   position: relative;
   display: flex;
@@ -3055,6 +3110,10 @@ const appleStyles = `
 }
 
 @media (prefers-reduced-motion: reduce) {
+  #dashboard-scroll-area,
+  #dashboard-scroll-area[data-sheet-open="true"] {
+    transition-duration: 1ms !important;
+  }
   .field-sheet,
   .field-sheet--exit {
     animation-duration: 1ms !important;

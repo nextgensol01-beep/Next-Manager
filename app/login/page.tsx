@@ -3,10 +3,11 @@ import { useState, useEffect, Suspense } from "react";
 import { getProviders, signIn, useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff, Loader2, AlertCircle, ShieldCheck } from "lucide-react";
+import { getFinancialYearPreferenceCacheKey } from "@/lib/financialYearPreferenceCache";
 
 // Inner component that uses useSearchParams — must be inside Suspense
 function LoginForm() {
-  const { data: session, status } = useSession();
+  const { data: session, status, update: updateSession } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl");
@@ -80,13 +81,30 @@ function LoginForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
+      const body = await response.json().catch(() => null);
       if (!response.ok) {
-        const body = await response.json().catch(() => null);
         setError(body?.error || "Invalid email or password.");
         return;
       }
 
-      router.push(safeCallbackUrl);
+      const accountId = typeof body?.user?.id === "string" ? body.user.id : "";
+      if (accountId) {
+        try {
+          const preferenceResponse = await fetch("/api/financial-year-preference", { cache: "no-store" });
+          const preferenceBody = await preferenceResponse.json().catch(() => null);
+          if (preferenceResponse.ok) {
+            window.localStorage.setItem(
+              getFinancialYearPreferenceCacheKey(accountId),
+              JSON.stringify(preferenceBody?.settings || {})
+            );
+          }
+        } catch {
+          // Login should still succeed if preference preloading is temporarily unavailable.
+        }
+      }
+
+      await updateSession();
+      router.replace(safeCallbackUrl);
       router.refresh();
     } catch {
       setError("Something went wrong. Please try again.");

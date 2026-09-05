@@ -26,6 +26,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (typeof body.label === "string" && body.label.trim()) update.label = body.label.trim();
     if (typeof body.description === "string") update.description = body.description.trim();
     if (isClientCustomFieldIcon(body.icon)) update.icon = body.icon;
+    if ("showIcon" in body) update.showIcon = Boolean(body.showIcon);
     if ("active" in body) update.active = Boolean(body.active);
     if ("applicableCategories" in body) update.applicableCategories = cleanCategories(body.applicableCategories);
     if (isClientCustomFieldFormTab(body.formTab)) update.formTab = body.formTab;

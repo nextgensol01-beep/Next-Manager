@@ -7,6 +7,7 @@ import Billing from "@/models/Billing";
 import Payment from "@/models/Payment";
 import DeletedRecord from "@/models/DeletedRecord";
 import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
+import { recordActivityEvent } from "@/lib/server/activity-events";
 
 
 // ── Re-fetch a billing doc through the full aggregation pipeline so the
@@ -106,11 +107,25 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     await connectDB();
     const body = normalizeBillingBody(await req.json());
     const { id } = await params;
+    const previous = await Billing.findById(id).lean() as { totalAmount?: number } | null;
     const record = await Billing.findByIdAndUpdate(id, { ...body, updatedAt: new Date() }, { new: true, runValidators: true });
     if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });
     await syncAnnualReturnStatus(record.clientId, record.financialYear);
     // Re-fetch through aggregation pipeline so response includes totalPaid, pendingAmount, paymentStatus
     const full = await fetchBillingAggregated(record._id);
+    await recordActivityEvent({
+      clientId: record.clientId,
+      category: "financial",
+      type: "billing_updated",
+      label: "Billing Updated",
+      detail: `Total changed from INR ${Number(previous?.totalAmount || 0).toLocaleString("en-IN")} to INR ${Number(record.totalAmount || 0).toLocaleString("en-IN")}`,
+      color: "violet",
+      badge: "Updated",
+      financialYear: record.financialYear,
+      entityId: String(record._id),
+      entityType: "billing",
+      relatedEntityIds: [String(record._id)],
+    }, session);
     return NextResponse.json(full ?? record);
   } catch (error) {
     console.error("PUT /api/billing/[id]:", error);

@@ -15,6 +15,12 @@ const nextConfig = {
       ...config.resolve.alias,
       uuid: path.resolve(__dirname, "vendor/uuid-safe/index.cjs"),
     };
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      fs: false,
+      path: false,
+      crypto: false,
+    };
 
     return config;
   },

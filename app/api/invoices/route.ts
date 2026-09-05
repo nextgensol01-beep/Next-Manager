@@ -5,6 +5,7 @@ import { connectDB } from "@/lib/mongoose";
 import Invoice from "@/models/Invoice";
 import Client from "@/models/Client";
 import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
+import { recordActivityEvent } from "@/lib/server/activity-events";
 
 const cleanInvoicePayload = (body: Record<string, unknown>) => ({
   clientId: String(body.clientId || "").trim(),
@@ -68,6 +69,19 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const invoice = await Invoice.create(cleanInvoicePayload(body));
     await syncAnnualReturnStatus(invoice.clientId, invoice.financialYear);
+    await recordActivityEvent({
+      clientId: invoice.clientId,
+      category: "compliance",
+      type: "invoice_tracking_updated",
+      label: `${invoice.invoiceType === "purchase" ? "Purchase" : "Sale"} Invoice Tracking Updated`,
+      detail: `${invoice.status || "Received"}${invoice.receivedVia ? ` · Received via ${invoice.receivedVia}` : ""}`,
+      color: invoice.status === "Received" ? "emerald" : "amber",
+      badge: invoice.status || "Received",
+      financialYear: invoice.financialYear,
+      entityId: String(invoice._id),
+      entityType: "invoice",
+      relatedEntityIds: [String(invoice._id)],
+    }, session);
     return NextResponse.json(invoice, { status: 201 });
   } catch (error) {
     console.error("POST /api/invoices:", error);

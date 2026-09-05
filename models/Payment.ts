@@ -2,6 +2,8 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export interface IPayment extends Document {
   clientId: string;
+  /** Explicit billing allocation. Payments can be received at any later date. */
+  billingId?: string;
   financialYear: string;
   amountPaid: number;
   paymentType: "billing" | "advance";
@@ -16,6 +18,7 @@ export interface IPayment extends Document {
 const PaymentSchema = new Schema<IPayment>(
   {
     clientId: { type: String, required: true, ref: "Client" },
+    billingId: { type: String, trim: true, default: "", index: true },
     financialYear: { type: String, required: true },
     amountPaid: { type: Number, required: true },
     paymentType: { type: String, enum: ["billing", "advance"], default: "billing" },
@@ -29,6 +32,7 @@ const PaymentSchema = new Schema<IPayment>(
 );
 
 PaymentSchema.index({ clientId: 1, financialYear: 1, paymentDate: -1 });
+PaymentSchema.index({ billingId: 1, paymentDate: -1 });
 
 export default mongoose.models.Payment ||
   mongoose.model<IPayment>("Payment", PaymentSchema);

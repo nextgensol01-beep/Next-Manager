@@ -7,10 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "verify:report-metrics": "node scripts/verify-report-metrics.cjs",
     "resync:client-ids": "node scripts/resync-client-id-counters.js"
   },
   "dependencies": {
     "@sparticuz/chromium": "^149.0.0",
+    "@techstark/opencv-js": "^5.0.0-release.1",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
@@ -31,6 +33,7 @@
     "recharts": "^2.13.0",
     "swr": "^2.3.0",
     "tailwind-merge": "^3.3.0",
+    "tesseract.js": "^7.0.0",
     "uuid": "file:vendor/uuid-safe",
     "zod": "^4.4.3"
   },
