@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion, type Variants } from "framer-motion";
 import toast from "react-hot-toast";
-import { Building2, CalendarDays, Check, IndianRupee, Sparkles, Target, X } from "lucide-react";
+import { ArrowLeft, Building2, CalendarDays, Check, ChevronRight, FileText, IndianRupee, Plus, Sparkles, Target, Trash2, X } from "lucide-react";
 import Modal from "@/components/ui/Modal";
 import { FINANCIAL_YEARS, formatCurrency } from "@/lib/utils";
-import type { Billing, Client, CreditTransaction, FinancialYearRecord, TargetBillingRow } from "./types";
+import type { Billing, BillingType, Client, CreditTransaction, FinancialYearRecord, TargetBillingRow } from "./types";
 import {
   CATEGORY_LABELS,
   PIBO_CATEGORIES,
@@ -19,6 +20,9 @@ import {
 type BillingForm = {
   clientId: string;
   financialYear: string;
+  billType: BillingType;
+  billTitle: string;
+  billDate: string;
   govtCharges: string;
   consultancyCharges: string;
   targetCharges: string;
@@ -26,6 +30,55 @@ type BillingForm = {
   notes: string;
   dueDate: string;
 };
+
+type GeneralLineItemForm = {
+  key: string;
+  description: string;
+  quantity: string;
+  rate: string;
+  gstPercent: string;
+  sourceQuotationId?: string;
+  sourceQuotationNumber?: string;
+  sourceRevisionNumber?: number;
+  sourceLineId?: string;
+};
+
+type BillingModalStep = "choose" | "form";
+
+const stepVariants: Variants = {
+  enter: (direction: number) => ({
+    opacity: 0,
+    x: direction > 0 ? "28%" : "-28%",
+    scale: 0.97,
+    skewX: direction > 0 ? -0.75 : 0.75,
+  }),
+  center: {
+    opacity: 1,
+    x: 0,
+    scale: 1,
+    skewX: 0,
+  },
+  exit: (direction: number) => ({
+    opacity: 0,
+    x: direction > 0 ? "-28%" : "28%",
+    scale: 0.975,
+    skewX: direction > 0 ? 0.75 : -0.75,
+  }),
+};
+
+const reducedStepVariants: Variants = {
+  enter: { opacity: 0 },
+  center: { opacity: 1 },
+  exit: { opacity: 0 },
+};
+
+const newGeneralLineItem = (): GeneralLineItemForm => ({
+  key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  description: "",
+  quantity: "1",
+  rate: "",
+  gstPercent: "18",
+});
 
 interface BillingModalProps {
   open: boolean;
@@ -40,6 +93,9 @@ function emptyBillingForm(financialYear: string): BillingForm {
   return {
     clientId: "",
     financialYear,
+    billType: "annual_return",
+    billTitle: "Annual Return Filing",
+    billDate: new Date().toISOString().split("T")[0],
     govtCharges: "0",
     consultancyCharges: "0",
     targetCharges: "0",
@@ -53,6 +109,9 @@ function formFromBilling(billing: Billing): BillingForm {
   return {
     clientId: billing.clientId,
     financialYear: billing.financialYear,
+    billType: billing.billType === "general" ? "general" : "annual_return",
+    billTitle: billing.billTitle || (billing.billType === "general" ? "" : "Annual Return Filing"),
+    billDate: dateInputValue(billing.billDate),
     govtCharges: String(billing.govtCharges ?? 0),
     consultancyCharges: String(billing.consultancyCharges ?? 0),
     targetCharges: String(billing.targetCharges ?? 0),
@@ -63,8 +122,13 @@ function formFromBilling(billing: Billing): BillingForm {
 }
 
 export default function BillingModal({ open, editingBilling, clients, fy, onClose, onSaved }: BillingModalProps) {
+  const reduceMotion = useReducedMotion();
   const [form, setForm] = useState<BillingForm>(() => emptyBillingForm(fy));
+  const [step, setStep] = useState<BillingModalStep>(editingBilling ? "form" : "choose");
+  const [navigationDirection, setNavigationDirection] = useState<1 | -1>(1);
+  const [generalTitleDraft, setGeneralTitleDraft] = useState("");
   const [targetRows, setTargetRows] = useState<TargetBillingRow[]>([]);
+  const [generalLineItems, setGeneralLineItems] = useState<GeneralLineItemForm[]>([newGeneralLineItem()]);
   const [targetSuggestionsLoading, setTargetSuggestionsLoading] = useState(false);
   const [targetSuggestionsError, setTargetSuggestionsError] = useState("");
   const [useTransactionRates, setUseTransactionRates] = useState(true);
@@ -73,15 +137,54 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
   useEffect(() => {
     if (!open) return;
     setForm(editingBilling ? formFromBilling(editingBilling) : emptyBillingForm(fy));
+    setStep(editingBilling ? "form" : "choose");
+    setNavigationDirection(1);
+    setGeneralTitleDraft(editingBilling?.billType === "general" ? editingBilling.billTitle || "" : "");
     setTargetRows(editingBilling ? breakdownToTargetRows(editingBilling.targetBreakdown) : []);
+    setGeneralLineItems(editingBilling?.lineItems?.length
+      ? editingBilling.lineItems.map((item, index) => ({
+          key: `${editingBilling._id}-${index}`,
+          description: item.description,
+          quantity: String(item.quantity),
+          rate: String(item.rate),
+          gstPercent: String(item.gstPercent),
+          sourceQuotationId: item.sourceQuotationId,
+          sourceQuotationNumber: item.sourceQuotationNumber,
+          sourceRevisionNumber: item.sourceRevisionNumber,
+          sourceLineId: item.sourceLineId,
+        }))
+      : editingBilling?.billType === "general" ? [newGeneralLineItem()] : []);
     setTargetSuggestionsError("");
     setTargetSuggestionsLoading(false);
     setUseTransactionRates(true);
   }, [editingBilling, fy, open]);
 
+  const chooseBillType = (billType: BillingType) => {
+    setNavigationDirection(1);
+    setForm((current) => ({
+      ...current,
+      billType,
+      billTitle: billType === "annual_return" ? "Annual Return Filing" : generalTitleDraft,
+    }));
+    if (billType === "general" && generalLineItems.length === 0) setGeneralLineItems([newGeneralLineItem()]);
+    setStep("form");
+  };
+
+  const returnToTypeChoice = () => {
+    if (form.billType === "general") setGeneralTitleDraft(form.billTitle);
+    setNavigationDirection(-1);
+    setStep("choose");
+  };
+
   const selectedBillingClient = clients.find((c) => c.clientId === form.clientId);
   const isPiboBillingClient = Boolean(selectedBillingClient && PIBO_CATEGORIES.has(selectedBillingClient.category));
-  const formTotal = Number(form.govtCharges) + Number(form.consultancyCharges) + Number(form.targetCharges) + Number(form.otherCharges);
+  const generalLineItemsTotal = useMemo(() => generalLineItems.reduce((sum, row) => {
+    const taxable = Number(row.quantity || 0) * Number(row.rate || 0);
+    return sum + taxable + taxable * (Number(row.gstPercent || 0) / 100);
+  }, 0), [generalLineItems]);
+  const formTotal = form.billType === "general"
+    ? generalLineItemsTotal
+    : Number(form.govtCharges) + Number(form.consultancyCharges) + Number(form.targetCharges) + Number(form.otherCharges) + generalLineItemsTotal;
 
   const targetRowsTotal = useMemo(
     () => targetRows.reduce((sum, row) => {
@@ -95,7 +198,7 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
 
   useEffect(() => {
     if (editingBilling) return;
-    if (!open || !form.clientId || !form.financialYear || !isPiboBillingClient) {
+    if (!open || form.billType !== "annual_return" || !form.clientId || !form.financialYear || !isPiboBillingClient) {
       setTargetRows([]);
       setTargetSuggestionsError("");
       return;
@@ -142,7 +245,7 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
     })();
 
     return () => { cancelled = true; };
-  }, [editingBilling, form.clientId, form.financialYear, isPiboBillingClient, open, useTransactionRates]);
+  }, [editingBilling, form.billType, form.clientId, form.financialYear, isPiboBillingClient, open, useTransactionRates]);
 
   const saveBilling = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -164,6 +267,16 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
           consultancyCharges: Number(form.consultancyCharges),
           targetCharges: Number(form.targetCharges),
           otherCharges: Number(form.otherCharges),
+          lineItems: generalLineItems.map((item) => ({
+            description: item.description.trim(),
+            quantity: Number(item.quantity),
+            rate: Number(item.rate),
+            gstPercent: Number(item.gstPercent),
+            sourceQuotationId: item.sourceQuotationId,
+            sourceQuotationNumber: item.sourceQuotationNumber,
+            sourceRevisionNumber: item.sourceRevisionNumber,
+            sourceLineId: item.sourceLineId,
+          })),
           targetBreakdown: shouldSave ? targetBreakdown : [],
           dueDate: form.dueDate || null,
         }),
@@ -179,6 +292,24 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
     }
   };
 
+  const stepTransition = reduceMotion
+    ? { duration: 0.01 }
+    : { type: "spring" as const, stiffness: 500, damping: 34, mass: 0.68 };
+
+  const backButtonTransition = reduceMotion
+    ? { duration: 0.01 }
+    : {
+        type: "spring" as const,
+        stiffness: 540,
+        damping: 27,
+        mass: 0.55,
+        delay: navigationDirection > 0 ? 0.08 : 0,
+      };
+
+  const headerIdentityTransition = reduceMotion
+    ? { duration: 0.01 }
+    : { type: "spring" as const, stiffness: 480, damping: 34, mass: 0.65 };
+
   return (
     <Modal
       open={open}
@@ -189,27 +320,81 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
       className="max-h-[calc(100dvh-16px)] rounded-[28px] border-white/70 bg-white/95 shadow-[0_32px_100px_rgba(0,0,0,0.28)] sm:max-h-[92vh] sm:rounded-[38px] dark:border-white/[0.12] dark:bg-[#1c1c1e]/95"
       backdropFilter="blur(18px) saturate(150%)"
       backdropColor="rgba(10,10,12,0.48)"
+      fluidMotion
     >
       <form onSubmit={saveBilling} className="flex min-h-0 flex-1 flex-col">
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-black/[0.06] bg-white/70 px-5 py-5 backdrop-blur-2xl sm:px-8 sm:py-6 dark:border-white/[0.08] dark:bg-white/[0.04]">
-          <div className="flex min-w-0 items-start gap-3.5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-lg shadow-brand-600/20 sm:h-12 sm:w-12">
-              <IndianRupee className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">{editingBilling ? "Billing workspace" : "New annual billing"}</p>
-              <h2 className="mt-1 text-xl font-bold tracking-[-0.025em] text-default sm:text-2xl">{editingBilling ? "Edit billing" : "Add billing"}</h2>
-              <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted">Set charges, review automatic target suggestions, and confirm the annual total.</p>
-            </div>
+          <div className="flex min-w-0 items-start">
+            <AnimatePresence initial={false} mode="popLayout">
+              {step === "form" && !editingBilling && (
+                <motion.button
+                  key="billing-back-button"
+                  type="button"
+                  onClick={returnToTypeChoice}
+                  disabled={saving}
+                  aria-label="Back to bill type selection"
+                  initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -16, scale: 0.84 }}
+                  animate={{ opacity: 1, x: 0, scale: 1 }}
+                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -12, scale: 0.9 }}
+                  transition={backButtonTransition}
+                  className="mr-3.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] border border-black/[0.07] bg-white text-muted shadow-sm hover:-translate-x-0.5 hover:bg-[#f5f5f7] hover:text-default active:scale-95 sm:h-12 sm:w-12 dark:border-white/[0.09] dark:bg-white/[0.07] dark:hover:bg-white/[0.11]"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </motion.button>
+              )}
+            </AnimatePresence>
+            <motion.div
+              layout={reduceMotion ? false : "position"}
+              transition={headerIdentityTransition}
+              className="flex min-w-0 items-start gap-3.5"
+            >
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-lg shadow-brand-600/20 sm:h-12 sm:w-12">
+                <IndianRupee className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">{editingBilling ? "Billing workspace" : "New billing"}</p>
+                <h2 className="mt-1 text-xl font-bold tracking-[-0.025em] text-default sm:text-2xl">{editingBilling ? "Edit billing" : step === "choose" ? "Add billing" : form.billType === "general" ? "General Bill" : "Annual Return Bill"}</h2>
+                <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted">{step === "choose" ? "Choose the type of bill you want to create." : form.billType === "general" ? "Create a flexible bill with itemised services and GST." : "Set charges, review automatic target suggestions, and confirm the annual total."}</p>
+              </div>
+            </motion.div>
           </div>
           <button type="button" onClick={onClose} disabled={saving} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-muted transition hover:bg-black/[0.08] active:scale-95 dark:bg-white/[0.08] dark:hover:bg-white/[0.12]">
             <X className="h-4 w-4" />
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8 sm:py-7">
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <div className="space-y-5">
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
+          <AnimatePresence initial={false} mode="sync" custom={navigationDirection}>
+            {step === "choose" ? (
+              <motion.div key="bill-type-choice" custom={navigationDirection} variants={reduceMotion ? reducedStepVariants : stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition} className="absolute inset-0 min-h-0 w-full overflow-y-auto px-4 py-5 sm:px-8 sm:py-7">
+                <div className="mx-auto flex min-h-full w-full max-w-3xl items-center justify-center py-4 sm:py-8">
+                  <section className="w-full rounded-[28px] border border-black/[0.07] bg-white/90 p-5 shadow-[0_24px_75px_rgba(15,23,42,0.10)] sm:rounded-[34px] sm:p-7 dark:border-white/[0.09] dark:bg-white/[0.045] dark:shadow-[0_24px_75px_rgba(0,0,0,0.24)]">
+                    <div className="mb-5 text-center sm:mb-6">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-600 dark:text-brand-300">Bill type</p>
+                      <h3 className="mt-2 text-xl font-bold tracking-[-0.025em] text-default sm:text-2xl">What are you billing for?</h3>
+                      <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-muted">Choose a workflow. Annual Return bills support filing charges and targets; General bills cover everything else.</p>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2 sm:gap-4">
+                      {([
+                        { value: "annual_return" as BillingType, label: "Annual Return Bill", description: "Government fee, consultancy, targets, and filing charges.", Icon: FileText, tone: "brand" },
+                        { value: "general" as BillingType, label: "General Bill", description: "Flexible itemised billing for any other service or expense.", Icon: IndianRupee, tone: "violet" },
+                      ]).map(({ value, label, description, Icon, tone }) => (
+                        <motion.button key={value} type="button" onClick={() => chooseBillType(value)} whileHover={reduceMotion ? undefined : { y: -3, scale: 1.012 }} whileTap={reduceMotion ? undefined : { scale: 0.975 }} transition={{ type: "spring", stiffness: 420, damping: 24 }} className="group relative min-h-40 overflow-hidden rounded-[24px] border border-black/[0.08] bg-[#f7f7f9] p-5 text-left shadow-sm transition-colors hover:border-brand-300 hover:bg-white hover:shadow-[0_18px_45px_rgba(37,99,235,0.10)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 sm:p-6 dark:border-white/[0.09] dark:bg-white/[0.045] dark:hover:border-brand-500/40 dark:hover:bg-white/[0.075]">
+                          <div className="flex h-full items-start gap-4">
+                            <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] text-white shadow-lg ${tone === "brand" ? "bg-gradient-to-br from-brand-500 to-brand-700 shadow-brand-600/20" : "bg-gradient-to-br from-violet-500 to-violet-700 shadow-violet-600/20"}`}><Icon className="h-5 w-5" /></span>
+                            <span className="min-w-0 flex-1"><span className="block text-base font-bold text-default">{label}</span><span className="mt-2 block text-sm leading-relaxed text-muted">{description}</span><span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-brand-600 transition-all group-hover:gap-2 dark:text-brand-300">Continue <ChevronRight className="h-3.5 w-3.5" /></span></span>
+                          </div>
+                        </motion.button>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div key={`billing-form-${form.billType}`} custom={navigationDirection} variants={reduceMotion ? reducedStepVariants : stepVariants} initial="enter" animate="center" exit="exit" transition={stepTransition} className="absolute inset-0 flex min-h-0 w-full flex-col">
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8 sm:py-7">
+                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+                    <div className="space-y-5">
               <section className="rounded-[24px] border border-black/[0.07] bg-[#f5f5f7]/75 p-4 sm:rounded-[30px] sm:p-5 dark:border-white/[0.09] dark:bg-white/[0.045]">
                 <div className="mb-4 flex items-center gap-2.5">
                   <div className="flex h-8 w-8 items-center justify-center rounded-[11px] bg-white text-brand-600 shadow-sm dark:bg-white/[0.08]"><Building2 className="h-4 w-4" /></div>
@@ -231,10 +416,22 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
           </select>
           {editingBilling && <p className="text-xs text-faint mt-1">Financial year is locked to prevent duplicate records.</p>}
         </div>
+        {form.billType === "general" && (
+          <>
+            <div>
+              <label className="label">Bill Title / Purpose *</label>
+              <input className="input-field h-12 rounded-2xl bg-white shadow-sm dark:bg-white/[0.06]" value={form.billTitle} onChange={(e) => { setForm({ ...form, billTitle: e.target.value }); setGeneralTitleDraft(e.target.value); }} placeholder="e.g. Registration support" required />
+            </div>
+            <div>
+              <label className="label">Bill Date</label>
+              <input type="date" className="input-field h-12 rounded-2xl bg-white shadow-sm dark:bg-white/[0.06]" value={form.billDate} onChange={(e) => setForm({ ...form, billDate: e.target.value })} />
+            </div>
+          </>
+        )}
                 </div>
               </section>
 
-        {form.clientId && (
+        {form.billType === "annual_return" && form.clientId && (
           <section className="rounded-[24px] border border-brand-200/60 bg-gradient-to-br from-brand-50/80 to-white p-4 shadow-[0_18px_50px_rgba(37,99,235,0.06)] sm:rounded-[30px] sm:p-5 dark:border-brand-500/20 dark:from-brand-950/25 dark:to-white/[0.04]">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
               <div>
@@ -317,6 +514,7 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
           </section>
         )}
 
+        {form.billType === "annual_return" && (
         <section className="rounded-[24px] border border-black/[0.07] bg-white p-4 shadow-[0_16px_50px_rgba(0,0,0,0.04)] sm:rounded-[30px] sm:p-5 dark:border-white/[0.09] dark:bg-white/[0.035]">
           <div className="mb-4 flex items-center gap-2.5"><div className="flex h-8 w-8 items-center justify-center rounded-[11px] bg-[#f5f5f7] text-brand-600 dark:bg-white/[0.08]"><Target className="h-4 w-4" /></div><div><p className="text-sm font-semibold text-default">Charges</p><p className="text-xs text-muted">Enter GST-inclusive billing amounts.</p></div></div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -326,6 +524,32 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
           <div><label className="label">Other Charges</label><input type="number" className="input-field h-12 rounded-2xl" value={form.otherCharges} onChange={(e) => setForm({ ...form, otherCharges: e.target.value })} min="0" step="0.01" /></div>
           </div>
         </section>
+        )}
+          <section className="rounded-[24px] border border-black/[0.07] bg-white p-4 shadow-[0_16px_50px_rgba(0,0,0,0.04)] sm:rounded-[30px] sm:p-5 dark:border-white/[0.09] dark:bg-white/[0.035]">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2.5"><div className="flex h-8 w-8 items-center justify-center rounded-[11px] bg-[#f5f5f7] text-brand-600 dark:bg-white/[0.08]"><FileText className="h-4 w-4" /></div><div><p className="text-sm font-semibold text-default">{form.billType === "general" ? "Line items" : "Additional items"}</p><p className="text-xs text-muted">{form.billType === "general" ? "Add each service or expense separately." : "Itemised services copied from quotations or added manually."}</p></div></div>
+              <button type="button" className="btn-secondary" onClick={() => setGeneralLineItems((items) => [...items, newGeneralLineItem()])}><Plus className="h-4 w-4" /> Add Item</button>
+            </div>
+            <div className="space-y-3">
+              {generalLineItems.map((row, index) => {
+                const taxable = Number(row.quantity || 0) * Number(row.rate || 0);
+                const total = taxable + taxable * (Number(row.gstPercent || 0) / 100);
+                const updateRow = (patch: Partial<GeneralLineItemForm>) => setGeneralLineItems((items) => items.map((item) => item.key === row.key ? { ...item, ...patch } : item));
+                return (
+                  <div key={row.key} className="rounded-2xl border border-base bg-surface/40 p-3">
+                    <div className="mb-3 flex items-center justify-between"><p className="text-xs font-semibold text-muted">Item {index + 1}{row.sourceQuotationNumber ? ` · ${row.sourceQuotationNumber}` : ""}</p><button type="button" aria-label={`Remove item ${index + 1}`} disabled={form.billType === "general" && generalLineItems.length === 1} onClick={() => setGeneralLineItems((items) => items.filter((item) => item.key !== row.key))} className="rounded-lg p-1.5 text-faint transition hover:bg-red-50 hover:text-red-500 disabled:opacity-30 dark:hover:bg-red-900/20"><Trash2 className="h-4 w-4" /></button></div>
+                    <div className="grid gap-3 md:grid-cols-[minmax(180px,2fr)_90px_130px_100px_130px] md:items-end">
+                      <div><label className="label">Description *</label><input className="input-field h-11 rounded-xl" value={row.description} onChange={(e) => updateRow({ description: e.target.value })} placeholder="Service or expense" required={form.billType === "general"} /></div>
+                      <div><label className="label">Qty *</label><input type="number" className="input-field h-11 rounded-xl" min="0.01" step="0.01" value={row.quantity} onChange={(e) => updateRow({ quantity: e.target.value })} required={form.billType === "general"} /></div>
+                      <div><label className="label">Rate *</label><input type="number" className="input-field h-11 rounded-xl" min="0.01" step="0.01" value={row.rate} onChange={(e) => updateRow({ rate: e.target.value })} placeholder="0.00" required={form.billType === "general"} /></div>
+                      <div><label className="label">GST %</label><input type="number" className="input-field h-11 rounded-xl" min="0" step="0.01" value={row.gstPercent} onChange={(e) => updateRow({ gstPercent: e.target.value })} /></div>
+                      <div className="rounded-xl bg-card px-3 py-2.5 text-right"><p className="text-[10px] font-semibold uppercase text-faint">Total</p><p className="mt-0.5 text-sm font-bold text-default">{formatCurrency(total)}</p></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         <section className="grid gap-4 rounded-[24px] border border-black/[0.07] bg-[#f5f5f7]/75 p-4 sm:grid-cols-2 sm:rounded-[30px] sm:p-5 dark:border-white/[0.09] dark:bg-white/[0.045]">
         <div><label className="label">Notes</label><textarea className="input-field min-h-24 rounded-2xl bg-white dark:bg-white/[0.06]" rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional billing context" /></div>
         <div>
@@ -342,11 +566,20 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
                 <p className="mt-3 text-3xl font-bold tracking-[-0.04em] text-default sm:text-4xl dark:text-white">{formatCurrency(formTotal)}</p>
                 <div className="my-5 h-px bg-black/[0.08] dark:bg-white/10" />
                 <div className="space-y-3 text-sm">
-                  {[["Government", form.govtCharges], ["Consultancy", form.consultancyCharges], ["Targets", form.targetCharges], ["Other", form.otherCharges]].map(([label, value]) => (
-                    <div key={label} className="flex items-center justify-between gap-4"><span className="text-muted dark:text-white/55">{label}</span><span className="font-mono font-medium tabular-nums text-default dark:text-white">{formatCurrency(Number(value || 0))}</span></div>
+                  {(form.billType === "general"
+                    ? generalLineItems.map((item, index) => [`${index + 1}. ${item.description || "Untitled item"}`, Number(item.quantity || 0) * Number(item.rate || 0) * (1 + Number(item.gstPercent || 0) / 100)] as const)
+                    : [
+                        ["Government", Number(form.govtCharges)],
+                        ["Consultancy", Number(form.consultancyCharges)],
+                        ["Targets", Number(form.targetCharges)],
+                        ["Other", Number(form.otherCharges)],
+                        ...generalLineItems.map((item, index) => [`${index + 1}. ${item.description || "Additional item"}`, Number(item.quantity || 0) * Number(item.rate || 0) * (1 + Number(item.gstPercent || 0) / 100)] as const),
+                      ]
+                  ).map(([label, value]) => (
+                    <div key={label} className="flex items-center justify-between gap-4"><span className="min-w-0 truncate text-muted dark:text-white/55">{label}</span><span className="font-mono font-medium tabular-nums text-default dark:text-white">{formatCurrency(Number(value || 0))}</span></div>
                   ))}
                 </div>
-                {selectedBillingClient && <div className="mt-6 rounded-[18px] border border-black/[0.05] bg-white/75 p-3.5 shadow-sm dark:border-white/[0.06] dark:bg-white/[0.08] dark:shadow-none"><p className="truncate text-sm font-semibold text-default dark:text-white">{selectedBillingClient.companyName}</p><p className="mt-1 text-xs text-muted dark:text-white/55">{form.financialYear} annual billing</p></div>}
+                {selectedBillingClient && <div className="mt-6 rounded-[18px] border border-black/[0.05] bg-white/75 p-3.5 shadow-sm dark:border-white/[0.06] dark:bg-white/[0.08] dark:shadow-none"><p className="truncate text-sm font-semibold text-default dark:text-white">{selectedBillingClient.companyName}</p><p className="mt-1 text-xs text-muted dark:text-white/55">{form.billType === "general" ? form.billTitle || "General bill" : `${form.financialYear} annual billing`}</p></div>}
               </div>
             </aside>
           </div>
@@ -356,6 +589,10 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
           <button type="button" className="inline-flex h-11 items-center justify-center rounded-full border border-black/[0.08] bg-white px-5 text-sm font-semibold text-default transition hover:bg-[#f5f5f7] active:scale-[0.98] dark:border-white/[0.10] dark:bg-white/[0.07] dark:hover:bg-white/[0.11]" onClick={onClose} disabled={saving}>Cancel</button>
           <button type="submit" className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-brand-600 px-5 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition hover:bg-brand-700 active:scale-[0.98] disabled:opacity-50" disabled={saving}>{!saving && <Check className="h-4 w-4" />}{saving ? "Saving..." : editingBilling ? "Update Billing" : "Save Billing"}</button>
         </footer>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </form>
     </Modal>
   );

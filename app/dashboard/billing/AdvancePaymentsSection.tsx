@@ -3,13 +3,12 @@ import { ArrowLeftRight, BookOpen, ChevronDown, ChevronUp, Plus, Search, Trash2,
 import EmptyState from "@/components/ui/EmptyState";
 import TableWrapper from "@/components/ui/TableWrapper";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import type { AdvanceClientRow, Billing, BillingSummary } from "./types";
+import type { AdvanceClientRow, Billing } from "./types";
 
 interface AdvancePaymentsSectionProps {
   fy: string;
-  billingSummary: BillingSummary;
+  availableAdvanceTotal: number;
   appliedAdvanceTotal: number;
-  advanceClientRows: AdvanceClientRow[];
   filteredAdvanceClientRows: AdvanceClientRow[];
   expandedAdvanceClients: Set<string>;
   search: string;
@@ -23,9 +22,8 @@ interface AdvancePaymentsSectionProps {
 
 export default function AdvancePaymentsSection({
   fy,
-  billingSummary,
+  availableAdvanceTotal,
   appliedAdvanceTotal,
-  advanceClientRows,
   filteredAdvanceClientRows,
   expandedAdvanceClients,
   search,
@@ -55,7 +53,7 @@ export default function AdvancePaymentsSection({
         <div className="grid grid-cols-3 gap-2 mb-3">
           <div className="rounded-xl border border-base bg-surface px-2.5 py-2">
             <p className="text-[10px] text-faint">Available</p>
-            <p className="text-sm font-bold text-amber-600 dark:text-amber-400 truncate">{formatCurrency(billingSummary.totalAdvance)}</p>
+            <p className="text-sm font-bold text-amber-600 dark:text-amber-400 truncate">{formatCurrency(availableAdvanceTotal)}</p>
           </div>
           <div className="rounded-xl border border-base bg-surface px-2.5 py-2">
             <p className="text-[10px] text-faint">Applied FY</p>
@@ -63,7 +61,7 @@ export default function AdvancePaymentsSection({
           </div>
           <div className="rounded-xl border border-base bg-surface px-2.5 py-2">
             <p className="text-[10px] text-faint">Clients</p>
-            <p className="text-sm font-bold text-default">{advanceClientRows.length}</p>
+            <p className="text-sm font-bold text-default">{filteredAdvanceClientRows.length}</p>
           </div>
         </div>
 

@@ -31,6 +31,10 @@ export async function POST(request: NextRequest) {
       ["Report", report.config.name],
       ["Source", report.config.source],
       ["Financial Year", report.config.financialYear],
+      ["Generated at", report.generatedAt || new Date().toISOString()],
+      ["Export scope", "All matching rows"],
+      ["Client search", report.config.search || "None"],
+      ["Filters", JSON.stringify(report.config.filters)],
       ["Matched Clients", report.summary.matchedClients],
       ["Columns", report.columns.map((column) => column.label).join(", ")],
       ["Group By", report.config.groupBy.join(", ") || "None"],
@@ -41,6 +45,37 @@ export async function POST(request: NextRequest) {
       if (format) row.getCell(2).numFmt = format;
     });
     if (report.quality.messages.length > 0) summary.addRow({ setting: "Data Quality", value: report.quality.messages.join(" ") });
+
+    if (report.config.view === "analysis") {
+      const analysis = report.summary.analysis;
+      const analysisSheet = workbook.addWorksheet("Field Analysis");
+      analysisSheet.columns = [
+        { header: "Result", key: "label", width: 34 },
+        { header: "Clients", key: "value", width: 18 },
+        { header: "% of Matching", key: "percent", width: 18 },
+      ];
+      [
+        ["Field", analysis.field.label, ""],
+        ["Analysis", analysis.transform, ""],
+        ["Total Clients", analysis.total, 100],
+        ["Applicable Clients", analysis.applicable, analysis.total > 0 ? analysis.applicable / analysis.total * 100 : 0],
+        ["Recorded", analysis.recorded, analysis.total > 0 ? analysis.recorded / analysis.total * 100 : 0],
+        ["No Record", analysis.missing, analysis.total > 0 ? analysis.missing / analysis.total * 100 : 0],
+        ["Not Applicable", analysis.excluded, analysis.total > 0 ? analysis.excluded / analysis.total * 100 : 0],
+      ].forEach(([label, value, percent]) => analysisSheet.addRow({ label, value, percent }));
+      analysisSheet.addRow({});
+      analysis.buckets.forEach((bucket) => analysisSheet.addRow({
+        label: bucket.label,
+        value: bucket.value,
+        percent: analysis.total > 0 ? bucket.value / analysis.total * 100 : 0,
+      }));
+      analysisSheet.getColumn("percent").numFmt = "0.0%";
+      analysisSheet.eachRow((row, rowNumber) => {
+        if (rowNumber > 1 && typeof row.getCell("percent").value === "number") {
+          row.getCell("percent").value = Number(row.getCell("percent").value) / 100;
+        }
+      });
+    }
 
     const businessResults = workbook.addWorksheet("Report Insights");
     businessResults.columns = [

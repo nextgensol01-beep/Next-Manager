@@ -34,7 +34,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       Client.findOne({ clientId }).select("clientId companyName category state gstNumber registrationNumber").lean() as Promise<FlatRecord | null>,
       FinancialYear.findOne({ clientId, financialYear }).lean() as Promise<FlatRecord | null>,
       Quotation.find({ clientId, financialYear }).select("quotationNumber status currentRevisionNumber createdAt sentAt acceptedAt").sort({ createdAt: -1 }).lean() as Promise<FlatRecord[]>,
-      Billing.findOne({ clientId, financialYear }).lean() as Promise<FlatRecord | null>,
+      Billing.findOne({ clientId, financialYear, billType: { $in: ["annual_return", null] } }).lean() as Promise<FlatRecord | null>,
       Payment.find({ clientId, financialYear }).select("amountPaid paymentType paymentDate paymentMode referenceNumber").sort({ paymentDate: -1 }).lean() as Promise<FlatRecord[]>,
       AnnualReturn.findOne({ clientId, financialYear }).lean() as Promise<FlatRecord | null>,
       Invoice.find({ clientId, financialYear }).lean() as Promise<FlatRecord[]>,
@@ -79,4 +79,3 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return errorResponse(error, "Unable to load relationships");
   }
 }
-

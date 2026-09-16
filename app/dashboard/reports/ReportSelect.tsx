@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Search, X } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { reportControlSpring } from "./report-motion";
 
 export type ReportSelectOption = {
   value: string;
@@ -45,12 +47,21 @@ export default function ReportSelect({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [position, setPosition] = useState<MenuPosition | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const reduceMotion = useReducedMotion();
   const selected = options.find((option) => option.value === value);
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return options;
     return options.filter((option) => `${option.label} ${option.group || ""}`.toLowerCase().includes(query));
   }, [options, search]);
+
+  useEffect(() => {
+    if (!open) return;
+    const selectedIndex = filtered.findIndex((option) => option.value === value && !option.disabled);
+    const firstEnabled = filtered.findIndex((option) => !option.disabled);
+    setActiveIndex(selectedIndex >= 0 ? selectedIndex : Math.max(0, firstEnabled));
+  }, [filtered, open, value]);
 
   const positionMenu = useCallback(() => {
     const rect = buttonRef.current?.getBoundingClientRect();
@@ -92,7 +103,7 @@ export default function ReportSelect({
     document.addEventListener("keydown", onKeyDown);
     window.addEventListener("resize", onViewportChange);
     window.addEventListener("scroll", onViewportChange, true);
-    if (searchable) window.setTimeout(() => searchRef.current?.focus(), 0);
+    window.setTimeout(() => (searchable ? searchRef.current : menuRef.current)?.focus(), 0);
     return () => {
       document.removeEventListener("mousedown", close);
       document.removeEventListener("keydown", onKeyDown);
@@ -106,6 +117,29 @@ export default function ReportSelect({
     setOpen(false);
     setSearch("");
     buttonRef.current?.focus();
+  };
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+      buttonRef.current?.focus();
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp", "Home", "End", "Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "Enter" || event.key === " ") {
+      const option = filtered[activeIndex];
+      if (option && !option.disabled) choose(option.value);
+      return;
+    }
+    const enabledIndexes = filtered.map((option, index) => option.disabled ? -1 : index).filter((index) => index >= 0);
+    if (enabledIndexes.length === 0) return;
+    if (event.key === "Home") { setActiveIndex(enabledIndexes[0]); return; }
+    if (event.key === "End") { setActiveIndex(enabledIndexes[enabledIndexes.length - 1]); return; }
+    const currentPosition = Math.max(0, enabledIndexes.indexOf(activeIndex));
+    const offset = event.key === "ArrowDown" ? 1 : -1;
+    setActiveIndex(enabledIndexes[(currentPosition + offset + enabledIndexes.length) % enabledIndexes.length]);
   };
 
   const groupedOptions = useMemo(() => {
@@ -136,17 +170,24 @@ export default function ReportSelect({
       className={`${variant === "bare" ? "report-select-button-bare" : "report-select-button"} ${open ? "is-open" : ""} ${buttonClassName}`}
     >
       <span className="min-w-0 flex-1 truncate text-left">{selected?.label || placeholder}</span>
-      <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-faint transition-transform ${open ? "rotate-180" : ""}`} />
+      <motion.span className="shrink-0 text-faint" animate={{ rotate: open ? 180 : 0 }} transition={reduceMotion ? { duration: 0.01 } : reportControlSpring}><ChevronDown className="h-3.5 w-3.5" /></motion.span>
     </button>
 
-    {open && position && createPortal(<div
+    {position && createPortal(<AnimatePresence initial={false}>{open && <motion.div
       ref={menuRef}
       id={`${id}-menu`}
       role="listbox"
       aria-label={ariaLabel}
+      aria-activedescendant={filtered[activeIndex] ? `${id}-option-${activeIndex}` : undefined}
+      tabIndex={-1}
       className="report-select-menu"
+      initial={reduceMotion ? false : { opacity: 0, scale: 0.975, y: position.bottom === undefined ? -7 : 7 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.985, y: position.bottom === undefined ? -4 : 4 }}
+      transition={reduceMotion ? { duration: 0.01 } : reportControlSpring}
+      style={{ left: position.left, top: position.top, bottom: position.bottom, width: position.width, maxHeight: position.maxHeight, transformOrigin: position.bottom === undefined ? "top center" : "bottom center" }}
       onMouseDown={(event) => event.stopPropagation()}
-      style={{ left: position.left, top: position.top, bottom: position.bottom, width: position.width, maxHeight: position.maxHeight }}
+      onKeyDown={handleMenuKeyDown}
     >
       {searchable && <div className="report-select-search-wrap">
         <Search className="h-3.5 w-3.5 shrink-0 text-faint" />
@@ -158,13 +199,14 @@ export default function ReportSelect({
           {group && <p className="report-select-group-label">{group}</p>}
           {groupOptions.map((option) => {
             const active = option.value === value;
-            return <button key={option.value} type="button" role="option" aria-selected={active} disabled={option.disabled} onClick={() => choose(option.value)} className={`report-select-option ${active ? "is-selected" : ""}`}>
+            const optionIndex = filtered.indexOf(option);
+            return <button key={option.value} id={`${id}-option-${optionIndex}`} type="button" role="option" tabIndex={-1} aria-selected={active} disabled={option.disabled} onMouseEnter={() => setActiveIndex(optionIndex)} onFocus={() => setActiveIndex(optionIndex)} onClick={() => choose(option.value)} className={`report-select-option ${active ? "is-selected" : ""} ${activeIndex === optionIndex ? "is-active" : ""}`}>
               <span className="min-w-0 flex-1 truncate">{option.label}</span>
               {active && <Check className="h-3.5 w-3.5 shrink-0" />}
             </button>;
           })}
         </div>)}
       </div>
-    </div>, document.body)}
+    </motion.div>}</AnimatePresence>, document.body)}
   </div>;
 }

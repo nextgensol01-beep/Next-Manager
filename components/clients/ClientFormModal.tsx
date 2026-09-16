@@ -978,6 +978,8 @@ export default function ClientFormModal({
   const tabScrollPos = useRef<Record<string, number>>({ basic: 0, portal: 0 });
   const initialFormRef = useRef<ClientFormData>(emptyForm());
   const initialPersonsRef = useRef<PersonEntry[]>([]);
+  const wasOpenRef = useRef(false);
+  const initializedClientIdRef = useRef<string | null>(null);
   const addContactBtnRef = useRef<HTMLButtonElement>(null);
   const contactsSectionRef = useRef<HTMLDivElement>(null);
   const stickyHeaderRef = useRef<HTMLDivElement>(null);
@@ -1043,7 +1045,17 @@ export default function ClientFormModal({
 
   // ── Reset on open ───────────────────────────────────────────────────────
   useEffect(() => {
+    const clientId = client?.clientId ?? null;
+    const justOpened = open && !wasOpenRef.current;
+    const switchedClient = open && initializedClientIdRef.current !== clientId;
+    wasOpenRef.current = open;
+
     if (!open) return;
+    // Background refreshes may replace `client` with an equivalent new object.
+    // Preserve the draft unless this is a new open session or a different client.
+    if (!justOpened && !switchedClient) return;
+    initializedClientIdRef.current = clientId;
+
     const f = client ? formFromClient(client) : emptyForm();
     const p = client ? personsFromClient(client) : [{ ...emptyPersonEntry(), isPrimaryContact: true }];
     setForm(f);

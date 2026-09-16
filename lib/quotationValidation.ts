@@ -34,6 +34,14 @@ export const quotationItemSchema = z.object({
   gstPercent: quotationGstPercentSchema,
 });
 
+export const quotationAdditionalItemSchema = z.object({
+  lineId: optionalText,
+  description: z.string().trim().min(1, "Description is required").max(200),
+  quantity: money,
+  rate: money,
+  gstPercent: quotationGstPercentSchema,
+});
+
 export const quotationCreateSchema = z.object({
   clientName: z.string().trim().min(1, "Client name is required").max(200),
   clientId: optionalText,
@@ -42,6 +50,7 @@ export const quotationCreateSchema = z.object({
   clientState: optionalText,
   financialYear: quotationFinancialYearSchema,
   items: z.array(quotationItemSchema).default([]),
+  additionalItems: z.array(quotationAdditionalItemSchema).default([]),
   consultationCharges: money.default(0),
   consultationGstPercent: quotationGstPercentSchema.default(18),
   governmentFees: money.default(0),
@@ -59,6 +68,7 @@ export const quotationPatchSchema = z.object({
   financialYear: quotationFinancialYearSchema.optional(),
   validityDays: positiveDays.optional(),
   items: z.array(quotationItemSchema).optional(),
+  additionalItems: z.array(quotationAdditionalItemSchema).optional(),
   consultationCharges: money.optional(),
   consultationGstPercent: quotationGstPercentSchema.optional(),
   governmentFees: money.optional(),

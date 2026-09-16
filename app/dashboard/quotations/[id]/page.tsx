@@ -26,6 +26,7 @@ import {
   canCreateQuotationRevision,
   canEditQuotation,
   getAllowedQuotationTransitions,
+  roundMoney,
   type QuotationStatus,
 } from "@/lib/quotationRules";
 
@@ -35,11 +36,18 @@ interface RevisionItem {
   subtotal: number; gstAmount: number; totalAmount: number;
 }
 
+interface RevisionAdditionalItem {
+  lineId?: string; description: string;
+  quantity: number; rate: number; gstPercent: number;
+  subtotal: number; gstAmount: number; totalAmount: number;
+}
+
 interface Revision {
   _id: string; revisionNumber: number;
-  items: RevisionItem[]; consultationCharges: number;
+  items: RevisionItem[]; additionalItems?: RevisionAdditionalItem[]; consultationCharges: number;
   consultationGstPercent: number; consultationGstAmount: number;
   governmentFees: number; itemsSubtotal: number; itemsGst: number;
+  additionalItemsSubtotal?: number; additionalItemsGst?: number; additionalItemsTotal?: number;
   grandTotal: number; notes: string; validityDays: number; isFinalised: boolean;
   finalisedAt?: string;
   createdAt: string;
@@ -1123,6 +1131,18 @@ function computeDiff(prev: Revision | null, curr: Revision) {
   if (prev.items.length !== curr.items.length) {
     changes.push({ field: "Line Items", from: `${prev.items.length} items`, to: `${curr.items.length} items` });
   }
+  const previousAdditionalItems = prev.additionalItems || [];
+  const currentAdditionalItems = curr.additionalItems || [];
+  if (previousAdditionalItems.length !== currentAdditionalItems.length) {
+    changes.push({ field: "Additional Items", from: `${previousAdditionalItems.length} items`, to: `${currentAdditionalItems.length} items` });
+  }
+  previousAdditionalItems.forEach((previousItem, index) => {
+    const currentItem = currentAdditionalItems.find(item => item.lineId && item.lineId === previousItem.lineId) || currentAdditionalItems[index];
+    if (!currentItem) return;
+    if (previousItem.description !== currentItem.description) changes.push({ field: `Additional item ${index + 1}`, from: previousItem.description, to: currentItem.description });
+    if (previousItem.quantity !== currentItem.quantity) changes.push({ field: `${currentItem.description} — Quantity`, from: String(previousItem.quantity), to: String(currentItem.quantity) });
+    if (previousItem.rate !== currentItem.rate) changes.push({ field: `${currentItem.description} — Rate`, from: `₹${fmt(previousItem.rate)}`, to: `₹${fmt(currentItem.rate)}` });
+  });
   prev.items.forEach((pItem, i) => {
     const cItem = curr.items[i];
     if (!cItem) return;
@@ -1139,6 +1159,23 @@ const newItem = () => ({
   subtotal: 0, gstAmount: 0, totalAmount: 0,
   _id: Math.random().toString(36).slice(2),
 });
+
+const newAdditionalItem = () => {
+  const lineId = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return {
+    lineId,
+    description: "",
+    quantity: 1,
+    rate: 0,
+    gstPercent: 18,
+    subtotal: 0,
+    gstAmount: 0,
+    totalAmount: 0,
+    _id: lineId,
+  };
+};
 
 const shouldSyncStandardDescription = (description: string) => {
   const normalized = description.trim();
@@ -1174,6 +1211,7 @@ export default function QuotationDetailPage() {
   const [validityDays, setValidityDays] = useState(30);
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<ReturnType<typeof newItem>[]>([newItem()]);
+  const [additionalItems, setAdditionalItems] = useState<ReturnType<typeof newAdditionalItem>[]>([]);
   const [openTypeMenuId, setOpenTypeMenuId] = useState<string | null>(null);
   const [openServiceMenuId, setOpenServiceMenuId] = useState<string | null>(null);
   const [consultationCharges, setConsultationCharges] = useState("0");
@@ -1602,6 +1640,11 @@ export default function QuotationDetailPage() {
       const currentRev = data.revisions.find(r => r.revisionNumber === data.currentRevisionNumber);
       if (currentRev) {
         setItems(currentRev.items.map(i => ({ ...i, _id: Math.random().toString(36).slice(2) })));
+        setAdditionalItems((currentRev.additionalItems || []).map(i => ({
+          ...i,
+          lineId: i.lineId || Math.random().toString(36).slice(2),
+          _id: i.lineId || Math.random().toString(36).slice(2),
+        })));
         setConsultationCharges(String(currentRev.consultationCharges));
         setConsultationGstPercent(String(currentRev.consultationGstPercent));
         setGovernmentFees(String(currentRev.governmentFees));
@@ -1709,6 +1752,11 @@ export default function QuotationDetailPage() {
     if (!rev) return;
     isSwitchingRevision.current = true;
     setItems(rev.items.map(i => ({ ...i, _id: Math.random().toString(36).slice(2) })));
+    setAdditionalItems((rev.additionalItems || []).map(i => ({
+      ...i,
+      lineId: i.lineId || Math.random().toString(36).slice(2),
+      _id: i.lineId || Math.random().toString(36).slice(2),
+    })));
     setConsultationCharges(String(rev.consultationCharges));
     setConsultationGstPercent(String(rev.consultationGstPercent));
     setGovernmentFees(String(rev.governmentFees));
@@ -1879,31 +1927,45 @@ export default function QuotationDetailPage() {
 
   const buildFormRevision = useCallback((baseRevision: Revision): Revision => {
     const calculatedItems = items.map(item => {
-      const subtotal = item.quantity * item.rate;
-      const gstAmount = subtotal * (item.gstPercent / 100);
-      return { ...item, subtotal, gstAmount, totalAmount: subtotal + gstAmount };
+      const subtotal = roundMoney(item.quantity * item.rate);
+      const gstAmount = roundMoney(subtotal * (item.gstPercent / 100));
+      return { ...item, subtotal, gstAmount, totalAmount: roundMoney(subtotal + gstAmount) };
     });
-    const itemsSubtotal = calculatedItems.reduce((sum, item) => sum + item.subtotal, 0);
-    const itemsGst = calculatedItems.reduce((sum, item) => sum + item.gstAmount, 0);
+    const itemsSubtotal = roundMoney(calculatedItems.reduce((sum, item) => sum + item.subtotal, 0));
+    const itemsGst = roundMoney(calculatedItems.reduce((sum, item) => sum + item.gstAmount, 0));
+    const calculatedAdditionalItems = additionalItems
+      .filter(item => item.description.trim())
+      .map(item => {
+        const subtotal = roundMoney(item.quantity * item.rate);
+        const gstAmount = roundMoney(subtotal * (item.gstPercent / 100));
+        return { ...item, description: item.description.trim(), subtotal, gstAmount, totalAmount: roundMoney(subtotal + gstAmount) };
+      });
+    const additionalItemsSubtotal = roundMoney(calculatedAdditionalItems.reduce((sum, item) => sum + item.subtotal, 0));
+    const additionalItemsGst = roundMoney(calculatedAdditionalItems.reduce((sum, item) => sum + item.gstAmount, 0));
+    const additionalItemsTotal = roundMoney(additionalItemsSubtotal + additionalItemsGst);
     const cc = Number(consultationCharges) || 0;
     const ccPct = Number(consultationGstPercent) || 0;
-    const consultationGstAmount = cc * (ccPct / 100);
+    const consultationGstAmount = roundMoney(cc * (ccPct / 100));
     const gf = Number(governmentFees) || 0;
 
     return {
       ...baseRevision,
       items: calculatedItems,
+      additionalItems: calculatedAdditionalItems,
       consultationCharges: cc,
       consultationGstPercent: ccPct,
       consultationGstAmount,
       governmentFees: gf,
       itemsSubtotal,
       itemsGst,
-      grandTotal: itemsSubtotal + itemsGst + cc + consultationGstAmount + gf,
+      additionalItemsSubtotal,
+      additionalItemsGst,
+      additionalItemsTotal,
+      grandTotal: roundMoney(itemsSubtotal + itemsGst + additionalItemsTotal + cc + consultationGstAmount + gf),
       notes,
       validityDays,
     };
-  }, [items, consultationCharges, consultationGstPercent, governmentFees, notes, validityDays]);
+  }, [items, additionalItems, consultationCharges, consultationGstPercent, governmentFees, notes, validityDays]);
 
   const saveCurrentDraft = useCallback(async () => {
     if (!quotation || !canEditQuotation(quotation.status) || selectedRevNum !== quotation.currentRevisionNumber) {
@@ -1930,6 +1992,7 @@ export default function QuotationDetailPage() {
         financialYear,
         validityDays,
         items: nextRevision.items,
+        additionalItems: nextRevision.additionalItems,
         consultationCharges: nextRevision.consultationCharges,
         consultationGstPercent: nextRevision.consultationGstPercent,
         governmentFees: nextRevision.governmentFees,
@@ -1979,20 +2042,23 @@ export default function QuotationDetailPage() {
 
   useEffect(() => {
     if (!loading && quotation && canEditQuotation(quotation.status) && !isInitialLoad.current && !isSwitchingRevision.current && selectedRevNum === quotation.currentRevisionNumber) triggerAutoSave();
-  }, [clientName, clientId, clientAddress, clientGst, clientState, financialYear, validityDays, items, consultationCharges, consultationGstPercent, governmentFees, notes]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientName, clientId, clientAddress, clientGst, clientState, financialYear, validityDays, items, additionalItems, consultationCharges, consultationGstPercent, governmentFees, notes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live totals
-  const calcItem = (item: typeof items[0]) => {
-    const subtotal = item.quantity * item.rate;
-    const gstAmt = subtotal * (item.gstPercent / 100);
-    return { subtotal, gstAmt, total: subtotal + gstAmt };
+  const calcItem = (item: { quantity: number; rate: number; gstPercent: number }) => {
+    const subtotal = roundMoney(item.quantity * item.rate);
+    const gstAmt = roundMoney(subtotal * (item.gstPercent / 100));
+    return { subtotal, gstAmt, total: roundMoney(subtotal + gstAmt) };
   };
   const liveItemsSubtotal = items.reduce((s, i) => s + calcItem(i).subtotal, 0);
   const liveItemsGst = items.reduce((s, i) => s + calcItem(i).gstAmt, 0);
+  const liveAdditionalItemsSubtotal = additionalItems.reduce((s, i) => s + calcItem(i).subtotal, 0);
+  const liveAdditionalItemsGst = additionalItems.reduce((s, i) => s + calcItem(i).gstAmt, 0);
+  const liveAdditionalItemsTotal = liveAdditionalItemsSubtotal + liveAdditionalItemsGst;
   const liveCC = Number(consultationCharges) || 0;
-  const liveCCGst = liveCC * ((Number(consultationGstPercent) || 0) / 100);
+  const liveCCGst = roundMoney(liveCC * ((Number(consultationGstPercent) || 0) / 100));
   const liveGF = Number(governmentFees) || 0;
-  const liveGrand = liveItemsSubtotal + liveItemsGst + liveCC + liveCCGst + liveGF;
+  const liveGrand = roundMoney(liveItemsSubtotal + liveItemsGst + liveAdditionalItemsTotal + liveCC + liveCCGst + liveGF);
 
   const updateItem = (idx: number, field: string, value: string | number) => {
     setItems(prev => prev.map((item, i) => {
@@ -2003,6 +2069,10 @@ export default function QuotationDetailPage() {
       }
       return nextItem;
     }));
+  };
+
+  const updateAdditionalItem = (idx: number, field: string, value: string | number) => {
+    setAdditionalItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item));
   };
 
   const selectStandardService = (idx: number, service: typeof STANDARD_SERVICES[number]) => {
@@ -2140,10 +2210,20 @@ export default function QuotationDetailPage() {
       if (!tmplRes.ok) throw new Error("Quotation template not found");
       const { html: template } = await tmplRes.json();
       const html = buildQuotationHTML(template, target.quotation, target.revision);
+      const documentTitle = getQuotationDocumentTitle(target.quotation, target.revision);
       const win = window.open("", "_blank");
       if (!win) { toast.error("Popup blocked - please allow popups"); return; }
-      win.document.write(html); win.document.close(); win.focus();
-      setTimeout(() => win.print(), 600);
+      win.document.write(html);
+      win.document.close();
+      // Browsers use the print document's title as the initial filename for
+      // "Save as PDF". Set it explicitly as well as in the HTML template so
+      // about:blank print windows consistently receive the quotation name.
+      win.document.title = documentTitle;
+      win.focus();
+      setTimeout(() => {
+        win.document.title = documentTitle;
+        win.print();
+      }, 600);
       if (target.quotation.status === "Finalized") {
         setMarkSentPrompt("print");
       }
@@ -2545,8 +2625,12 @@ export default function QuotationDetailPage() {
       clientState: q.clientState || "",
       financialYear: q.financialYear,
       items: rev.items,
+      additionalItems: rev.additionalItems || [],
       itemsSubtotal: rev.itemsSubtotal,
       itemsGst: rev.itemsGst,
+      additionalItemsSubtotal: rev.additionalItemsSubtotal || 0,
+      additionalItemsGst: rev.additionalItemsGst || 0,
+      additionalItemsTotal: rev.additionalItemsTotal || 0,
       consultationCharges: rev.consultationCharges,
       consultationGstPercent: rev.consultationGstPercent,
       consultationGstAmount: rev.consultationGstAmount,
@@ -2707,6 +2791,8 @@ export default function QuotationDetailPage() {
   const summaryBreakdownRows = [
     { label: "EPR Credits", value: liveItemsSubtotal },
     { label: "GST on Credits", value: liveItemsGst },
+    ...(liveAdditionalItemsSubtotal > 0 ? [{ label: "Additional Items", value: liveAdditionalItemsSubtotal }] : []),
+    ...(liveAdditionalItemsGst > 0 ? [{ label: "GST on Additional Items", value: liveAdditionalItemsGst }] : []),
     ...(liveCC > 0 ? [{ label: "Consultation", value: liveCC }] : []),
     ...(liveCCGst > 0 ? [{ label: "GST on Consultation", value: liveCCGst }] : []),
     ...(liveGF > 0 ? [{ label: "Government Fees", value: liveGF }] : []),
@@ -3325,6 +3411,38 @@ export default function QuotationDetailPage() {
                   )}
                 </div>
 
+                {(additionalItems.length > 0) && (
+                  <div className={`${surfaceCard} p-4 sm:p-5`}>
+                    <div className="mb-3.5 flex items-center justify-between gap-4 px-0.5">
+                      <div>
+                        <h3 className="text-base font-semibold tracking-[-0.01em] text-default">Additional Items</h3>
+                        <p className="mt-1 text-xs text-muted">Other agreed services and expenses in this revision.</p>
+                      </div>
+                      <p className="rounded-full bg-black/[0.04] px-2.5 py-1 text-[11px] font-medium text-muted dark:bg-white/[0.055]">{additionalItems.length} {additionalItems.length === 1 ? "item" : "items"}</p>
+                    </div>
+                    <div className="space-y-3">
+                      {additionalItems.map((item, idx) => {
+                        const { gstAmt, total } = calcItem(item);
+                        return (
+                          <article key={item._id} className={`rounded-[18px] p-4 sm:px-5 sm:py-4 ${quoteReadOnlyPanel}`}>
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="min-w-0"><p className={sectionEyebrow}>Additional item {idx + 1}</p><h4 className="mt-1 text-base font-semibold text-default">{item.description}</h4></div>
+                              <div className="shrink-0 text-right"><p className={sectionEyebrow}>Total</p><p className="mt-1 font-mono text-xl font-semibold text-default">{money(total)}</p></div>
+                            </div>
+                            <div className={`mt-3 grid grid-cols-3 gap-px rounded-2xl ${quoteReadOnlyGrid}`}>
+                              {[
+                                { label: "Quantity", value: item.quantity.toLocaleString("en-IN") },
+                                { label: "Rate", value: money(item.rate) },
+                                { label: "GST", value: `${item.gstPercent}% · ${money(gstAmt)}` },
+                              ].map(({ label, value }) => <div key={label} className={`px-3 py-2.5 ${quoteReadOnlyCell}`}><p className={sectionEyebrow}>{label}</p><p className="mt-0.5 truncate text-sm font-medium text-default">{value}</p></div>)}
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className={`${surfaceCard} p-4 sm:p-8`}>
                   <div className="mb-4 flex items-center gap-2 sm:mb-6">
                     <Receipt className="h-5 w-5 text-muted" />
@@ -3333,8 +3451,9 @@ export default function QuotationDetailPage() {
                       <p className="mt-1 text-sm text-muted">Fees and tax components in this revision.</p>
                     </div>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     {[
+                      { label: "Additional Items", value: money(liveAdditionalItemsTotal), helper: `${additionalItems.length} item${additionalItems.length === 1 ? "" : "s"}` },
                       { label: "Consultation", value: money(liveCC), helper: `GST ${Number(consultationGstPercent) || 0}% - ${money(liveCCGst)}` },
                       { label: "Government Fees", value: money(liveGF), helper: "CPCB / SPCB / portal charges" },
                       { label: "Grand Total", value: money(liveGrand), emphasis: true },
@@ -3603,6 +3722,37 @@ export default function QuotationDetailPage() {
                     })}
                   </div>
                   <button onClick={() => setItems(prev => [...prev, newItem()])} className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-black/[0.12] bg-black/[0.015] px-4 py-3 text-xs font-semibold text-muted transition-all duration-200 hover:border-brand-400/50 hover:bg-brand-50/50 hover:text-brand-700 active:scale-[0.995] dark:border-white/[0.12] dark:bg-white/[0.025] dark:hover:border-brand-400/40 dark:hover:bg-brand-400/[0.08] dark:hover:text-brand-200"><Plus className="h-3.5 w-3.5" />Add another line item</button>
+                </div>
+
+                <div className={`${surfaceCard} p-4 sm:p-8`}>
+                  <div className="mb-4 flex items-center justify-between gap-4 sm:mb-6">
+                    <div><h3 className="flex items-center gap-2 text-xl font-semibold text-default"><FileText className="h-5 w-5 text-muted" />Additional Items</h3><p className="mt-1 text-sm text-muted">Add other services or expenses without treating them as target charges.</p></div>
+                    <button type="button" onClick={() => setAdditionalItems(prev => [...prev, newAdditionalItem()])} className="glass-btn glass-btn-primary shrink-0 rounded-full px-3 py-2 sm:px-4"><Plus className="h-3.5 w-3.5" /> Add Item</button>
+                  </div>
+                  {additionalItems.length === 0 ? (
+                    <button type="button" onClick={() => setAdditionalItems([newAdditionalItem()])} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-black/[0.12] bg-black/[0.015] px-4 py-7 text-sm font-semibold text-muted transition hover:border-brand-400/50 hover:bg-brand-50/50 hover:text-brand-700 dark:border-white/[0.12] dark:bg-white/[0.025]"><Plus className="h-4 w-4" />Add the first additional item</button>
+                  ) : (
+                    <div className="space-y-3">
+                      {additionalItems.map((item, idx) => {
+                        const { gstAmt, total } = calcItem(item);
+                        return (
+                          <article key={item._id} className={`rounded-[20px] p-4 sm:p-5 ${quoteSubtleSurface}`}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1"><label className="label">Description *</label><input className={`${softInput} w-full`} value={item.description} onChange={event => updateAdditionalItem(idx, "description", event.target.value)} placeholder="Service or expense" /></div>
+                              <button type="button" onClick={() => setAdditionalItems(prev => prev.filter((_, index) => index !== idx))} className="mt-7 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-faint transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10" aria-label={`Remove additional item ${idx + 1}`}><Trash2 className="h-4 w-4" /></button>
+                            </div>
+                            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                              <div><label className="label">Quantity</label><PremiumNumberInput ariaLabel={`Quantity for additional item ${idx + 1}`} value={item.quantity} onChange={value => updateAdditionalItem(idx, "quantity", value)} decimals={2} /></div>
+                              <div><label className="label">Rate</label><PremiumNumberInput ariaLabel={`Rate for additional item ${idx + 1}`} value={item.rate} onChange={value => updateAdditionalItem(idx, "rate", value)} prefix="₹" decimals={2} /></div>
+                              <div><label className="label">GST</label><LiquidGlassDropdown label={`GST for additional item ${idx + 1}`} options={GST_DROPDOWN_OPTIONS} value={String(item.gstPercent)} onChange={value => updateAdditionalItem(idx, "gstPercent", Number(value))} variant="soft" portal /></div>
+                            </div>
+                            <div className="mt-3 flex items-center justify-between rounded-2xl bg-black/[0.025] px-4 py-3 text-sm dark:bg-white/[0.04]"><span className="text-muted">Taxable {money(item.quantity * item.rate)} · GST {money(gstAmt)}</span><span className="font-mono font-semibold text-default">{money(total)}</span></div>
+                          </article>
+                        );
+                      })}
+                      <div className="flex items-center justify-between rounded-2xl border border-base px-4 py-3"><span className="text-sm font-medium text-muted">Additional items total</span><span className="font-mono text-lg font-semibold text-default">{money(liveAdditionalItemsTotal)}</span></div>
+                    </div>
+                  )}
                 </div>
 
                 <div className={`${surfaceCard} p-4 sm:p-8`}>
@@ -4282,12 +4432,19 @@ export default function QuotationDetailPage() {
                   <div className="divide-y divide-black/[0.06] dark:divide-white/[0.08]">
                     {[
                       ["Target charges", Number(emailDraftRevision?.itemsSubtotal || 0) + Number(emailDraftRevision?.itemsGst || 0)],
+                      ["Additional items", Number(emailDraftRevision?.additionalItemsTotal || 0)],
                       ["Consultancy charges", Number(emailDraftRevision?.consultationCharges || 0) + Number(emailDraftRevision?.consultationGstAmount || 0)],
                       ["Government fees", Number(emailDraftRevision?.governmentFees || 0)],
                     ].map(([label, amount]) => (
                       <div key={String(label)} className="flex items-center justify-between gap-4 px-4 py-3.5 text-sm">
                         <span className="text-muted">{label}</span>
                         <span className="font-mono font-semibold tabular-nums text-default">{money(Number(amount))}</span>
+                      </div>
+                    ))}
+                    {(emailDraftRevision?.additionalItems || []).map((item, index) => (
+                      <div key={item.lineId || `${item.description}-${index}`} className="flex items-center justify-between gap-4 bg-black/[0.015] px-4 py-2.5 pl-7 text-xs dark:bg-white/[0.02]">
+                        <span className="min-w-0 truncate text-muted">{item.description}</span>
+                        <span className="shrink-0 font-mono font-semibold tabular-nums text-default">{money(item.totalAmount)}</span>
                       </div>
                     ))}
                   </div>

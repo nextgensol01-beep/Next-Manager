@@ -9,13 +9,14 @@ import { formatDateTime, type Billing, type Payment } from "./ClientProfileSuppo
 
 type ClientProfileBillingPaymentsProps = {
   selectedFy: string;
-  billing: WithPending<Billing> | null;
+  billings: WithPending<Billing>[];
   payments: WithPending<Payment>[];
   billingLastUpdated: string;
   hasFyData: boolean;
   isPWP: boolean;
   openReminderModal: (billing?: Billing) => void;
   openBillingModalForRecord: (billing?: Billing | null) => void;
+  openBillingWorkspace: (billing: Billing) => void;
   deleteBilling: (billing: Billing) => void;
   openFYModal: () => void;
   openPaymentModalForRecord: (payment?: Payment | null) => void;
@@ -25,39 +26,37 @@ type ClientProfileBillingPaymentsProps = {
 
 export default function ClientProfileBillingPayments({
   selectedFy,
-  billing,
+  billings,
   payments,
   billingLastUpdated,
   hasFyData,
   isPWP,
   openReminderModal,
   openBillingModalForRecord,
+  openBillingWorkspace,
   deleteBilling,
   openFYModal,
   openPaymentModalForRecord,
   deletePayment,
   view = "all",
 }: ClientProfileBillingPaymentsProps) {
-  const billingIsPending = billing?._status === "pending";
   const showBilling = view === "all" || view === "billing";
   const showPayments = view === "all" || view === "payments";
   const showLedger = view === "ledger";
+  const outstandingBilling = billings.find((record) => Number(record.pendingAmount || 0) > 0);
   const directPayments = payments.filter((payment) => payment.paymentType !== "advance");
   const advancePayments = payments.filter((payment) => payment.paymentType === "advance");
   const paymentTotal = directPayments.reduce((sum, payment) => sum + Number(payment.amountPaid || 0), 0);
   const advanceTotal = advancePayments.reduce((sum, payment) => sum + Number(payment.amountPaid || 0), 0);
-  const paymentProgress = billing?.totalAmount
-    ? Math.min(100, Math.round((Number(billing.totalPaid || 0) / Number(billing.totalAmount)) * 100))
-    : 0;
   const ledgerEntries = [
-    ...(billing ? [{
-      id: `billing-${billing._id}`,
-      date: billing.invoiceDate || billing.createdAt || "",
-      title: billing.invoiceNumber ? `Invoice ${billing.invoiceNumber}` : `Billing for FY ${selectedFy}`,
-      detail: "Amount billed",
-      amount: Number(billing.totalAmount || 0),
+    ...billings.map((record) => ({
+      id: `billing-${record._id}`,
+      date: record.billDate || record.invoiceDate || record.createdAt || "",
+      title: record.billTitle || (record.invoiceNumber ? `Invoice ${record.invoiceNumber}` : "Annual Return Filing"),
+      detail: (record.billType || "annual_return") === "general" ? "General bill" : "Annual Return bill",
+      amount: Number(record.totalAmount || 0),
       kind: "debit" as const,
-    }] : []),
+    })),
     ...payments.map((payment) => ({
       id: payment._id,
       date: payment.paymentDate,
@@ -74,58 +73,105 @@ export default function ClientProfileBillingPayments({
     <>
     {showBilling && <div className="client-profile-card client-profile-financial-card">
       <div className="flex items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div>
-            <p className="client-profile-kicker">Billing</p>
-            <h3 className="text-xl font-semibold text-default">FY {selectedFy} billing</h3>
-          </div>
-          {billing && <PaymentStatusBadge status={billing.paymentStatus} />}
-          {billing && <PendingChip status={billing._status} />}
+        <div>
+          <p className="client-profile-kicker">Billing</p>
+          <h3 className="text-xl font-semibold text-default">FY {selectedFy} bills</h3>
+          {billings.length > 0 && <p className="mt-1 text-xs text-faint">{billings.length} bill{billings.length === 1 ? "" : "s"} recorded</p>}
         </div>
-        <div className="flex items-center gap-2">
-          {billing ? (
-            <div className="glass-tray" style={{ gap: "3px" }}>
-              {billing.pendingAmount > 0 && (
-                <button type="button" className="glass-pill" disabled={billingIsPending} onClick={() => openReminderModal(billing)}>
-                  <Send className="w-3 h-3" /> Reminder
-                </button>
-              )}
-              <button type="button" className="glass-pill" disabled={billingIsPending} onClick={() => openBillingModalForRecord(billing)}>
-                <Pencil className="w-3 h-3" /> Edit
-              </button>
-              <button type="button" className="glass-pill" style={{ color: "#ff3b30" }} disabled={billingIsPending} onClick={() => deleteBilling(billing)}>
-                <Trash2 className="w-3 h-3" /> Delete
-              </button>
-            </div>
-          ) : (
-            <button type="button" className="glass-btn glass-btn-primary" onClick={() => openBillingModalForRecord()}>
-              <Plus className="w-3.5 h-3.5" /> Create Billing
-            </button>
-          )}
-        </div>
+        <button type="button" className="glass-btn glass-btn-primary" onClick={() => openBillingModalForRecord()}>
+          <Plus className="w-3.5 h-3.5" /> Create Billing
+        </button>
       </div>
       {billingLastUpdated && <p className="text-xs text-faint mb-4">Last updated {formatDateTime(billingLastUpdated)}</p>}
-      {billing ? (
-        <div className={`transition-opacity duration-200 ${billingIsPending ? "opacity-60" : ""}`}>
-          <div className="client-profile-financial-payment-progress">
-            <div>
-              <span>Payment progress</span>
-              <strong>{paymentProgress}%</strong>
-            </div>
-            <div aria-label={`${paymentProgress}% paid`}><span style={{ width: `${paymentProgress}%` }} /></div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-            <div className="bg-surface rounded-xl p-3"><p className="text-xs text-muted">Govt Charges</p><p className="font-semibold">{formatCurrency(billing.govtCharges)}</p></div>
-            <div className="bg-surface rounded-xl p-3"><p className="text-xs text-muted">Consultancy</p><p className="font-semibold">{formatCurrency(billing.consultancyCharges)}</p></div>
-            <div className="bg-surface rounded-xl p-3"><p className="text-xs text-muted">Target Charges</p><p className="font-semibold">{formatCurrency(billing.targetCharges)}</p></div>
-            <div className="bg-surface rounded-xl p-3"><p className="text-xs text-muted">Other Charges</p><p className="font-semibold">{formatCurrency(billing.otherCharges)}</p></div>
-          </div>
-          {billing.notes && <div className="rounded-xl bg-surface px-3 py-2.5 text-sm text-muted mb-4">{billing.notes}</div>}
-          <div className="border-t border-soft pt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="text-center"><p className="text-xs text-muted">Total Billed</p><p className="font-bold text-default">{formatCurrency(billing.totalAmount)}</p></div>
-            <div className="text-center"><p className="text-xs text-muted">Paid</p><p className="font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(billing.totalPaid)}</p></div>
-            <div className="text-center"><p className="text-xs text-muted">Pending</p><p className="font-bold text-red-500">{formatCurrency(billing.pendingAmount)}</p></div>
-          </div>
+      {billings.length > 0 ? (
+        <div className="space-y-4">
+          {billings.map((record) => {
+            const isGeneral = (record.billType || "annual_return") === "general";
+            const isPending = record._status === "pending";
+            const progress = record.totalAmount
+              ? Math.min(100, Math.round((Number(record.totalPaid || 0) / Number(record.totalAmount)) * 100))
+              : 0;
+            const billingDate = record.billDate || record.invoiceDate || record.createdAt;
+
+            return (
+              <article key={record._id} className={`rounded-2xl border border-base bg-card p-4 transition-opacity duration-200 sm:p-5 ${isPending ? "opacity-60" : ""}`}>
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="truncate font-semibold text-default">{record.billTitle || (isGeneral ? "General Bill" : "Annual Return Filing")}</h4>
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${isGeneral ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300" : "bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300"}`}>
+                        {isGeneral ? "General" : "Annual Return"}
+                      </span>
+                      <PaymentStatusBadge status={record.paymentStatus} />
+                      <PendingChip status={record._status} />
+                    </div>
+                    <p className="mt-1 text-xs text-faint">
+                      {billingDate ? formatDate(billingDate) : `FY ${selectedFy}`}
+                    </p>
+                  </div>
+                  <div className="glass-tray self-start" style={{ gap: "3px" }}>
+                    {record.pendingAmount > 0 && (
+                      <button type="button" className="glass-pill" disabled={isPending} onClick={() => openReminderModal(record)}>
+                        <Send className="w-3 h-3" /> Reminder
+                      </button>
+                    )}
+                    <button type="button" className="glass-pill" disabled={isPending} onClick={() => isGeneral ? openBillingWorkspace(record) : openBillingModalForRecord(record)}>
+                      <Pencil className="w-3 h-3" /> {isGeneral ? "Manage" : "Edit"}
+                    </button>
+                    <button type="button" className="glass-pill" style={{ color: "#ff3b30" }} disabled={isPending} onClick={() => deleteBilling(record)}>
+                      <Trash2 className="w-3 h-3" /> Delete
+                    </button>
+                  </div>
+                </div>
+
+                <div className="client-profile-financial-payment-progress">
+                  <div><span>Payment progress</span><strong>{progress}%</strong></div>
+                  <div aria-label={`${progress}% paid`}><span style={{ width: `${progress}%` }} /></div>
+                </div>
+
+                {isGeneral ? (
+                  <div className="mb-4 space-y-2">
+                    {(record.lineItems || []).length > 0 ? record.lineItems?.map((item, index) => (
+                      <div key={`${record._id}-item-${index}`} className="flex items-start justify-between gap-4 rounded-xl bg-surface px-3 py-2.5">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-default">{item.description}</p>
+                          <p className="text-xs text-faint">{item.quantity} × {formatCurrency(item.rate)} · GST {item.gstPercent}%</p>
+                        </div>
+                        <p className="shrink-0 text-sm font-semibold text-default">{formatCurrency(item.totalAmount)}</p>
+                      </div>
+                    )) : <div className="rounded-xl bg-surface px-3 py-2.5 text-sm text-muted">General billing entry</div>}
+                  </div>
+                ) : (
+                  <>
+                    <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl bg-surface p-3"><p className="text-xs text-muted">Govt Charges</p><p className="font-semibold">{formatCurrency(record.govtCharges)}</p></div>
+                      <div className="rounded-xl bg-surface p-3"><p className="text-xs text-muted">Consultancy</p><p className="font-semibold">{formatCurrency(record.consultancyCharges)}</p></div>
+                      <div className="rounded-xl bg-surface p-3"><p className="text-xs text-muted">Target Charges</p><p className="font-semibold">{formatCurrency(record.targetCharges)}</p></div>
+                      <div className="rounded-xl bg-surface p-3"><p className="text-xs text-muted">Other Charges</p><p className="font-semibold">{formatCurrency(record.otherCharges)}</p></div>
+                    </div>
+                    {(record.lineItems || []).length > 0 && (
+                      <div className="mb-4 space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted">Additional Items</p>
+                        {record.lineItems?.map((item, index) => (
+                          <div key={`${record._id}-additional-${index}`} className="flex items-start justify-between gap-4 rounded-xl bg-surface px-3 py-2.5">
+                            <div className="min-w-0"><p className="truncate text-sm font-medium text-default">{item.description}</p><p className="text-xs text-faint">{item.quantity} × {formatCurrency(item.rate)} · GST {item.gstPercent}%</p></div>
+                            <p className="shrink-0 text-sm font-semibold text-default">{formatCurrency(item.totalAmount)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {record.notes && <div className="mb-4 rounded-xl bg-surface px-3 py-2.5 text-sm text-muted">{record.notes}</div>}
+                <div className="grid grid-cols-1 gap-3 border-t border-soft pt-3 sm:grid-cols-3">
+                  <div className="text-center"><p className="text-xs text-muted">Total Billed</p><p className="font-bold text-default">{formatCurrency(record.totalAmount)}</p></div>
+                  <div className="text-center"><p className="text-xs text-muted">Paid</p><p className="font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(record.totalPaid)}</p></div>
+                  <div className="text-center"><p className="text-xs text-muted">Pending</p><p className="font-bold text-red-500">{formatCurrency(record.pendingAmount)}</p></div>
+                </div>
+              </article>
+            );
+          })}
         </div>
       ) : (
         <div className="text-center py-6">
@@ -275,8 +321,8 @@ export default function ClientProfileBillingPayments({
               <button type="button" className="glass-pill glass-pill-active" onClick={() => openPaymentModalForRecord()}>
                 Add Payment
               </button>
-              {billing && billing.pendingAmount > 0 && (
-                <button type="button" className="glass-pill" onClick={() => openReminderModal()}>
+              {outstandingBilling && (
+                <button type="button" className="glass-pill" onClick={() => openReminderModal(outstandingBilling)}>
                   Send Reminder
                 </button>
               )}
@@ -324,7 +370,7 @@ export default function ClientProfileBillingPayments({
 
 export function FinancialOverviewPanel({
   selectedFy,
-  billing,
+  billings,
   payments,
   acceptedQuotationCount,
   isPWP,
@@ -334,7 +380,7 @@ export function FinancialOverviewPanel({
   onOpenSection,
 }: {
   selectedFy: string;
-  billing: WithPending<Billing> | null;
+  billings: WithPending<Billing>[];
   payments: WithPending<Payment>[];
   acceptedQuotationCount: number;
   isPWP: boolean;
@@ -343,13 +389,15 @@ export function FinancialOverviewPanel({
   onSendReminder: () => void;
   onOpenSection: (section: "quotations" | "billing" | "payments" | "ledger") => void;
 }) {
-  const total = Number(billing?.totalAmount || 0);
-  const paid = Number(billing?.totalPaid || 0);
-  const pending = Number(billing?.pendingAmount || 0);
+  const total = billings.reduce((sum, record) => sum + Number(record.totalAmount || 0), 0);
+  const paid = billings.reduce((sum, record) => sum + Number(record.totalPaid || 0), 0);
+  const pending = billings.reduce((sum, record) => sum + Number(record.pendingAmount || 0), 0);
+  const hasBilling = billings.length > 0;
   const advances = payments.filter((payment) => payment.paymentType === "advance")
     .reduce((sum, payment) => sum + Number(payment.amountPaid || 0), 0);
   const progress = total ? Math.min(100, Math.round((paid / total) * 100)) : 0;
-  const settled = Boolean(billing && pending <= 0);
+  const settled = hasBilling && pending <= 0;
+  const paymentStatus = settled ? "Paid" : paid > 0 ? "Partial" : hasBilling ? "Unpaid" : "Not billed";
 
   return (
     <div className="client-profile-section-stack">
@@ -360,8 +408,8 @@ export function FinancialOverviewPanel({
             <h2>FY {selectedFy} at a glance</h2>
             <span>Billing, receipts and outstanding balance in one clear view.</span>
           </div>
-          <span className="client-profile-status-pill" data-state={settled ? "complete" : billing ? "progress" : "neutral"}>
-            {settled ? "Settled" : billing ? billing.paymentStatus : "Not billed"}
+          <span className="client-profile-status-pill" data-state={settled ? "complete" : hasBilling ? "progress" : "neutral"}>
+            {settled ? "Settled" : paymentStatus}
           </span>
         </div>
 
@@ -378,18 +426,18 @@ export function FinancialOverviewPanel({
         <div className="client-profile-financial-next-step">
           <span>{settled ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}</span>
           <div>
-            <strong>{settled ? "Account settled for this financial year" : !billing ? "Create billing to begin payment tracking" : "Payment follow-up is required"}</strong>
-            <small>{settled ? "All billed charges have been received." : !billing ? "Once billing is created, receipts and outstanding balance update automatically." : `${formatCurrency(pending)} remains outstanding.`}</small>
+            <strong>{settled ? "Account settled for this financial year" : !hasBilling ? "Create billing to begin payment tracking" : "Payment follow-up is required"}</strong>
+            <small>{settled ? "All billed charges have been received." : !hasBilling ? "Once billing is created, receipts and outstanding balance update automatically." : `${formatCurrency(pending)} remains outstanding across ${billings.length} bill${billings.length === 1 ? "" : "s"}.`}</small>
           </div>
-          <button type="button" className="client-profile-primary-button" onClick={!billing ? onCreateBilling : settled ? onAddPayment : onSendReminder}>
-            {!billing ? "Create Billing" : settled ? "Add Payment" : "Send Reminder"}
+          <button type="button" className="client-profile-primary-button" onClick={!hasBilling ? onCreateBilling : settled ? onAddPayment : onSendReminder}>
+            {!hasBilling ? "Create Billing" : settled ? "Add Payment" : "Send Reminder"}
           </button>
         </div>
       </section>
 
       <section className="client-profile-financial-shortcuts">
         {!isPWP && <button type="button" onClick={() => onOpenSection("quotations")}><Receipt className="h-4 w-4" /><span>Quotations<small>{acceptedQuotationCount} accepted</small></span></button>}
-        <button type="button" onClick={() => onOpenSection("billing")}><IndianRupee className="h-4 w-4" /><span>Billing<small>{billing ? billing.paymentStatus : "Not created"}</small></span></button>
+        <button type="button" onClick={() => onOpenSection("billing")}><IndianRupee className="h-4 w-4" /><span>Billing<small>{hasBilling ? `${billings.length} bill${billings.length === 1 ? "" : "s"}` : "Not created"}</small></span></button>
         <button type="button" onClick={() => onOpenSection("payments")}><Wallet className="h-4 w-4" /><span>Payments & Advances<small>{payments.length} entries</small></span></button>
         <button type="button" onClick={() => onOpenSection("ledger")}><Clock3 className="h-4 w-4" /><span>Ledger<small>View activity</small></span></button>
       </section>

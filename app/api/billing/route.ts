@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { normalizeBillingBody } from "@/lib/billing-utils";
+import { ensureBillingSchema, normalizeBillingBody } from "@/lib/billing-utils";
 import { connectDB } from "@/lib/mongoose";
 import Billing from "@/models/Billing";
 import Payment from "@/models/Payment";
@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     await connectDB();
+    await ensureBillingSchema(Billing.collection);
     const { searchParams } = new URL(req.url);
     const clientId = searchParams.get("clientId");
     const fy = searchParams.get("fy");
@@ -27,15 +28,31 @@ export async function GET(req: NextRequest) {
         {
           $lookup: {
             from: Payment.collection.name,
-            let: { billingClientId: "$clientId", billingFinancialYear: "$financialYear" },
+            let: {
+              billingRecordId: { $toString: "$_id" },
+              billingClientId: "$clientId",
+              billingFinancialYear: "$financialYear",
+              billingType: { $ifNull: ["$billType", "annual_return"] },
+            },
             pipeline: [
               {
                 $match: {
                   $expr: {
                     $and: [
-                      { $eq: ["$clientId", "$$billingClientId"] },
-                      { $eq: ["$financialYear", "$$billingFinancialYear"] },
                       { $ne: ["$paymentType", "advance"] },
+                      {
+                        $or: [
+                          { $eq: ["$billingId", "$$billingRecordId"] },
+                          {
+                            $and: [
+                              { $eq: ["$$billingType", "annual_return"] },
+                              { $eq: ["$clientId", "$$billingClientId"] },
+                              { $eq: ["$financialYear", "$$billingFinancialYear"] },
+                              { $in: [{ $ifNull: ["$billingId", ""] }, ["", null]] },
+                            ],
+                          },
+                        ],
+                      },
                     ],
                   },
                 },
@@ -127,15 +144,31 @@ async function fetchBillingAggregated(id: unknown) {
       {
         $lookup: {
           from: Payment.collection.name,
-          let: { billingClientId: "$clientId", billingFinancialYear: "$financialYear" },
+          let: {
+            billingRecordId: { $toString: "$_id" },
+            billingClientId: "$clientId",
+            billingFinancialYear: "$financialYear",
+            billingType: { $ifNull: ["$billType", "annual_return"] },
+          },
           pipeline: [
             {
               $match: {
                 $expr: {
                   $and: [
-                    { $eq: ["$clientId", "$$billingClientId"] },
-                    { $eq: ["$financialYear", "$$billingFinancialYear"] },
                     { $ne: ["$paymentType", "advance"] },
+                    {
+                      $or: [
+                        { $eq: ["$billingId", "$$billingRecordId"] },
+                        {
+                          $and: [
+                            { $eq: ["$$billingType", "annual_return"] },
+                            { $eq: ["$clientId", "$$billingClientId"] },
+                            { $eq: ["$financialYear", "$$billingFinancialYear"] },
+                            { $in: [{ $ifNull: ["$billingId", ""] }, ["", null]] },
+                          ],
+                        },
+                      ],
+                    },
                   ],
                 },
               },
@@ -185,12 +218,26 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     await connectDB();
+    await ensureBillingSchema(Billing.collection);
     const body = normalizeBillingBody(await req.json());
 
-    const existing = await Billing.collection.findOne({
-      clientId: body.clientId,
-      financialYear: body.financialYear,
-    });
+    if (!body.clientId || !body.financialYear) {
+      return NextResponse.json({ error: "Client and financial year are required" }, { status: 400 });
+    }
+    if (body.billType === "general" && !body.billTitle) {
+      return NextResponse.json({ error: "A title or purpose is required for a general bill" }, { status: 400 });
+    }
+    if (body.billType === "general" && body.lineItems.length === 0) {
+      return NextResponse.json({ error: "Add at least one valid line item to the general bill" }, { status: 400 });
+    }
+
+    const existing = body.billType === "annual_return"
+      ? await Billing.collection.findOne({
+          clientId: body.clientId,
+          financialYear: body.financialYear,
+          billType: "annual_return",
+        })
+      : null;
 
     const now = new Date();
 
@@ -220,13 +267,15 @@ export async function POST(req: NextRequest) {
     const insertedBilling = { ...body, createdAt: now, updatedAt: now };
     const result = await Billing.collection.insertOne(insertedBilling);
     const full = await fetchBillingAggregated(result.insertedId);
-    await syncAnnualReturnStatus(body.clientId, body.financialYear);
+    if (body.billType === "annual_return") {
+      await syncAnnualReturnStatus(body.clientId, body.financialYear);
+    }
     await recordActivityEvent({
       clientId: body.clientId,
       category: "financial",
       type: "billing_created",
-      label: "Billing Created",
-      detail: `Total INR ${Number(body.totalAmount || 0).toLocaleString("en-IN")}`,
+      label: body.billType === "general" ? "General Bill Created" : "Annual Return Bill Created",
+      detail: `${body.billTitle} · Total INR ${Number(body.totalAmount || 0).toLocaleString("en-IN")}`,
       color: "brand",
       badge: "Created",
       financialYear: body.financialYear,

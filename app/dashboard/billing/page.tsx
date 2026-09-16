@@ -29,6 +29,7 @@ import type {
   AdvanceClientRow,
   Billing,
   BillingFilter,
+  BillTypeFilter,
   BillingTab,
   Client,
   Payment,
@@ -66,6 +67,7 @@ export default function BillingPage() {
   const [activeTab, setActiveTab] = useState<BillingTab>("billing");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<BillingFilter>("all");
+  const [billTypeFilter, setBillTypeFilter] = useState<BillTypeFilter>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
 
   useEffect(() => {
@@ -94,16 +96,22 @@ export default function BillingPage() {
 
   const clientName = useCallback((id: string) => clients.find((c) => c.clientId === id)?.companyName || id, [clients]);
 
-  const paymentsByClient = useMemo(() => {
+  const paymentsByBilling = useMemo(() => {
     const map = new Map<string, Payment[]>();
     payments.forEach((payment) => {
       if (payment.paymentType === "advance") return;
-      const clientPayments = map.get(payment.clientId);
-      if (clientPayments) clientPayments.push(payment);
-      else map.set(payment.clientId, [payment]);
+      const linkedBillingId = payment.billingId || billings.find((billing) =>
+        (billing.billType || "annual_return") === "annual_return" &&
+        billing.clientId === payment.clientId &&
+        billing.financialYear === payment.financialYear
+      )?._id;
+      if (!linkedBillingId) return;
+      const billingPayments = map.get(linkedBillingId);
+      if (billingPayments) billingPayments.push(payment);
+      else map.set(linkedBillingId, [payment]);
     });
     return map;
-  }, [payments]);
+  }, [billings, payments]);
 
   const advanceByClient = useMemo(() => {
     const map = new Map<string, number>();
@@ -112,20 +120,41 @@ export default function BillingPage() {
     return map;
   }, [payments]);
 
+  const searchMatchedBillings = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return billings;
+    return billings.filter((billing) => {
+      const name = clientName(billing.clientId).toLowerCase();
+      return name.includes(q) ||
+        billing.clientId.toLowerCase().includes(q) ||
+        billing.paymentStatus.toLowerCase().includes(q) ||
+        (billing.billTitle || "").toLowerCase().includes(q);
+    });
+  }, [billings, clientName, search]);
+
+  const scopedBillings = useMemo(() => (
+    billTypeFilter === "all"
+      ? searchMatchedBillings
+      : searchMatchedBillings.filter((billing) => (billing.billType || "annual_return") === billTypeFilter)
+  ), [billTypeFilter, searchMatchedBillings]);
+
   const billingSummary = useMemo(() => {
-    const totalBilled = billings.reduce((s, b) => s + Number(b.totalAmount || 0), 0);
-    const totalCollected = billings.reduce((s, b) => s + Number(b.totalPaid || 0), 0);
-    const totalPending = billings.reduce((s, b) => s + Number(b.pendingAmount || 0), 0);
-    const totalAdvance = payments.filter((p) => p.paymentType === "advance").reduce((s, p) => s + Number(p.amountPaid || 0), 0);
-    const invoiceGap = billings.filter((b) => !b.invoiceCreated).reduce((s, b) => s + Number(b.totalAmount || 0), 0);
-    const invoicePendingCount = billings.filter((b) => !b.invoiceCreated).length;
-    const invoiceCreatedCount = billings.filter((b) => b.invoiceCreated === true).length;
-    const paidCount = billings.filter((b) => b.pendingAmount <= 0 || b.paymentStatus.toLowerCase() === "paid").length;
-    const partialCount = billings.filter((b) => b.pendingAmount > 0 && b.totalPaid > 0).length;
-    const unpaidCount = billings.filter((b) => b.pendingAmount > 0 && b.totalPaid <= 0).length;
+    const scopedClientIds = new Set(scopedBillings.map((billing) => billing.clientId));
+    const totalBilled = scopedBillings.reduce((s, b) => s + Number(b.totalAmount || 0), 0);
+    const totalCollected = scopedBillings.reduce((s, b) => s + Number(b.totalPaid || 0), 0);
+    const totalPending = scopedBillings.reduce((s, b) => s + Number(b.pendingAmount || 0), 0);
+    const totalAdvance = payments
+      .filter((payment) => payment.paymentType === "advance" && scopedClientIds.has(payment.clientId))
+      .reduce((s, payment) => s + Number(payment.amountPaid || 0), 0);
+    const invoiceGap = scopedBillings.filter((b) => !b.invoiceCreated).reduce((s, b) => s + Number(b.totalAmount || 0), 0);
+    const invoicePendingCount = scopedBillings.filter((b) => !b.invoiceCreated).length;
+    const invoiceCreatedCount = scopedBillings.filter((b) => b.invoiceCreated === true).length;
+    const paidCount = scopedBillings.filter((b) => b.pendingAmount <= 0 || b.paymentStatus.toLowerCase() === "paid").length;
+    const partialCount = scopedBillings.filter((b) => b.pendingAmount > 0 && b.totalPaid > 0).length;
+    const unpaidCount = scopedBillings.filter((b) => b.pendingAmount > 0 && b.totalPaid <= 0).length;
     const collectionPct = totalBilled > 0 ? Math.round((totalCollected / totalBilled) * 100) : 0;
-    const overdueCount = billings.filter((b) => (b.daysOverdue ?? 0) > 0).length;
-    const aging = billings.reduce(
+    const overdueCount = scopedBillings.filter((b) => (b.daysOverdue ?? 0) > 0).length;
+    const aging = scopedBillings.reduce(
       (acc, b) => {
         const pending = Number(b.pendingAmount || 0);
         if (pending <= 0) return acc;
@@ -139,13 +168,10 @@ export default function BillingPage() {
       { notDue: 0, days0To30: 0, days31To60: 0, days60Plus: 0 }
     );
     return { totalBilled, totalCollected, totalPending, totalAdvance, invoiceGap, invoicePendingCount, invoiceCreatedCount, paidCount, partialCount, unpaidCount, pendingCount: partialCount + unpaidCount, collectionPct, overdueCount, aging };
-  }, [billings, payments]);
+  }, [payments, scopedBillings]);
 
   const filteredBillings = useMemo(() => {
-    const q = search.toLowerCase();
-    return billings.filter((b) => {
-      const name = clientName(b.clientId).toLowerCase();
-      const matchesSearch = !search.trim() || name.includes(q) || b.clientId.toLowerCase().includes(q) || b.paymentStatus.toLowerCase().includes(q);
+    return scopedBillings.filter((b) => {
       const matchesFilter =
         statusFilter === "all" ||
         (statusFilter === "pending" && b.pendingAmount > 0) ||
@@ -156,9 +182,15 @@ export default function BillingPage() {
         (statusFilter === "overdue" && (b.daysOverdue ?? 0) > 0) ||
         (statusFilter === "invoice-pending" && !b.invoiceCreated) ||
         (statusFilter === "invoice-created" && b.invoiceCreated === true);
-      return matchesSearch && matchesFilter;
+      return matchesFilter;
     });
-  }, [advanceByClient, billings, search, statusFilter, clientName]);
+  }, [advanceByClient, scopedBillings, statusFilter]);
+
+  const billTypeCounts = useMemo(() => ({
+    all: searchMatchedBillings.length,
+    annual_return: searchMatchedBillings.filter((billing) => (billing.billType || "annual_return") === "annual_return").length,
+    general: searchMatchedBillings.filter((billing) => billing.billType === "general").length,
+  }), [searchMatchedBillings]);
 
   const advancePayments = useMemo(() => payments.filter((p) => p.paymentType === "advance"), [payments]);
   const appliedAdvancePayments = useMemo(() => payments.filter((p) => p.paymentType !== "advance" && isAppliedAdvancePayment(p)), [payments]);
@@ -296,8 +328,8 @@ export default function BillingPage() {
 
   const exportBillingCsv = useCallback(() => {
     const esc = (v: unknown) => { const t = String(v ?? ""); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
-    const rows = filteredBillings.map((b) => [b.clientId, clientName(b.clientId), b.financialYear, b.govtCharges, b.consultancyCharges, b.targetCharges, b.otherCharges, b.totalAmount, b.totalPaid, b.pendingAmount, b.paymentStatus, b.dueDate ? formatDate(b.dueDate) : "", b.daysOverdue || 0, advanceByClient.get(b.clientId) || 0, b.invoiceCreated ? "Yes" : "No", b.invoiceNumber || "", b.notes || ""]);
-    const csv = [["Client ID", "Client", "FY", "Govt", "Consultancy", "Target", "Other", "Total", "Paid", "Pending", "Status", "Due Date", "Days Overdue", "Advance Balance", "Invoice Created", "Invoice No.", "Notes"], ...rows].map((r) => r.map(esc).join(",")).join("\n");
+    const rows = filteredBillings.map((b) => [b.clientId, clientName(b.clientId), b.financialYear, (b.billType || "annual_return") === "annual_return" ? "Annual Return" : "General", b.billTitle || "Annual Return Filing", b.billDate ? formatDate(b.billDate) : "", b.govtCharges, b.consultancyCharges, b.targetCharges, b.otherCharges, (b.lineItems || []).map((item) => `${item.description} (Qty ${item.quantity}, Rate ${item.rate}, GST ${item.gstPercent}%, Total ${item.totalAmount})`).join("; "), (b.lineItems || []).reduce((sum, item) => sum + Number(item.totalAmount || 0), 0), b.totalAmount, b.totalPaid, b.pendingAmount, b.paymentStatus, b.dueDate ? formatDate(b.dueDate) : "", b.daysOverdue || 0, advanceByClient.get(b.clientId) || 0, b.invoiceCreated ? "Yes" : "No", b.invoiceNumber || "", b.notes || ""]);
+    const csv = [["Client ID", "Client", "FY", "Bill Type", "Bill Title", "Bill Date", "Govt", "Consultancy", "Target", "Other", "Line Items", "Line Items Total", "Total", "Paid", "Pending", "Status", "Due Date", "Days Overdue", "Advance Balance", "Invoice Created", "Invoice No.", "Notes"], ...rows].map((r) => r.map(esc).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -306,12 +338,17 @@ export default function BillingPage() {
   }, [filteredBillings, clientName, advanceByClient, fy]);
 
   // ── Derived UI values ─────────────────────────────────────────────────────
-  const advanceClientCount = advanceClientRows.filter((row) => row.available > 0).length;
-  const billingAdvanceRecordCount = billings.filter((b) => (advanceByClient.get(b.clientId) || 0) > 0).length;
-  const appliedAdvanceTotal = appliedAdvancePayments.reduce((s, p) => s + Number(p.amountPaid || 0), 0);
+  const scopedAdvanceClientCount = new Set(
+    scopedBillings
+      .filter((billing) => (advanceByClient.get(billing.clientId) || 0) > 0)
+      .map((billing) => billing.clientId)
+  ).size;
+  const billingAdvanceRecordCount = scopedBillings.filter((billing) => (advanceByClient.get(billing.clientId) || 0) > 0).length;
+  const filteredAdvanceAvailableTotal = filteredAdvanceClientRows.reduce((sum, row) => sum + Number(row.available || 0), 0);
+  const filteredAppliedAdvanceTotal = filteredAdvanceClientRows.reduce((sum, row) => sum + Number(row.applied || 0), 0);
 
   const filterOptions: Array<{ value: BillingFilter; label: string; count: number; separator?: boolean }> = useMemo(() => [
-    { value: "all", label: "All", count: billings.length },
+    { value: "all", label: "All", count: scopedBillings.length },
     { value: "pending", label: "Pending", count: billingSummary.pendingCount },
     { value: "partial", label: "Partial", count: billingSummary.partialCount },
     { value: "unpaid", label: "Unpaid", count: billingSummary.unpaidCount },
@@ -320,7 +357,7 @@ export default function BillingPage() {
     { value: "overdue", label: "Overdue", count: billingSummary.overdueCount },
     { value: "invoice-pending", label: "Invoice Pending", count: billingSummary.invoicePendingCount, separator: true },
     { value: "invoice-created", label: "Invoice Created", count: billingSummary.invoiceCreatedCount },
-  ], [billingAdvanceRecordCount, billingSummary, billings.length]);
+  ], [billingAdvanceRecordCount, billingSummary, scopedBillings.length]);
 
   // ── Target suggestions loader ──────────────────────────────────────────────
   // ── Two-phase scroll architecture ───────────────────────────────────────
@@ -382,8 +419,8 @@ export default function BillingPage() {
           {/*    Collapses via maxHeight as user scrolls (0→240px range).      */}
           <BillingSummaryStats
             billingSummary={billingSummary}
-            billings={billings}
-            advanceClientCount={advanceClientCount}
+            billings={scopedBillings}
+            advanceClientCount={scopedAdvanceClientCount}
             scrollProgress={scrollProgress}
             onContentHeightChange={setStatsContentHeight}
             isMobile={isMobile}
@@ -400,6 +437,9 @@ export default function BillingPage() {
             viewMode={viewMode}
             onViewModeChange={setViewMode}
             filterOptions={filterOptions}
+            billTypeFilter={billTypeFilter}
+            onBillTypeFilterChange={setBillTypeFilter}
+            billTypeCounts={billTypeCounts}
             merged={headerMerged}
             docked={headerDocked}
             dockOffset={billingDockOffset}
@@ -416,13 +456,13 @@ export default function BillingPage() {
       {/* ── Billing list ─────────────────────────────────────────────────── */}
       {loading ? <BillingSkeleton /> : (
         <BillingList
-          billings={billings}
+          billings={scopedBillings}
           filteredBillings={filteredBillings}
           payments={payments}
           loading={loading}
           viewMode={viewMode}
           expandedRows={expandedRows}
-          paymentsByClient={paymentsByClient}
+          paymentsByBilling={paymentsByBilling}
           advanceByClient={advanceByClient}
           clientName={clientName}
           onToggleRow={toggleRow}
@@ -446,9 +486,8 @@ export default function BillingPage() {
       {activeTab === "advances" && (
         <AdvancePaymentsSection
           fy={fy}
-          billingSummary={billingSummary}
-          appliedAdvanceTotal={appliedAdvanceTotal}
-          advanceClientRows={advanceClientRows}
+          availableAdvanceTotal={filteredAdvanceAvailableTotal}
+          appliedAdvanceTotal={filteredAppliedAdvanceTotal}
           filteredAdvanceClientRows={filteredAdvanceClientRows}
           expandedAdvanceClients={expandedAdvanceClients}
           search={search}

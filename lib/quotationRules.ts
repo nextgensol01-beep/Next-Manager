@@ -78,13 +78,31 @@ export type CalculatedQuotationItem = QuotationItemInput & {
   totalAmount: number;
 };
 
+export type QuotationAdditionalItemInput = {
+  lineId?: string;
+  description: string;
+  quantity: number;
+  rate: number;
+  gstPercent: number;
+};
+
+export type CalculatedQuotationAdditionalItem = QuotationAdditionalItemInput & {
+  subtotal: number;
+  gstAmount: number;
+  totalAmount: number;
+};
+
+export function roundMoney(value: number) {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+}
+
 export function calculateQuotationItems(items: QuotationItemInput[]) {
   const calculatedItems: CalculatedQuotationItem[] = items.map((item) => {
     const quantity = Number(item.quantity) || 0;
     const rate = Number(item.rate) || 0;
     const gstPercent = Number(item.gstPercent) || 0;
-    const subtotal = quantity * rate;
-    const gstAmount = subtotal * (gstPercent / 100);
+    const subtotal = roundMoney(quantity * rate);
+    const gstAmount = roundMoney(subtotal * (gstPercent / 100));
 
     return {
       description: item.description.trim(),
@@ -95,14 +113,38 @@ export function calculateQuotationItems(items: QuotationItemInput[]) {
       gstPercent,
       subtotal,
       gstAmount,
-      totalAmount: subtotal + gstAmount,
+      totalAmount: roundMoney(subtotal + gstAmount),
     };
   });
 
-  const itemsSubtotal = calculatedItems.reduce((sum, item) => sum + item.subtotal, 0);
-  const itemsGst = calculatedItems.reduce((sum, item) => sum + item.gstAmount, 0);
+  const itemsSubtotal = roundMoney(calculatedItems.reduce((sum, item) => sum + item.subtotal, 0));
+  const itemsGst = roundMoney(calculatedItems.reduce((sum, item) => sum + item.gstAmount, 0));
 
   return { calculatedItems, itemsSubtotal, itemsGst };
+}
+
+export function calculateQuotationAdditionalItems(items: QuotationAdditionalItemInput[]) {
+  const calculatedAdditionalItems: CalculatedQuotationAdditionalItem[] = items.map((item) => {
+    const quantity = Number(item.quantity) || 0;
+    const rate = Number(item.rate) || 0;
+    const gstPercent = Number(item.gstPercent) || 0;
+    const subtotal = roundMoney(quantity * rate);
+    const gstAmount = roundMoney(subtotal * (gstPercent / 100));
+    return {
+      lineId: item.lineId?.trim() || "",
+      description: item.description.trim(),
+      quantity,
+      rate,
+      gstPercent,
+      subtotal,
+      gstAmount,
+      totalAmount: roundMoney(subtotal + gstAmount),
+    };
+  });
+  const additionalItemsSubtotal = roundMoney(calculatedAdditionalItems.reduce((sum, item) => sum + item.subtotal, 0));
+  const additionalItemsGst = roundMoney(calculatedAdditionalItems.reduce((sum, item) => sum + item.gstAmount, 0));
+  const additionalItemsTotal = roundMoney(additionalItemsSubtotal + additionalItemsGst);
+  return { calculatedAdditionalItems, additionalItemsSubtotal, additionalItemsGst, additionalItemsTotal };
 }
 
 export function calculateQuotationGrandTotal(values: {
@@ -111,14 +153,19 @@ export function calculateQuotationGrandTotal(values: {
   consultationCharges: number;
   consultationGstPercent: number;
   governmentFees: number;
+  additionalItemsSubtotal?: number;
+  additionalItemsGst?: number;
 }) {
-  const consultationGstAmount = values.consultationCharges * (values.consultationGstPercent / 100);
-  const grandTotal =
+  const consultationGstAmount = roundMoney(values.consultationCharges * (values.consultationGstPercent / 100));
+  const grandTotal = roundMoney(
     values.itemsSubtotal +
     values.itemsGst +
+    Number(values.additionalItemsSubtotal || 0) +
+    Number(values.additionalItemsGst || 0) +
     values.consultationCharges +
     consultationGstAmount +
-    values.governmentFees;
+    values.governmentFees
+  );
 
   return { consultationGstAmount, grandTotal };
 }

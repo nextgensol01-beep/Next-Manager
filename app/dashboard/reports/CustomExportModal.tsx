@@ -1,5 +1,5 @@
 ﻿"use client";
-import type React from "react";
+import { useState } from "react";
 import Modal from "@/components/ui/Modal";
 import { FINANCIAL_YEARS } from "@/lib/utils";
 import { ChevronDown, Download, Search, Save, X } from "lucide-react";
@@ -15,12 +15,13 @@ import {
   type CustomExportSortBy,
 } from "@/lib/reports";
 import {
-  DEFAULT_CUSTOM_FIELDS,
   type AdvancedCustomExportSection,
   type ClientOption,
   type CustomExportPreview,
 } from "./ReportsSupport";
 import ReportSelect from "./ReportSelect";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { reportControlSpring, reportSoftSpring } from "./report-motion";
 
 type CustomExportModalProps = {
   customExportOpen: boolean;
@@ -95,13 +96,7 @@ export default function CustomExportModal({
   sortBy,
   userPresets,
   presetName,
-  showAdvancedControls,
-  activeAdvancedSection,
   expandedFieldGroups,
-  allFieldsSelected,
-  noFieldsSelected,
-  usingExampleFields,
-  filtersAreReset,
   clientsLoading,
   hasClientQuery,
   filteredClientOptions,
@@ -122,12 +117,8 @@ export default function CustomExportModal({
   setSortBy,
   setPresetName,
   setClientLoadAttempt,
-  setExpandedFieldGroups,
   toggleFieldGroup,
   toggleCustomField,
-  toggleAdvancedControls,
-  toggleAdvancedSection,
-  isPresetActive,
   applyPreset,
   deletePreset,
   saveCurrentPreset,
@@ -135,681 +126,58 @@ export default function CustomExportModal({
   toggleClientSelection,
   downloadCustomExport,
 }: CustomExportModalProps) {
-  return (    <Modal open={customExportOpen} onClose={() => !customDownloading && setCustomExportOpen(false)} title="Custom Client Export" size="2xl" className="!max-w-[1100px]" bgColor="var(--color-card)">
-      <div className="space-y-4">
-        <div className="rounded-2xl border border-base bg-surface/60 p-4">
-          <h4 className="text-sm font-semibold text-default mb-1">Choose the client fields you want in the sheet</h4>
-          <p className="text-sm text-muted">
-            You can now mix client master data with related client records like contacts, billing, payments, FY summaries, invoices, uploads, documents, email history, and portal details.
-          </p>
+  const [step, setStep] = useState<"fields" | "filters" | "review">("fields");
+  const [fieldQuery, setFieldQuery] = useState("");
+  const [showPresets, setShowPresets] = useState(false);
+  const reduceMotion = useReducedMotion();
+  const steps = ["fields", "filters", "review"] as const;
+  const index = steps.indexOf(step);
+  const invalidDates = Boolean(dateFrom && dateTo && dateFrom > dateTo);
+  const canDownload = !customDownloading && !previewLoading && !previewError && !invalidDates && Boolean(preview?.previewColumns.length) && customFields.length > 0;
+  const goToStep = (next: typeof step) => {
+    if (next !== "fields" && !customFields.length) return;
+    setStep(next);
+  };
+  const moveField = (id: string, direction: number) => setCustomFields((current) => {
+    const next = [...current]; const from = next.indexOf(id); const to = from + direction;
+    if (from < 0 || to < 0 || to >= next.length) return current;
+    [next[from], next[to]] = [next[to], next[from]]; return next;
+  });
+  const resetFilters = () => { setCustomCategories([]); setSelectedClientIds([]); setClientSearch(""); setDateFrom(""); setDateTo(""); setIncludeOnlyNonEmpty(false); setSortBy("companyName"); };
+  const fieldById = new Map(allCustomExportFields.map((field) => [field.id, field]));
+  return <Modal open={customExportOpen} onClose={() => !customDownloading && setCustomExportOpen(false)} title="Custom client export" hideHeader size="2xl" className="report-export-modal" bgColor="var(--color-card)" fluidMotion>
+    <div className="report-export-header"><div><span className="report-eyebrow">EXCEL WORKBOOK</span><h3>Build your client export</h3></div><button className="report-icon-button" onClick={() => setCustomExportOpen(false)} disabled={customDownloading} aria-label="Close custom export"><X size={16} /></button></div>
+    <nav className="report-export-steps" aria-label="Export steps">{steps.map((id, number) => <button key={id} aria-current={id === step ? "step" : undefined} disabled={customDownloading || (id !== "fields" && !customFields.length)} onClick={() => goToStep(id)}><span>{number + 1}</span>{["Choose fields", "Filter clients", "Review"][number]}</button>)}</nav>
+    <div className="report-export-scroll custom-export-workspace"><AnimatePresence mode="wait" initial={false}><motion.div key={step} className="min-h-full" initial={reduceMotion ? false : { opacity: 0, x: 14 }} animate={{ opacity: 1, x: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -10 }} transition={reduceMotion ? { duration: 0.01 } : reportSoftSpring}>
+      {step === "fields" && <div className="report-export-field-layout">
+        <section><div className="report-export-section-heading"><div><h4>Field library</h4><p className="report-caption">Add the information your workbook needs.</p></div><button className="report-text-button" onClick={() => setShowPresets((open) => !open)} aria-expanded={showPresets}><Save size={14} />Presets</button></div>
+          <AnimatePresence initial={false}>{showPresets && <motion.div className="report-export-presets" initial={reduceMotion ? false : { opacity: 0, height: 0, y: -8 }} animate={{ opacity: 1, height: "auto", y: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0, y: -6 }} transition={reduceMotion ? { duration: 0.01 } : reportControlSpring}><p className="report-caption">Ready-made templates and your saved configurations.</p>{[...userPresets, ...CUSTOM_EXPORT_PRESETS].map((preset) => <div key={preset.id} className="flex items-center gap-2"><button className="flex-1 rounded-lg px-3 py-2 text-left text-xs text-default hover:bg-surface" onClick={() => applyPreset(preset.config)}><strong className="block">{preset.name}</strong><span className="text-muted">{preset.description}</span></button>{userPresets.some((entry) => entry.id === preset.id) && <button className="report-icon-button" onClick={() => deletePreset(preset.id)} aria-label={`Delete ${preset.name}`}><X size={14} /></button>}</div>)}</motion.div>}</AnimatePresence>
+          <label className="report-client-search !max-w-none mb-4"><Search size={16} /><input value={fieldQuery} onChange={(event) => setFieldQuery(event.target.value)} placeholder="Find a field…" aria-label="Search export fields" /></label>
+          {customExportGroups.map(([group, fields]) => {
+            const visible = fields.filter((field) => `${field.label} ${field.description} ${group}`.toLowerCase().includes(fieldQuery.toLowerCase()));
+            if (!visible.length) return null;
+            const open = Boolean(fieldQuery) || expandedFieldGroups.includes(group);
+            return <section key={group} className="report-export-field-group"><button onClick={() => toggleFieldGroup(group)} aria-expanded={open} className="report-export-group-title"><span>{group}<small>{fields.filter((field) => customFields.includes(field.id)).length} / {fields.length}</small></span><motion.span animate={{ rotate: open ? 0 : -90 }} transition={reduceMotion ? { duration: 0.01 } : reportControlSpring}><ChevronDown size={15} /></motion.span></button><AnimatePresence initial={false}>{open && <motion.div className="report-export-field-options overflow-hidden" initial={reduceMotion ? false : { opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0 }} transition={reduceMotion ? { duration: 0.01 } : reportSoftSpring}>{visible.map((field) => <label key={field.id}><input type="checkbox" checked={customFields.includes(field.id)} onChange={() => toggleCustomField(field.id)} /><span><strong>{field.label}</strong><small>{field.description}</small></span></label>)}</motion.div>}</AnimatePresence></section>;
+          })}
+          {fieldQuery && !allCustomExportFields.some((field) => `${field.label} ${field.description} ${field.group}`.toLowerCase().includes(fieldQuery.toLowerCase())) && <p className="py-8 text-center text-sm text-muted">No fields match your search.</p>}
+        </section>
+        <aside className="report-export-selected"><div className="report-export-section-heading"><div><h4>Your columns <span>{customFields.length}</span></h4><p className="report-caption">In the order they will appear.</p></div><button className="report-text-button" onClick={() => setCustomFields([])}>Clear</button></div><AnimatePresence initial={false}>{customFields.length ? customFields.map((id, position) => <motion.div layout={!reduceMotion} key={id} initial={reduceMotion ? false : { opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -8 }} transition={reduceMotion ? { duration: 0.01 } : reportControlSpring} className="report-export-selected-row"><span>{position + 1}</span><strong>{fieldById.get(id)?.label || id}</strong><button disabled={position === 0} onClick={() => moveField(id, -1)} aria-label={`Move ${fieldById.get(id)?.label || id} earlier`}><ChevronDown size={14} className="rotate-180" /></button><button disabled={position === customFields.length - 1} onClick={() => moveField(id, 1)} aria-label={`Move ${fieldById.get(id)?.label || id} later`}><ChevronDown size={14} /></button><button onClick={() => toggleCustomField(id)} aria-label={`Remove ${fieldById.get(id)?.label || id}`}><X size={14} /></button></motion.div>) : <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="py-10 text-center text-sm text-muted">Select a field from the library to get started.</motion.p>}</AnimatePresence></aside>
+      </div>}
+      {step === "filters" && <div className="report-export-filters"><div className="report-export-section-heading"><div><h4>Define your scope</h4><p className="report-caption">Leave categories and clients empty to include all clients.</p></div><button className="report-text-button" onClick={resetFilters}>Reset filters</button></div>
+        <div className="grid gap-5 sm:grid-cols-2"><label className="report-export-label">Financial year<ReportSelect value={customFy} onChange={setCustomFy} ariaLabel="Export financial year" options={FINANCIAL_YEARS.map((year) => ({ value: year, label: year }))} /></label><label className="report-export-label">Sort workbook by<ReportSelect value={sortBy} onChange={(value) => setSortBy(value as CustomExportSortBy)} ariaLabel="Export sort order" options={CUSTOM_EXPORT_SORT_OPTIONS.map((sort) => ({ value: sort.id, label: sort.label }))} /></label></div>
+        <fieldset className="report-export-filter-section"><legend>Client categories</legend><div className="flex flex-wrap gap-2">{CUSTOM_EXPORT_CLIENT_CATEGORIES.map((category) => <button key={category} aria-pressed={customCategories.includes(category)} className={`report-category-choice ${customCategories.includes(category) ? "is-active" : ""}`} onClick={() => toggleCategory(category)}>{category}</button>)}</div></fieldset>
+        <div className="report-export-filter-section"><h4>Specific clients</h4><p className="report-caption">Search and select clients to limit the workbook. Search alone does not filter the export.</p><label className="report-client-search !max-w-none mt-3"><Search size={16} /><input value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder="Search by client name…" aria-label="Find export clients" /></label>
+          {selectedClientIds.length > 0 && <div className="flex flex-wrap gap-2 mt-3">{selectedClientIds.map((id) => <button key={id} className="report-filter-chip px-2 py-1 text-xs text-default" onClick={() => toggleClientSelection(id)} aria-label={`Remove client ${id}`}>{filteredClientOptions.find((client) => client.clientId === id)?.companyName || id}<X size={12} className="ml-2" /></button>)}</div>}
+          {clientsLoadError ? <p className="mt-3 text-sm text-rose-600">{clientsLoadError}<button onClick={() => setClientLoadAttempt((attempt) => attempt + 1)} className="ml-2 underline">Retry</button></p> : clientsLoading ? <p className="mt-3 text-sm text-muted" role="status">Finding clients…</p> : hasClientQuery && <div className="mt-3 max-h-48 overflow-y-auto rounded-xl border border-base">{filteredClientOptions.length ? filteredClientOptions.map((client) => <label key={client.clientId} className="flex items-center gap-3 border-b border-base p-3 last:border-0"><input type="checkbox" checked={selectedClientSet.has(client.clientId)} onChange={() => toggleClientSelection(client.clientId)} /><span className="text-xs text-default">{client.companyName}<small className="block text-muted">{client.clientId} · {client.category}</small></span></label>) : <p className="p-4 text-sm text-muted">No clients match that search.</p>}</div>}
         </div>
-    
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-4 items-start">
-          <div className="space-y-4">
-            {customExportGroups.map(([groupName, fields]) => (
-              <div
-                key={groupName}
-                className={`rounded-2xl border bg-card transition-all duration-200 ${
-                  expandedFieldGroups.includes(groupName)
-                    ? "border-brand-500/60 shadow-sm dark:bg-brand-900/5"
-                    : "border-base"
-                }`}
-              >
-                <div className="flex items-start gap-3 p-4">
-                  <button
-                    type="button"
-                    onClick={() => toggleFieldGroup(groupName)}
-                    className="min-w-0 flex-1 text-left"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h5 className="text-sm font-semibold text-default">{groupName}</h5>
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                            fields.filter((field) => customFields.includes(field.id as CustomClientExportField)).length > 0
-                              ? "bg-brand-500 text-white"
-                              : "border border-base text-faint"
-                          }`}>
-                            {fields.filter((field) => customFields.includes(field.id as CustomClientExportField)).length} selected
-                          </span>
-                          <span className="rounded-full border border-base px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
-                            {fields.length} fields
-                          </span>
-                        </div>
-                        <p className="text-xs text-muted mt-1">
-                          {fields.some((field) => field.fyScoped)
-                            ? `Includes fields that use the selected FY ${customFy}`
-                            : "All-time or client-level fields"}
-                        </p>
-                      </div>
-                      <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-muted transition-transform ${
-                        expandedFieldGroups.includes(groupName) ? "rotate-180" : ""
-                      }`} />
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    className={`glass-pill ${fields.every((field) => customFields.includes(field.id as CustomClientExportField)) ? "glass-pill-active" : ""}`}
-                    onClick={() => {
-                      const fieldIds = fields.map((field) => field.id) as CustomClientExportField[];
-                      setCustomFields((current) => Array.from(new Set<CustomClientExportField>([...current, ...fieldIds])));
-                      setExpandedFieldGroups((current) => current.includes(groupName) ? current : [...current, groupName]);
-                    }}
-                  >
-                    Select Group
-                  </button>
-                </div>
-    
-                <div
-                  className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
-                    expandedFieldGroups.includes(groupName) ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-                  }`}
-                >
-                  <div className="overflow-hidden">
-                    <div className="border-t border-base px-4 pb-4 pt-3">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {fields.map((field) => {
-                          const fieldId = field.id as CustomClientExportField;
-                          const isSelected = customFields.includes(fieldId);
-                          return (
-                            <label
-                              key={field.id}
-                              className={`rounded-2xl border p-4 cursor-pointer transition-all ${isSelected ? "border-brand-500 bg-brand-50/60 dark:bg-brand-900/15" : "border-base bg-surface/40 hover:bg-surface/70"}`}
-                            >
-                              <div className="flex items-start gap-3">
-                                <input
-                                  type="checkbox"
-                                  className="mt-1 rounded"
-                                  checked={isSelected}
-                                  onChange={() => toggleCustomField(fieldId)}
-                                />
-                                <div>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <div className="text-sm font-semibold text-default">{field.label}</div>
-                                    {field.fyScoped && (
-                                      <span className="text-[10px] font-semibold uppercase tracking-wide text-brand-700 dark:text-brand-300 bg-brand-100 dark:bg-brand-900/30 px-2 py-0.5 rounded-full">
-                                        FY Based
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-xs text-muted mt-1">{field.description}</div>
-                                </div>
-                              </div>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-    
-          <div className="xl:sticky xl:top-0 xl:self-start space-y-4">
-            <div className="rounded-2xl border border-base bg-card p-4">
-              <div className="text-xs uppercase tracking-wide text-faint mb-3">Quick Actions</div>
-              <div className="glass-tray" style={{ flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  className={`glass-pill ${allFieldsSelected ? "glass-pill-active" : ""}`}
-                  onClick={() => setCustomFields(allCustomExportFields.map((field) => field.id))}
-                >
-                  Select All
-                </button>
-                <button
-                  type="button"
-                  className={`glass-pill ${usingExampleFields ? "glass-pill-active" : ""}`}
-                  onClick={() => setCustomFields([...DEFAULT_CUSTOM_FIELDS])}
-                >
-                  Use Example
-                </button>
-                <button
-                  type="button"
-                  className={`glass-pill ${noFieldsSelected ? "glass-pill-active" : ""}`}
-                  onClick={() => setCustomFields([])}
-                >
-                  Clear Fields
-                </button>
-                <button
-                  type="button"
-                  className={`glass-pill ${filtersAreReset ? "glass-pill-active" : ""}`}
-                  onClick={() => {
-                    setCustomCategories([]);
-                    setSelectedClientIds([]);
-                    setClientSearch("");
-                    setDateFrom("");
-                    setDateTo("");
-                    setIncludeOnlyNonEmpty(false);
-                    setSortBy("companyName");
-                  }}
-                >
-                  Reset Filters
-                </button>
-              </div>
-            </div>
-    
-            <div className="rounded-2xl border border-base bg-card p-3">
-              <button
-                type="button"
-                onClick={toggleAdvancedControls}
-                className="flex w-full items-center justify-between gap-3 rounded-xl bg-surface/40 px-3 py-2.5 text-left transition hover:bg-surface/70"
-              >
-                <div>
-                  <div className="text-sm font-semibold text-default">More Options</div>
-                  <div className="text-[11px] text-muted mt-0.5">Presets, filters, preview, and summary</div>
-                </div>
-                <ChevronDown className={`h-4 w-4 text-muted transition-transform ${showAdvancedControls ? "rotate-180" : ""}`} />
-              </button>
-            </div>
-    
-            <div
-              className={`grid transition-[grid-template-rows,opacity,margin-top] duration-300 ease-out ${
-                showAdvancedControls ? "mt-0 grid-rows-[1fr] opacity-100" : "mt-[-0.25rem] grid-rows-[0fr] opacity-0"
-              }`}
-            >
-              <div className="overflow-hidden">
-              <div className="space-y-3 pt-1">
-                <div className={`rounded-2xl border bg-card transition-colors ${
-                  activeAdvancedSection === "presets"
-                    ? "border-brand-500 bg-brand-50/30 shadow-sm dark:bg-brand-900/10"
-                    : "border-base"
-                }`}>
-                  <button
-                    type="button"
-                    onClick={() => toggleAdvancedSection("presets")}
-                    className={`flex w-full items-center justify-between gap-3 px-4 py-4 text-left transition-colors ${
-                      activeAdvancedSection === "presets" ? "text-brand-700 dark:text-brand-200" : ""
-                    }`}
-                  >
-                    <div>
-                      <div className="text-xs uppercase tracking-wide text-faint">Saved Presets</div>
-                      <div className="text-sm text-muted mt-1">Use built-in or saved export setups</div>
-                    </div>
-                    <ChevronDown className={`h-4 w-4 text-muted transition-transform ${activeAdvancedSection === "presets" ? "rotate-180" : ""}`} />
-                  </button>
-                  <div
-                    className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
-                      activeAdvancedSection === "presets" ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-                    }`}
-                  >
-                    <div className="overflow-hidden">
-                    <div className="border-t border-base px-4 pb-4 pt-3">
-                      <div className="space-y-4">
-                      <div>
-                        <div className="text-xs uppercase tracking-wide text-faint mb-2">Built-In Presets</div>
-                        <div className="space-y-2">
-                          {CUSTOM_EXPORT_PRESETS.map((preset) => (
-                            <button
-                              key={preset.id}
-                              type="button"
-                              onClick={() => applyPreset(preset.config)}
-                              className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
-                                isPresetActive(preset.config)
-                                  ? "border-brand-500 bg-brand-50/70 shadow-sm dark:bg-brand-900/20"
-                                  : "border-base bg-surface/50 hover:bg-surface"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="text-sm font-semibold text-default">{preset.name}</div>
-                                {isPresetActive(preset.config) && (
-                                  <span className="rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-                                    Active
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-xs text-muted mt-1">{preset.description}</div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-    
-                      <div>
-                        <div className="text-xs uppercase tracking-wide text-faint mb-2">Your Presets</div>
-                        <div className="space-y-2">
-                          {userPresets.length > 0 ? userPresets.map((preset) => (
-                            <div
-                              key={preset.id}
-                              className={`rounded-2xl border p-3 ${
-                                isPresetActive(preset.config)
-                                  ? "border-brand-500 bg-brand-50/70 shadow-sm dark:bg-brand-900/20"
-                                  : "border-base bg-surface/50"
-                              }`}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <button
-                                  type="button"
-                                  onClick={() => applyPreset(preset.config)}
-                                  className="min-w-0 flex-1 text-left"
-                                >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <div className="text-sm font-semibold text-default truncate">{preset.name}</div>
-                                    {isPresetActive(preset.config) && (
-                                      <span className="rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-                                        Active
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-xs text-muted mt-1">{preset.description}</div>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => deletePreset(preset.id)}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-base text-muted transition hover:text-red-500 hover:border-red-300"
-                                  aria-label={`Delete ${preset.name}`}
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </div>
-                          )) : (
-                            <div className="rounded-2xl border border-dashed border-base px-3 py-4 text-sm text-muted">
-                              Save one of your current export setups here for reuse.
-                            </div>
-                          )}
-                        </div>
-                      </div>
-    
-                      <div className="space-y-2">
-                        <label className="text-xs text-muted block">Save current setup</label>
-                        <div className="flex gap-2">
-                          <input
-                            value={presetName}
-                            onChange={(e) => setPresetName(e.target.value)}
-                            placeholder="Preset name"
-                            className="flex-1 rounded-xl border border-base bg-surface px-3 py-2.5 text-sm text-default outline-none focus:border-brand-500"
-                            disabled={customDownloading}
-                          />
-                          <button type="button" className="glass-btn" style={{padding:"8px 10px"}} onClick={saveCurrentPreset} disabled={customDownloading}>
-                            <Save className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                      </div>
-                    </div>
-                    </div>
-                  </div>
-                </div>
-    
-                <div className={`rounded-2xl border bg-card transition-colors ${
-                  activeAdvancedSection === "filters"
-                    ? "border-brand-500 bg-brand-50/30 shadow-sm dark:bg-brand-900/10"
-                    : "border-base"
-                }`}>
-                  <button
-                    type="button"
-                    onClick={() => toggleAdvancedSection("filters")}
-                    className={`flex w-full items-center justify-between gap-3 px-4 py-4 text-left transition-colors ${
-                      activeAdvancedSection === "filters" ? "text-brand-700 dark:text-brand-200" : ""
-                    }`}
-                  >
-                    <div>
-                      <div className="text-xs uppercase tracking-wide text-faint">Filters</div>
-                      <div className="text-sm text-muted mt-1">Financial year, category, client, date range, and sorting</div>
-                    </div>
-                    <ChevronDown className={`h-4 w-4 text-muted transition-transform ${activeAdvancedSection === "filters" ? "rotate-180" : ""}`} />
-                  </button>
-                  <div
-                    className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
-                      activeAdvancedSection === "filters" ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-                    }`}
-                  >
-                    <div className="overflow-hidden">
-                    <div className="border-t border-base px-4 pb-4 pt-3">
-                      <div className="space-y-4">
-                <label className="block">
-                  <span className="text-xs text-muted mb-2 block">Financial Year</span>
-                  <ReportSelect value={customFy} onChange={setCustomFy} ariaLabel="Custom export financial year" disabled={customDownloading} options={FINANCIAL_YEARS.map((year) => ({ value: year, label: year }))} buttonClassName="text-sm" />
-                </label>
-    
-                <div>
-                  <div className="text-xs text-muted mb-2">Category Filter</div>
-                  <div className="flex flex-wrap gap-2">
-                    {CUSTOM_EXPORT_CLIENT_CATEGORIES.map((category) => {
-                      const active = customCategories.includes(category);
-                      return (
-                        <button
-                          key={category}
-                          type="button"
-                          onClick={() => toggleCategory(category)}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                            active
-                              ? "border-brand-500 bg-brand-500 text-white"
-                              : "border-base bg-surface text-muted hover:text-default"
-                          }`}
-                        >
-                          {category}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-    
-                <div>
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <span className="text-xs text-muted">Client Filter</span>
-                    <span className="text-[11px] text-faint">{selectedClientIds.length} selected</span>
-                  </div>
-                  <div className="relative mb-2">
-                    <Search className="w-4 h-4 text-faint absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      value={clientSearch}
-                      onChange={(e) => setClientSearch(e.target.value)}
-                      placeholder="Search company or client ID"
-                      className="w-full rounded-xl border border-base bg-surface pl-9 pr-3 py-2.5 text-sm text-default outline-none focus:border-brand-500"
-                      disabled={customDownloading}
-                    />
-                  </div>
-                  <div className="glass-tray mb-2">
-                    <button
-                      type="button"
-                      className={`glass-pill ${filteredClientOptions.length > 0 && filteredClientOptions.every((client) => selectedClientSet.has(client.clientId)) ? "glass-pill-active" : ""}`}
-                      onClick={() => {
-                        const visibleIds = filteredClientOptions.map((client) => client.clientId);
-                        setSelectedClientIds((current) => Array.from(new Set([...current, ...visibleIds])));
-                      }}
-                      disabled={clientsLoading || !hasClientQuery || filteredClientOptions.length === 0}
-                    >
-                      Select Visible
-                    </button>
-                    <button
-                      type="button"
-                      className={`glass-pill ${selectedClientIds.length === 0 ? "glass-pill-active" : ""}`}
-                      onClick={() => setSelectedClientIds([])}
-                      disabled={selectedClientIds.length === 0}
-                    >
-                      Clear Selection
-                    </button>
-                  </div>
-                  <div className="relative">
-                    <div
-                      className={`absolute inset-x-0 top-0 overflow-hidden rounded-2xl border border-base bg-surface/40 transition-[height] duration-200 ease-out ${
-                        hasClientQuery ? "h-56" : "h-[4.5rem]"
-                      }`}
-                    >
-                      <div className="h-full overflow-y-auto">
-                      {!hasClientQuery ? (
-                        <div className="px-3 py-4 text-sm text-muted">
-                          Type a company name or client ID, or choose a category to start searching clients.
-                        </div>
-                      ) : clientsLoading ? (
-                        <div className="px-3 py-4 text-sm text-muted">
-                          {clientSearch.trim() || customCategories.length > 0 ? "Searching matching clients..." : "Loading clients..."}
-                        </div>
-                      ) : clientsLoadError ? (
-                        <div className="px-3 py-4">
-                          <div className="text-sm text-red-500 dark:text-red-300">{clientsLoadError}</div>
-                          <button
-                            type="button"
-                            className="glass-btn"
-                            style={{marginTop:"10px"}}
-                            onClick={() => setClientLoadAttempt((current) => current + 1)}
-                          >
-                            Retry Loading Clients
-                          </button>
-                        </div>
-                      ) : filteredClientOptions.length > 0 ? (
-                        filteredClientOptions.map((client) => {
-                          const selected = selectedClientSet.has(client.clientId);
-                          return (
-                            <label
-                              key={client.clientId}
-                              className={`flex cursor-pointer items-start gap-3 border-b border-base/70 px-3 py-3 last:border-b-0 ${
-                                selected ? "bg-brand-50/60 dark:bg-brand-900/15" : ""
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                className="mt-1 rounded"
-                                checked={selected}
-                                onChange={() => toggleClientSelection(client.clientId)}
-                              />
-                              <div className="min-w-0">
-                                <div className="text-sm font-medium text-default truncate">{client.companyName}</div>
-                                <div className="text-xs text-muted mt-0.5">
-                                  {client.clientId} · {client.category}
-                                </div>
-                              </div>
-                            </label>
-                          );
-                        })
-                      ) : (
-                        <div className="px-3 py-4 text-sm text-muted">
-                          {clientSearch.trim() || customCategories.length > 0
-                            ? "No clients match the current search and category filter."
-                            : "No clients available to select right now."}
-                        </div>
-                      )}
-                      </div>
-                    </div>
-                    <div
-                      aria-hidden="true"
-                      className={`transition-[height] duration-200 ease-out ${
-                        hasClientQuery ? "h-56" : "h-[4.5rem]"
-                      }`}
-                    />
-                  </div>
-                </div>
-    
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="block">
-                    <span className="text-xs text-muted mb-2 block">Date From</span>
-                    <input
-                      type="date"
-                      value={dateFrom}
-                      onChange={(e) => setDateFrom(e.target.value)}
-                      className="w-full rounded-xl border border-base bg-surface px-3 py-2.5 text-sm text-default outline-none focus:border-brand-500"
-                      disabled={customDownloading}
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-xs text-muted mb-2 block">Date To</span>
-                    <input
-                      type="date"
-                      value={dateTo}
-                      onChange={(e) => setDateTo(e.target.value)}
-                      className="w-full rounded-xl border border-base bg-surface px-3 py-2.5 text-sm text-default outline-none focus:border-brand-500"
-                      disabled={customDownloading}
-                    />
-                  </label>
-                </div>
-    
-                <label className="flex items-start gap-3 rounded-2xl border border-base bg-surface/40 px-3 py-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="mt-1 rounded"
-                    checked={includeOnlyNonEmpty}
-                    onChange={(e) => setIncludeOnlyNonEmpty(e.target.checked)}
-                  />
-                  <div>
-                    <div className="text-sm font-medium text-default">Include Only Non-Empty Fields</div>
-                    <div className="text-xs text-muted mt-1">Hide selected columns that would be completely blank for the current export.</div>
-                  </div>
-                </label>
-    
-                <label className="block">
-                  <span className="text-xs text-muted mb-2 block">Sort By</span>
-                  <ReportSelect value={sortBy} onChange={(value) => setSortBy(value as CustomExportSortBy)} ariaLabel="Custom export sort" disabled={customDownloading} options={CUSTOM_EXPORT_SORT_OPTIONS.map((option) => ({ value: option.id, label: option.label }))} buttonClassName="text-sm" />
-                  <div className="text-xs text-muted mt-2">
-                    {CUSTOM_EXPORT_SORT_OPTIONS.find((option) => option.id === sortBy)?.description}
-                  </div>
-                </label>
-                      </div>
-                    </div>
-                    </div>
-                  </div>
-                </div>
-    
-                <div className={`rounded-2xl border bg-card transition-colors ${
-                  activeAdvancedSection === "selected-fields"
-                    ? "border-brand-500 bg-brand-50/30 shadow-sm dark:bg-brand-900/10"
-                    : "border-base"
-                }`}>
-                  <button
-                    type="button"
-                    onClick={() => toggleAdvancedSection("selected-fields")}
-                    className={`flex w-full items-center justify-between gap-3 px-4 py-4 text-left transition-colors ${
-                      activeAdvancedSection === "selected-fields" ? "text-brand-700 dark:text-brand-200" : ""
-                    }`}
-                  >
-                    <div>
-                      <div className="text-xs uppercase tracking-wide text-faint">Selected Fields</div>
-                      <div className="text-sm text-muted mt-1">{customFields.length} fields currently selected</div>
-                    </div>
-                    <ChevronDown className={`h-4 w-4 text-muted transition-transform ${activeAdvancedSection === "selected-fields" ? "rotate-180" : ""}`} />
-                  </button>
-                  <div
-                    className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
-                      activeAdvancedSection === "selected-fields" ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-                    }`}
-                  >
-                    <div className="overflow-hidden">
-                    <div className="border-t border-base px-4 pb-4 pt-3">
-                      <div className="flex flex-wrap gap-2">
-                        {customFields.length > 0 ? customFields.map((fieldId) => {
-                          const field = allCustomExportFields.find((entry) => entry.id === fieldId);
-                          return (
-                            <span key={fieldId} className="text-xs font-medium text-default bg-surface px-2.5 py-1 rounded-full border border-base">
-                              {field?.label || fieldId}
-                            </span>
-                          );
-                        }) : (
-                          <span className="text-sm text-muted">No fields selected yet.</span>
-                        )}
-                      </div>
-                    </div>
-                    </div>
-                  </div>
-                </div>
-    
-                <div className={`rounded-2xl border bg-card transition-colors ${
-                  activeAdvancedSection === "preview"
-                    ? "border-brand-500 bg-brand-50/30 shadow-sm dark:bg-brand-900/10"
-                    : "border-base"
-                }`}>
-                  <button
-                    type="button"
-                    onClick={() => toggleAdvancedSection("preview")}
-                    className={`flex w-full items-center justify-between gap-3 px-4 py-4 text-left transition-colors ${
-                      activeAdvancedSection === "preview" ? "text-brand-700 dark:text-brand-200" : ""
-                    }`}
-                  >
-                    <div>
-                      <div className="text-xs uppercase tracking-wide text-faint">Preview Columns</div>
-                      <div className="text-sm text-muted mt-1">See the final export sheet structure before download</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {previewLoading && <span className="text-[11px] text-brand-600">Refreshing...</span>}
-                      <ChevronDown className={`h-4 w-4 text-muted transition-transform ${activeAdvancedSection === "preview" ? "rotate-180" : ""}`} />
-                    </div>
-                  </button>
-                  <div
-                    className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
-                      activeAdvancedSection === "preview" ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-                    }`}
-                  >
-                    <div className="overflow-hidden">
-                    <div className="border-t border-base px-4 pb-4 pt-3">
-                      {previewError ? (
-                        <div className="rounded-xl border border-red-200 bg-red-50/80 px-3 py-3 text-sm text-red-600 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
-                          {previewError}
-                        </div>
-                      ) : preview?.previewColumns?.length ? (
-                        <div className="space-y-2">
-                          {preview.previewColumns.map((column, index) => (
-                            <div key={column.id} className="rounded-2xl border border-base bg-surface/40 px-3 py-3">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-sm font-semibold text-default">
-                                    {index + 1}. {column.label}
-                                  </div>
-                                  <div className="text-xs text-muted mt-1">
-                                    {column.group}
-                                    {column.fyScoped ? ` · FY ${preview.fy}` : " · Global"}
-                                  </div>
-                                </div>
-                                <span className="shrink-0 rounded-full border border-base bg-card px-2.5 py-1 text-[11px] font-medium text-muted">
-                                  {column.nonEmptyCount} non-empty
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-muted">Select fields to see the final sheet structure.</div>
-                      )}
-                    </div>
-                    </div>
-                  </div>
-                </div>
-    
-                <div className={`rounded-2xl border bg-card transition-colors ${
-                  activeAdvancedSection === "summary"
-                    ? "border-brand-500 bg-brand-50/30 shadow-sm dark:bg-brand-900/10"
-                    : "border-base"
-                }`}>
-                  <button
-                    type="button"
-                    onClick={() => toggleAdvancedSection("summary")}
-                    className={`flex w-full items-center justify-between gap-3 px-4 py-4 text-left transition-colors ${
-                      activeAdvancedSection === "summary" ? "text-brand-700 dark:text-brand-200" : ""
-                    }`}
-                  >
-                    <div>
-                      <div className="text-xs uppercase tracking-wide text-faint">Export Count Summary</div>
-                      <div className="text-sm text-muted mt-1">Matched clients and data coverage at a glance</div>
-                    </div>
-                    <ChevronDown className={`h-4 w-4 text-muted transition-transform ${activeAdvancedSection === "summary" ? "rotate-180" : ""}`} />
-                  </button>
-                  <div
-                    className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
-                      activeAdvancedSection === "summary" ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-                    }`}
-                  >
-                    <div className="overflow-hidden">
-                    <div className="border-t border-base px-4 pb-4 pt-3">
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          { label: "Matched Clients", value: preview?.summary.matchedClients ?? 0 },
-                          { label: "With Contacts", value: preview?.summary.withContacts ?? 0 },
-                          { label: "With Billing", value: preview?.summary.withBilling ?? 0 },
-                          { label: "With Payments", value: preview?.summary.withPayments ?? 0 },
-                          { label: "With Emails", value: preview?.summary.withEmails ?? 0 },
-                          { label: "With Documents", value: preview?.summary.withDocuments ?? 0 },
-                          { label: "With Annual Return", value: preview?.summary.withAnnualReturn ?? 0 },
-                        ].map((item) => (
-                          <div key={item.label} className="rounded-2xl border border-base bg-surface/40 px-3 py-3">
-                            <div className="text-lg font-semibold text-default">{item.value}</div>
-                            <div className="text-xs text-muted mt-1">{item.label}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              </div>
-            </div>
-    
-            <div className="rounded-2xl border border-base bg-card p-4 space-y-3">
-              <div className="text-xs uppercase tracking-wide text-faint">Actions</div>
-              <div className="text-sm text-muted">
-                {preview
-                  ? `${preview.summary.matchedClients} clients matched and ${preview.previewColumns.length} columns will be exported.`
-                  : "The export file will be generated with your current field and filter setup."}
-              </div>
-              <button type="button" className="btn-primary w-full justify-center" onClick={downloadCustomExport} disabled={customDownloading || customFields.length === 0}>
-                <Download className="w-4 h-4" />
-                {customDownloading ? "Generating..." : "Download Custom Export"}
-              </button>
-              <button type="button" className="btn-secondary w-full justify-center" onClick={() => setCustomExportOpen(false)} disabled={customDownloading}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Modal>
-  );
+        <div className="report-export-filter-section"><h4>Related record dates <span className="font-normal text-muted">optional</span></h4><p className="report-caption">Applies to payments, invoices, documents, and emails. Other fields use the financial year or client record.</p><div className="grid grid-cols-2 gap-4 mt-3"><label className="report-export-label">From<input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label><label className="report-export-label">Through<input type="date" value={dateTo} min={dateFrom || undefined} onChange={(event) => setDateTo(event.target.value)} /></label></div>{invalidDates && <p role="alert" className="mt-2 text-xs text-rose-600">The end date must be on or after the start date.</p>}</div>
+        <label className="flex items-center gap-3 text-sm text-default"><input type="checkbox" checked={includeOnlyNonEmpty} onChange={(event) => setIncludeOnlyNonEmpty(event.target.checked)} />Omit columns that are empty for every matching client</label>
+      </div>}
+      {step === "review" && <section className="report-export-review"><div><h4>Your workbook, ready to review</h4><p className="report-caption">The preview shows up to five rows. Excel includes all matching clients.</p></div><div className="report-export-scope"><span>FY {customFy}</span><span>{customCategories.join(", ") || "All categories"}</span><span>{selectedClientIds.length ? `${selectedClientIds.length} selected clients` : "All clients"}</span><span>{CUSTOM_EXPORT_SORT_OPTIONS.find((entry) => entry.id === sortBy)?.label}</span>{(dateFrom || dateTo) && <span>{dateFrom || "Any start"} → {dateTo || "Any end"}</span>}{includeOnlyNonEmpty && <span>Empty columns omitted</span>}</div>
+        {previewError || invalidDates ? <div role="alert" className="rounded-xl border border-rose-200 p-4 text-sm text-rose-600">{invalidDates ? "Correct the date range in Filter clients to continue." : previewError}<button onClick={() => setStep("filters")} className="block mt-2 underline">Review filters</button></div> : previewLoading || !preview ? <div role="status" className="p-12 text-center text-sm text-muted">Preparing your preview…</div> : <><div className="flex items-center justify-between"><strong className="text-sm text-default">{preview.summary.matchedClients} clients · {preview.previewColumns.length} columns</strong><span className="report-caption">Sample rows</span></div><div className="report-export-preview"><table><thead><tr>{preview.previewColumns.map((column) => <th key={column.id}>{column.label}</th>)}</tr></thead><tbody>{preview.sampleRows?.length ? preview.sampleRows.map((row, rowIndex) => <tr key={rowIndex}>{preview.previewColumns.map((column) => <td key={column.id}>{row[column.id] === "" || row[column.id] == null ? <span className="text-faint">—</span> : String(row[column.id])}</td>)}</tr>) : <tr><td colSpan={Math.max(1, preview.previewColumns.length)}>No clients match this scope. Return to filters to broaden it.</td></tr>}</tbody></table></div>{!preview.previewColumns.length && <p role="alert" className="text-sm text-rose-600">All selected columns are empty. Turn off “Omit columns” or choose more fields.</p>}</>}
+        <div className="report-export-save"><div><h4>Use this setup again</h4><p className="report-caption">Save fields, order, FY, and filters to your account.</p></div><div className="flex gap-2 mt-3"><input value={presetName} maxLength={120} onChange={(event) => setPresetName(event.target.value)} className="input-field min-w-0 flex-1" placeholder="Name this export" aria-label="Export preset name" /><button onClick={saveCurrentPreset} disabled={!presetName.trim() || !customFields.length} className="report-secondary-button"><Save size={15} />Save preset</button></div></div>
+      </section>}
+    </motion.div></AnimatePresence></div>
+    <footer className="report-export-footer"><div><strong>{step === "review" ? "Export all matching clients" : `Step ${index + 1} of 3`}</strong>{step === "review" ? `${preview?.summary.matchedClients ?? "—"} rows · ${preview?.previewColumns.length ?? "—"} columns · .xlsx` : `${customFields.length} columns selected`}</div>{index > 0 && <button onClick={() => goToStep(steps[index - 1])} disabled={customDownloading} className="report-secondary-button">Back</button>}{step === "review" ? <button onClick={downloadCustomExport} disabled={!canDownload} className="report-primary-button"><Download size={16} />{customDownloading ? "Preparing Excel…" : "Download Excel"}</button> : <button onClick={() => goToStep(steps[index + 1])} disabled={!customFields.length || invalidDates} className="report-primary-button">{step === "fields" ? "Continue to filters" : "Review workbook"}</button>}</footer>
+  </Modal>;
 }

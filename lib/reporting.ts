@@ -225,6 +225,7 @@ export type ReportClientRow = {
   gstNumber: string;
   registrationNumber: string;
   clientCreatedAt: string;
+  customFields?: Record<string, string | number | boolean | null>;
   financialYear: string;
   financialYearRecorded: boolean;
   quotationCount: number;

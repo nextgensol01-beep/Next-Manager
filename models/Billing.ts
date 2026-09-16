@@ -13,9 +13,28 @@ export interface IBillingTargetBreakdownRow {
   rateSource?: "transaction" | "manual";
 }
 
+export type BillingType = "annual_return" | "general";
+
+export interface IBillingLineItem {
+  description: string;
+  quantity: number;
+  rate: number;
+  taxableAmount: number;
+  gstPercent: number;
+  gstAmount: number;
+  totalAmount: number;
+  sourceQuotationId?: string;
+  sourceQuotationNumber?: string;
+  sourceRevisionNumber?: number;
+  sourceLineId?: string;
+}
+
 export interface IBilling extends Document {
   clientId: string;
   financialYear: string;
+  billType: BillingType;
+  billTitle?: string;
+  billDate?: Date;
   govtCharges: number;
   consultancyCharges: number;
   targetCharges: number;
@@ -24,6 +43,7 @@ export interface IBilling extends Document {
   /** Denormalized cache of sum of non-advance payments. Updated by Payment write routes. */
   totalPaid: number;
   dueDate?: Date;
+  lineItems?: IBillingLineItem[];
   targetBreakdown?: IBillingTargetBreakdownRow[];
   notes?: string;
   sourceQuotationIds?: string[];
@@ -52,10 +72,30 @@ const BillingTargetBreakdownSchema = new Schema<IBillingTargetBreakdownRow>(
   { _id: false }
 );
 
+const BillingLineItemSchema = new Schema<IBillingLineItem>(
+  {
+    description: { type: String, required: true, trim: true },
+    quantity: { type: Number, default: 1 },
+    rate: { type: Number, default: 0 },
+    taxableAmount: { type: Number, default: 0 },
+    gstPercent: { type: Number, default: 0 },
+    gstAmount: { type: Number, default: 0 },
+    totalAmount: { type: Number, default: 0 },
+    sourceQuotationId: { type: String, default: "", trim: true },
+    sourceQuotationNumber: { type: String, default: "", trim: true },
+    sourceRevisionNumber: { type: Number, default: null },
+    sourceLineId: { type: String, default: "", trim: true },
+  },
+  { _id: false }
+);
+
 const BillingSchema = new Schema<IBilling>(
   {
     clientId: { type: String, required: true, ref: "Client" },
     financialYear: { type: String, required: true },
+    billType: { type: String, enum: ["annual_return", "general"], default: "annual_return", index: true },
+    billTitle: { type: String, trim: true, default: "" },
+    billDate: { type: Date, default: null },
     govtCharges: { type: Number, default: 0 },
     consultancyCharges: { type: Number, default: 0 },
     targetCharges: { type: Number, default: 0 },
@@ -64,6 +104,7 @@ const BillingSchema = new Schema<IBilling>(
     /** Denormalized sum of non-advance payments. Kept in sync by Payment write routes. */
     totalPaid: { type: Number, default: 0 },
     dueDate: { type: Date, default: null },
+    lineItems: { type: [BillingLineItemSchema], default: [] },
     targetBreakdown: { type: [BillingTargetBreakdownSchema], default: [] },
     notes: { type: String, default: "" },
     sourceQuotationIds: { type: [String], default: [] },
@@ -78,15 +119,15 @@ const BillingSchema = new Schema<IBilling>(
 );
 
 BillingSchema.pre("save", function (next) {
-  this.totalAmount =
-    this.govtCharges +
-    this.consultancyCharges +
-    this.targetCharges +
-    this.otherCharges;
+  const lineItemsTotal = (this.lineItems || []).reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
+  const total = this.billType === "general"
+    ? lineItemsTotal
+    : this.govtCharges + this.consultancyCharges + this.targetCharges + this.otherCharges + lineItemsTotal;
+  this.totalAmount = Math.round((Number(total || 0) + Number.EPSILON) * 100) / 100;
   next();
 });
 
-BillingSchema.index({ clientId: 1, financialYear: 1 }, { unique: true });
+BillingSchema.index({ clientId: 1, financialYear: 1, billType: 1, createdAt: -1 });
 BillingSchema.index({ sourceQuotationIds: 1 }, { unique: true, sparse: true });
 
 export default mongoose.models.Billing ||

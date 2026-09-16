@@ -1,11 +1,16 @@
 import {
-  REPORT_STUDIO_FIELD_MAP,
+  reportStudioCustomFieldKey,
+  reportStudioFieldMap,
   validateReportStudioConfig,
   type ReportStudioCellValue,
+  type ReportStudioAnalysisBucket,
+  type ReportStudioAnalysisBucketFilter,
+  type ReportStudioAnalysisResult,
   type ReportStudioConfig,
   type ReportStudioFieldDefinition,
   type ReportStudioFilterClause,
   type ReportStudioFilterGroup,
+  type ReportStudioFilterValue,
   type ReportStudioResponse,
   type ReportStudioResultValue,
   type ReportStudioResultRow,
@@ -21,6 +26,7 @@ import ClientWorkItem from "@/models/ClientWorkItem";
 import ActivityEvent from "@/models/ActivityEvent";
 import ClientContact from "@/models/ClientContact";
 import Person from "@/models/Person";
+import { loadReportStudioCustomFields } from "@/lib/server/report-studio-fields";
 
 type StudioBaseRow = {
   id: string;
@@ -107,7 +113,25 @@ function registeredInFinancialYear(createdAt: string, financialYear: string) {
   return date.getTime() >= start && date.getTime() <= end;
 }
 
-function resolveValue(row: ReportClientRow, fieldId: string, related: RelatedStats): ReportStudioCellValue {
+function resolveValue(
+  row: ReportClientRow,
+  fieldId: string,
+  related: RelatedStats,
+  definition?: ReportStudioFieldDefinition,
+): ReportStudioCellValue {
+  const customFieldKey = reportStudioCustomFieldKey(fieldId);
+  if (customFieldKey) {
+    const value = row.customFields?.[customFieldKey];
+    if (value == null || value === "") return null;
+    if (definition?.type === "number") {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    }
+    if (definition?.type === "boolean") return value === true || value === 1 || String(value).toLowerCase() === "true";
+    const text = String(value).trim();
+    return text || null;
+  }
+  if (fieldId === "target.overall.progress") return PIBO_CATEGORIES.has(row.clientCategory) && row.financialYearRecorded && row.targetTotal > 0 ? row.achievedTotal / row.targetTotal * 100 : null;
   if (fieldId.startsWith("target.")) return targetValue(row, fieldId);
   if (fieldId.startsWith("quotation.rate.") || fieldId.startsWith("billing.rate.")) return categoryRateValue(row, fieldId);
   switch (fieldId) {
@@ -597,7 +621,176 @@ function buildColumnResults(rows: StudioBaseRow[], definitions: ReportStudioFiel
   });
 }
 
-function groupRows(rows: StudioBaseRow[], config: ReportStudioConfig): ReportStudioResultRow[] {
+function hasRecordedAnalysisValue(value: ReportStudioCellValue) {
+  return value != null && value !== "" && (!Array.isArray(value) || value.length > 0);
+}
+
+function analysisScopeFilters(definition: ReportStudioFieldDefinition): ReportStudioAnalysisBucketFilter[] {
+  return definition.applicableCategories?.length
+    ? [{ field: "client.category", operator: "in", value: definition.applicableCategories }]
+    : [];
+}
+
+function analysisNumberLabel(value: number) {
+  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(value);
+}
+
+function dateAnalysisBucket(value: string, period: ReportStudioConfig["analysis"]["timePeriod"]) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const startMonth = period === "quarter" ? Math.floor(month / 3) * 3 : period === "year" ? 0 : month;
+  const endMonth = period === "quarter" ? startMonth + 2 : period === "year" ? 11 : month;
+  const start = new Date(Date.UTC(year, startMonth, 1));
+  const end = new Date(Date.UTC(year, endMonth + 1, 0));
+  const key = period === "month"
+    ? `${year}-${String(month + 1).padStart(2, "0")}`
+    : period === "quarter" ? `${year}-Q${Math.floor(month / 3) + 1}` : String(year);
+  const label = period === "month"
+    ? new Intl.DateTimeFormat("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }).format(start)
+    : period === "quarter" ? `Q${Math.floor(month / 3) + 1} ${year}` : String(year);
+  return { key, label, start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+}
+
+function buildFieldAnalysis(
+  rows: StudioBaseRow[],
+  config: ReportStudioConfig,
+  definition: ReportStudioFieldDefinition,
+): ReportStudioAnalysisResult {
+  const applicableCategories = definition.applicableCategories || [];
+  const applicableRows = applicableCategories.length > 0
+    ? rows.filter((row) => applicableCategories.includes(String(row.values["client.category"] || "")))
+    : rows;
+  const excluded = rows.length - applicableRows.length;
+  const recordedRows = applicableRows.filter((row) => hasRecordedAnalysisValue(row.values[definition.id]));
+  const missing = applicableRows.length - recordedRows.length;
+  const scopeFilters = analysisScopeFilters(definition);
+  const missingBucket: ReportStudioAnalysisBucket = {
+    id: "missing",
+    label: "No Record",
+    value: missing,
+    filters: [...scopeFilters, { field: definition.id, operator: "empty" }],
+    tone: "missing",
+  };
+  const excludedBucket: ReportStudioAnalysisBucket | null = excluded > 0 ? {
+    id: "not-applicable",
+    label: "Not Applicable",
+    value: excluded,
+    filters: [{ field: "client.category", operator: "not_in", value: applicableCategories }],
+    tone: "excluded",
+  } : null;
+  let buckets: ReportStudioAnalysisBucket[] = [];
+  let chart: ReportStudioAnalysisResult["chart"] = "bar";
+
+  if (config.analysis.transform === "presence") {
+    chart = "donut";
+    buckets = [{
+      id: "recorded",
+      label: "Recorded",
+      value: recordedRows.length,
+      filters: [...scopeFilters, { field: definition.id, operator: "not_empty" }],
+      tone: "recorded",
+    }, missingBucket];
+  } else if (config.analysis.transform === "value") {
+    const counts = new Map<string, { label: string; value: ReportStudioFilterValue; count: number }>();
+    recordedRows.forEach((row) => {
+      const raw = row.values[definition.id];
+      const values = Array.isArray(raw) ? Array.from(new Set(raw)) : [raw as string | number | boolean];
+      values.forEach((value) => {
+        const key = `${typeof value}:${String(value)}`;
+        const label = typeof value === "boolean" ? (value ? "Yes" : "No") : String(value);
+        const current = counts.get(key);
+        counts.set(key, { label, value: value as ReportStudioFilterValue, count: (current?.count || 0) + 1 });
+      });
+    });
+    const ranked = Array.from(counts.values()).sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+    const visible = ranked.slice(0, 10);
+    buckets = visible.map((entry, index) => ({
+      id: `value-${index}`,
+      label: entry.label,
+      value: entry.count,
+      filters: [...scopeFilters, { field: definition.id, operator: "eq", value: entry.value }],
+      tone: "value",
+    }));
+    if (ranked.length > visible.length) {
+      buckets.push({
+        id: "other",
+        label: `Other (${ranked.length - visible.length} values)`,
+        value: ranked.slice(visible.length).reduce((total, entry) => total + entry.count, 0),
+        filters: [...scopeFilters, { field: definition.id, operator: "not_empty" }, { field: definition.id, operator: "not_in", value: visible.map((entry) => entry.value).filter((value): value is string | number => typeof value === "string" || typeof value === "number") }],
+        tone: "value",
+      });
+    }
+    buckets.push(missingBucket);
+  } else if (config.analysis.transform === "range") {
+    const numericRows = recordedRows.map((row) => Number(row.values[definition.id])).filter(Number.isFinite);
+    if (numericRows.length > 0) {
+      const minimum = Math.min(...numericRows);
+      const maximum = Math.max(...numericRows);
+      if (minimum === maximum) {
+        buckets.push({ id: "range-0", label: analysisNumberLabel(minimum), value: numericRows.length, filters: [...scopeFilters, { field: definition.id, operator: "eq", value: minimum }], tone: "value" });
+      } else {
+        const bucketCount = Math.min(config.analysis.bucketCount, Math.max(2, new Set(numericRows).size));
+        const width = (maximum - minimum) / bucketCount;
+        buckets = Array.from({ length: bucketCount }, (_, index) => {
+          const start = minimum + width * index;
+          const end = index === bucketCount - 1 ? maximum : minimum + width * (index + 1);
+          const value = numericRows.filter((entry) => entry >= start && (index === bucketCount - 1 ? entry <= end : entry < end)).length;
+          return {
+            id: `range-${index}`,
+            label: `${analysisNumberLabel(start)} – ${analysisNumberLabel(end)}`,
+            value,
+            filters: [...scopeFilters, { field: definition.id, operator: "gte" as const, value: start }, { field: definition.id, operator: index === bucketCount - 1 ? "lte" as const : "lt" as const, value: end }],
+            tone: "value" as const,
+          };
+        });
+      }
+    }
+    buckets.push(missingBucket);
+  } else {
+    chart = "line";
+    const dated = new Map<string, { label: string; start: string; end: string; count: number }>();
+    const invalidValues = new Set<string>();
+    let invalidCount = 0;
+    recordedRows.forEach((row) => {
+      const raw = String(row.values[definition.id] ?? "");
+      const period = dateAnalysisBucket(raw, config.analysis.timePeriod);
+      if (!period) { invalidCount += 1; invalidValues.add(raw); return; }
+      const current = dated.get(period.key);
+      dated.set(period.key, { ...period, count: (current?.count || 0) + 1 });
+    });
+    buckets = Array.from(dated.entries()).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => ({
+      id: `period-${key}`,
+      label: entry.label,
+      value: entry.count,
+      filters: [...scopeFilters, { field: definition.id, operator: "between", value: entry.start, secondValue: entry.end }],
+      tone: "value",
+    }));
+    if (invalidCount > 0) buckets.push({ id: "invalid-date", label: "Invalid Date", value: invalidCount, filters: [...scopeFilters, { field: definition.id, operator: "in", value: Array.from(invalidValues) }], tone: "missing" });
+    buckets.push(missingBucket);
+  }
+
+  if (excludedBucket) buckets.push(excludedBucket);
+  return {
+    field: definition,
+    transform: config.analysis.transform,
+    chart,
+    total: rows.length,
+    applicable: applicableRows.length,
+    recorded: recordedRows.length,
+    missing,
+    excluded,
+    coveragePercent: applicableRows.length > 0 ? recordedRows.length / applicableRows.length * 100 : 0,
+    buckets,
+  };
+}
+
+function groupRows(
+  rows: StudioBaseRow[],
+  config: ReportStudioConfig,
+  fieldMap: Map<string, ReportStudioFieldDefinition>,
+): ReportStudioResultRow[] {
   if (config.groupBy.length === 0) {
     return rows.map((row) => ({ id: row.id, values: row.values, clientIds: [row.clientId] }));
   }
@@ -613,7 +806,7 @@ function groupRows(rows: StudioBaseRow[], config: ReportStudioConfig): ReportStu
     const values: Record<string, ReportStudioCellValue> = {};
     config.groupBy.forEach((fieldId) => { values[fieldId] = members[0]?.values[fieldId] ?? null; });
     config.metrics.forEach((fieldId) => {
-      const definition = REPORT_STUDIO_FIELD_MAP.get(fieldId);
+      const definition = fieldMap.get(fieldId);
       if (definition) values[fieldId] = aggregateMetric(members, definition);
     });
     return { id: `group-${index}-${key}`, values, clientIds: members.map((member) => member.clientId) };
@@ -647,6 +840,7 @@ function referencedFields(config: ReportStudioConfig) {
     ...config.metrics,
     ...config.groupBy,
     ...config.sort.map((entry) => entry.field),
+    config.analysis.field,
   ]);
   const visit = (group: ReportStudioFilterGroup) => group.children.forEach((child) => {
     if (child.kind === "group") visit(child);
@@ -735,7 +929,9 @@ async function loadRelatedStats(clientIds: string[], financialYear: string, fiel
 }
 
 export async function executeReportStudio(rawConfig: unknown, options: { exportAll?: boolean } = {}): Promise<ReportStudioResponse> {
-  const config = validateReportStudioConfig(rawConfig);
+  const customFields = await loadReportStudioCustomFields();
+  const fieldMap = reportStudioFieldMap(customFields);
+  const config = validateReportStudioConfig(rawConfig, customFields);
   const businessResultOptions = buildBusinessResults([], config.source);
   const availableBusinessResultIds = new Set(businessResultOptions.map((result) => result.id));
   const { automaticResultIds, relatedResultIds } = contextualBusinessResultIds(config, businessResultOptions);
@@ -744,10 +940,28 @@ export async function executeReportStudio(rawConfig: unknown, options: { exportA
     ? automaticResultIds
     : validManualResultIds.length > 0 ? validManualResultIds : automaticResultIds;
   const referenced = referencedFields(config);
+  const analysisDefinition = fieldMap.get(config.analysis.field)!;
+  if (analysisDefinition.applicableCategories?.length) referenced.add("client.category");
+  const focusDefinitions: NonNullable<ReportStudioResponse["summary"]["focusOptions"]> = config.source === "annual-returns" ? [
+    { field: "annualReturn.status", operator: "eq", value: "Ready to File", label: "Ready to file", count: 0 },
+    { field: "annualReturn.status", operator: "eq", value: "In Progress", label: "In progress", count: 0 },
+    { field: "invoice.coveragePercent", operator: "lt", value: 100, label: "Incomplete invoice coverage", count: 0 },
+    { field: "annualReturn.status", operator: "eq", value: "Verified", label: "Verified", count: 0 },
+  ] : config.source === "billing" ? [
+    { field: "billing.outstanding", operator: "gt", value: 0, label: "Outstanding balances", count: 0 },
+    { field: "payment.status", operator: "eq", value: "unpaid", label: "Unpaid clients", count: 0 },
+    { field: "payment.status", operator: "eq", value: "partial", label: "Partially paid", count: 0 },
+  ] : config.source === "pwp-credits" ? [
+    { field: "pwp.remaining", operator: "gt", value: 0, label: "Clients with available credits", count: 0 },
+  ] : [];
+  focusDefinitions.forEach((focus) => referenced.add(focus.field));
   selectedBusinessResultIds.forEach((resultId) => {
     (BUSINESS_RESULT_FIELD_DEPENDENCIES[resultId] || []).forEach((fieldId) => referenced.add(fieldId));
   });
   const sections = requiredSections(config, referenced);
+  const customFieldKeys = new Set(Array.from(referenced)
+    .map(reportStudioCustomFieldKey)
+    .filter((key): key is string => Boolean(key)));
   const baseQuery = createReportQuery(config.financialYear, "clients");
   const report = await buildReport({
     ...baseQuery,
@@ -761,39 +975,48 @@ export async function executeReportStudio(rawConfig: unknown, options: { exportA
     sortDirection: "asc",
     page: 1,
     pageSize: 100,
-  }, { exportAll: true, sections });
+  }, { exportAll: true, sections, customFieldKeys });
 
-  const sourceFieldIds = new Set(Array.from(referenced).filter((fieldId) => REPORT_STUDIO_FIELD_MAP.has(fieldId)));
+  const sourceFieldIds = new Set(Array.from(referenced).filter((fieldId) => fieldMap.has(fieldId)));
   const relatedStats = await loadRelatedStats(report.rows.map((row) => row.clientId), config.financialYear, referenced, config.source);
+  const search = config.search.toLocaleLowerCase();
   const baseRows: StudioBaseRow[] = report.rows
+    .filter((row) => !search || [row.companyName, row.legalName, row.clientId, row.gstNumber, row.registrationNumber].some((value) => String(value || "").toLocaleLowerCase().includes(search)))
     .filter((row) => sourceMatches(row, config, relatedStats.get(row.clientId) || EMPTY_RELATED_STATS))
     .map((row) => {
       const related = relatedStats.get(row.clientId) || EMPTY_RELATED_STATS;
-      const values = Object.fromEntries(Array.from(sourceFieldIds, (fieldId) => [fieldId, resolveValue(row, fieldId, related)]));
+      const values = Object.fromEntries(Array.from(sourceFieldIds, (fieldId) => [fieldId, resolveValue(row, fieldId, related, fieldMap.get(fieldId))]));
       return { id: row.clientId, clientId: row.clientId, values };
     })
     .filter((row) => matchesFilterGroup(row.values, config.filters));
 
-  const summaryMetrics = config.metrics.map((fieldId) => REPORT_STUDIO_FIELD_MAP.get(fieldId)).filter((definition): definition is ReportStudioFieldDefinition => Boolean(definition));
-  const groupedRows = sortRows(groupRows(baseRows, config), config);
+  const summaryMetrics = config.metrics.map((fieldId) => fieldMap.get(fieldId)).filter((definition): definition is ReportStudioFieldDefinition => Boolean(definition));
+  const groupedRows = sortRows(groupRows(baseRows, config, fieldMap), config);
   const responseColumnIds = config.groupBy.length > 0 ? [...config.groupBy, ...config.metrics] : config.columns;
-  const columns = responseColumnIds.map((fieldId) => REPORT_STUDIO_FIELD_MAP.get(fieldId)).filter((definition): definition is ReportStudioFieldDefinition => Boolean(definition));
+  const columns = responseColumnIds.map((fieldId) => fieldMap.get(fieldId)).filter((definition): definition is ReportStudioFieldDefinition => Boolean(definition));
   const totalRows = groupedRows.length;
-  const pageRows = options.exportAll || config.view === "pivot"
+  const pageRows = options.exportAll || config.view === "pivot" || config.view === "chart"
     ? groupedRows
     : groupedRows.slice((config.page - 1) * config.pageSize, config.page * config.pageSize);
 
   const calculatedBusinessResults = new Map(buildBusinessResults(baseRows, config.source).map((result) => [result.id, result]));
+  const analysis = buildFieldAnalysis(baseRows, config, analysisDefinition);
   const businessResults = selectedBusinessResultIds
     .map((resultId) => calculatedBusinessResults.get(resultId))
     .filter((result): result is ReportStudioResultValue => Boolean(result));
 
   return {
+    generatedAt: new Date().toISOString(),
     config,
     columns,
     rows: pageRows,
     summary: {
       matchedClients: baseRows.length,
+      focusOptions: focusDefinitions.map((focus) => ({ ...focus, count: baseRows.filter((row) => {
+        const value = row.values[focus.field];
+        if (focus.operator === "eq") return value === focus.value;
+        return typeof value === "number" && (focus.operator === "gt" ? value > Number(focus.value) : value < Number(focus.value));
+      }).length })),
       metrics: summaryMetrics.map((definition) => ({
         field: definition.id,
         label: definition.label,
@@ -805,6 +1028,7 @@ export async function executeReportStudio(rawConfig: unknown, options: { exportA
       automaticBusinessResultIds: automaticResultIds,
       relatedBusinessResultIds: relatedResultIds,
       columnResults: buildColumnResults(baseRows, columns),
+      analysis,
     },
     pagination: {
       page: config.page,

@@ -450,7 +450,11 @@ export async function GET(req: NextRequest) {
       Billing.find({ clientId: { $in: clientIds }, financialYear: fy }).lean() as Promise<Record<string, unknown>[]>,
       Payment.find({ clientId: { $in: clientIds }, financialYear: fy }).lean() as Promise<Record<string, unknown>[]>,
     ]);
-    const billingMap = new Map(billings.map((billing) => [String(billing.clientId), billing]));
+    const billingMap = new Map<string, Record<string, unknown>[]>();
+    billings.forEach((billing) => {
+      const clientId = String(billing.clientId || "");
+      billingMap.set(clientId, [...(billingMap.get(clientId) || []), billing]);
+    });
     const paymentMap = new Map<string, Record<string, unknown>[]>();
     payments.forEach((payment) => {
       const clientId = String(payment.clientId || "");
@@ -461,9 +465,9 @@ export async function GET(req: NextRequest) {
     });
     let rowIdx = 0;
     for (const client of clients) {
-      const billing = billingMap.get(client.clientId) || null;
+      const clientBillings = billingMap.get(client.clientId) || [];
       const clientPayments = paymentMap.get(client.clientId) || [];
-      if (!billing && clientPayments.length === 0) continue;
+      if (clientBillings.length === 0 && clientPayments.length === 0) continue;
       const billingPaid = clientPayments.reduce<number>(
         (sum, payment) => sum + (payment.paymentType === "advance" ? 0 : (Number(payment.amountPaid) || 0)),
         0
@@ -472,7 +476,7 @@ export async function GET(req: NextRequest) {
         (sum, payment) => sum + (payment.paymentType === "advance" ? (Number(payment.amountPaid) || 0) : 0),
         0
       );
-      const totalAmount = Number(billing?.totalAmount) || 0;
+      const totalAmount = clientBillings.reduce((sum, billing) => sum + (Number(billing.totalAmount) || 0), 0);
       const totalReceived = billingPaid + advancePaid;
       const pending = Math.max(0, totalAmount - billingPaid);
       const status  = totalAmount > 0

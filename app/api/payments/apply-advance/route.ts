@@ -38,13 +38,14 @@ export async function POST(req: NextRequest) {
 
     const clientId = typeof body.clientId === "string" ? body.clientId.trim() : "";
     const financialYear = typeof body.financialYear === "string" ? body.financialYear.trim() : "";
+    const billingId = typeof body.billingId === "string" ? body.billingId.trim() : "";
     const amountToApply = Number(body.amountToApply);
     const applyDate = body.applyDate ? new Date(String(body.applyDate)) : new Date();
     const notes = typeof body.notes === "string" ? body.notes.trim() : "";
 
     // ── Validate inputs ──────────────────────────────────────────────────────
-    if (!clientId || !financialYear) {
-      return NextResponse.json({ error: "clientId and financialYear are required" }, { status: 400 });
+    if (!clientId || !financialYear || !billingId) {
+      return NextResponse.json({ error: "clientId, financialYear, and billingId are required" }, { status: 400 });
     }
     if (!Number.isFinite(amountToApply) || amountToApply <= 0) {
       return NextResponse.json({ error: "amountToApply must be a positive number" }, { status: 400 });
@@ -54,9 +55,9 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Load billing record ──────────────────────────────────────────────────
-    const billing = await Billing.findOne({ clientId, financialYear })
-      .select("_id totalAmount")
-      .lean() as { _id?: unknown; totalAmount?: number } | null;
+    const billing = await Billing.findOne({ _id: billingId, clientId, financialYear })
+      .select("_id totalAmount billType")
+      .lean() as { _id?: unknown; totalAmount?: number; billType?: string } | null;
 
     if (!billing) {
       return NextResponse.json(
@@ -71,8 +72,10 @@ export async function POST(req: NextRequest) {
       paymentType: { $ne: "advance" },
       $or: [
         { billingId: String(billing._id) },
-        { billingId: { $in: ["", null] }, financialYear },
-        { billingId: { $exists: false }, financialYear },
+        ...((billing.billType || "annual_return") === "annual_return" ? [
+          { billingId: { $in: ["", null] }, financialYear },
+          { billingId: { $exists: false }, financialYear },
+        ] : []),
       ],
     }).select("amountPaid").lean() as Array<{ amountPaid?: number }>;
 

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { connectDB } from "@/lib/mongoose";
 import { validateReportStudioConfig, type ReportStudioConfig } from "@/lib/report-studio";
 import { currentSessionUserObjectId } from "@/lib/server/current-session-user";
+import { loadReportStudioCustomFields } from "@/lib/server/report-studio-fields";
 import ReportStudioSavedReport from "@/models/ReportStudioSavedReport";
 
 const updateReportSchema = z.object({
@@ -43,12 +44,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json().catch(() => null);
   try {
     const parsed = updateReportSchema.parse(body);
+    await connectDB();
+    const customFields = await loadReportStudioCustomFields();
     const config = validateReportStudioConfig({
       ...parsed.config as Record<string, unknown>,
       name: parsed.name,
-    });
+    }, customFields);
 
-    await connectDB();
     const updated = await ReportStudioSavedReport.findOneAndUpdate(
       { _id: id, userId: currentUser.userId },
       { $set: { name: parsed.name, config } },

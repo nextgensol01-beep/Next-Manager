@@ -36,7 +36,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const hasChargeableValue = currentRevision.grandTotal > 0;
   const hasPositiveItem = currentRevision.items.some((item) => item.quantity > 0 && item.rate > 0);
-  if (!hasChargeableValue || (!hasPositiveItem && currentRevision.consultationCharges <= 0 && currentRevision.governmentFees <= 0)) {
+  const hasPositiveAdditionalItem = (currentRevision.additionalItems || []).some((item) => item.quantity > 0 && item.rate > 0);
+  if (!hasChargeableValue || (!hasPositiveItem && !hasPositiveAdditionalItem && currentRevision.consultationCharges <= 0 && currentRevision.governmentFees <= 0)) {
     return NextResponse.json({ error: "Add at least one chargeable item or fee before finalising" }, { status: 400 });
   }
 

@@ -59,6 +59,13 @@ export type CustomClientExportFieldDefinition = {
   fyScoped?: boolean;
 };
 
+const SENSITIVE_CUSTOM_EXPORT_FIELD_PATTERN = /(password|passcode|secret|token|credential|one[-_ ]?time|otp\b|\bpin\b)/i;
+
+/** Keeps credentials out of both built-in and user-configured exports. */
+export function isSafeCustomExportField(fieldName: string) {
+  return !SENSITIVE_CUSTOM_EXPORT_FIELD_PATTERN.test(fieldName);
+}
+
 export const CUSTOM_EXPORT_CLIENT_CATEGORIES = [
   "PWP",
   "Producer",
@@ -79,7 +86,6 @@ export const CUSTOM_CLIENT_EXPORT_FIELDS = [
   { id: "registrationNumber", label: "Registration Number", description: "Registration or license number", group: "Client", width: 24 },
   { id: "address", label: "Address", description: "Saved company address", group: "Client", width: 40 },
   { id: "cpcbLoginId", label: "CPCB Login ID", description: "Portal login username", group: "Portal", width: 24 },
-  { id: "cpcbPassword", label: "CPCB Password", description: "Portal password", group: "Portal", width: 24 },
   { id: "otpMobileNumber", label: "OTP Mobile Number", description: "Portal OTP mobile number", group: "Portal", width: 18 },
   { id: "createdAt", label: "Created At", description: "Client record creation date", group: "Client", width: 16 },
   { id: "updatedAt", label: "Last Updated", description: "Most recent update date", group: "Client", width: 16 },
@@ -263,7 +269,6 @@ export const CUSTOM_EXPORT_PRESETS: readonly CustomExportPresetDefinition[] = [
         "category",
         "state",
         "cpcbLoginId",
-        "cpcbPassword",
         "otpMobileNumber",
       ],
       sortBy: "companyName",

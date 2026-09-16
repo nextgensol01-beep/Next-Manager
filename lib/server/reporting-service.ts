@@ -225,7 +225,11 @@ function countFacet(values: string[]) {
   return Array.from(counts, ([value, count]) => ({ value, count })).sort((a, b) => a.value.localeCompare(b.value));
 }
 
-export async function buildReport(rawQuery: ReportQuery, options: { exportAll?: boolean; sections?: ReadonlySet<ReportDataSection> } = {}): Promise<ReportResponse> {
+export async function buildReport(rawQuery: ReportQuery, options: {
+  exportAll?: boolean;
+  sections?: ReadonlySet<ReportDataSection>;
+  customFieldKeys?: ReadonlySet<string>;
+} = {}): Promise<ReportResponse> {
   const query = reportQuerySchema.parse(rawQuery);
   const include = (section: ReportDataSection) => !options.sections || options.sections.has(section);
   const clientMatch: FlatRecord = {};
@@ -265,7 +269,6 @@ export async function buildReport(rawQuery: ReportQuery, options: { exportAll?: 
   ]));
 
   const financialYearMap = new Map(financialYears.map((record) => [textValue(record.clientId), record]));
-  const billingMap = new Map(billings.map((record) => [textValue(record.clientId), record]));
   const annualReturnMap = new Map(annualReturns.map((record) => [textValue(record.clientId), record]));
   const groupByClient = (records: FlatRecord[], field = "clientId") => {
     const map = new Map<string, FlatRecord[]>();
@@ -277,6 +280,7 @@ export async function buildReport(rawQuery: ReportQuery, options: { exportAll?: 
     return map;
   };
   const quotationMap = groupByClient(quotations);
+  const billingMap = groupByClient(billings);
   const paymentsMap = groupByClient(payments);
   const invoicesMap = groupByClient(invoices);
   const uploadsMap = groupByClient(uploads);
@@ -339,8 +343,9 @@ export async function buildReport(rawQuery: ReportQuery, options: { exportAll?: 
     const quotedTotal = sumBreakdown("quoted");
     const achievedTotal = sumBreakdown("achieved");
     const remainingTotal = targetTotal - achievedTotal;
-    const billing = billingMap.get(clientId);
-    const billingTotal = numberValue(billing?.totalAmount);
+    const clientBillings = billingMap.get(clientId) || [];
+    const annualBilling = clientBillings.find((entry) => textValue(entry.billType) !== "general");
+    const billingTotal = clientBillings.reduce((sum, entry) => sum + numberValue(entry.totalAmount), 0);
     const receivedTotal = (paymentsMap.get(clientId) || []).reduce((sum, payment) => sum + numberValue(payment.amountPaid), 0);
     const pendingAmount = billingTotal - receivedTotal;
     const currentPaymentStatus = paymentStatus(billingTotal, receivedTotal);
@@ -361,6 +366,15 @@ export async function buildReport(rawQuery: ReportQuery, options: { exportAll?: 
     const invoiceCoverage = buildInvoiceCoverageSummary(clientInvoices as InvoiceCoverageInput[], query.financialYear);
     const invoiceMonthsReceived = invoiceCoverage.sale.doneCount + invoiceCoverage.purchase.doneCount;
     const acceptedQuotations = acceptedQuotationRows;
+    const clientCustomFields = client.customFields && typeof client.customFields === "object" && !Array.isArray(client.customFields)
+      ? client.customFields as FlatRecord
+      : {};
+    const selectedCustomFields = options.customFieldKeys && options.customFieldKeys.size > 0
+      ? Object.fromEntries(Array.from(options.customFieldKeys, (key) => {
+        const value = clientCustomFields[key];
+        return [key, typeof value === "boolean" || typeof value === "number" || typeof value === "string" ? value : null];
+      }))
+      : null;
     const row: ReportClientRow = {
       clientId,
       companyName: textValue(client.companyName),
@@ -370,6 +384,7 @@ export async function buildReport(rawQuery: ReportQuery, options: { exportAll?: 
       gstNumber: textValue(client.gstNumber),
       registrationNumber: textValue(client.registrationNumber),
       clientCreatedAt: isoDate(client.createdAt),
+      ...(selectedCustomFields ? { customFields: selectedCustomFields } : {}),
       financialYear: query.financialYear,
       financialYearRecorded: Boolean(fyRecord),
       quotationCount: reportQuotations.length,
@@ -400,8 +415,8 @@ export async function buildReport(rawQuery: ReportQuery, options: { exportAll?: 
       paymentCount: (paymentsMap.get(clientId) || []).length,
       pendingAmount,
       paymentStatus: currentPaymentStatus,
-      billingCreated: Boolean(billing),
-      billingInvoiceCreated: Boolean(billing?.invoiceCreated),
+      billingCreated: Boolean(annualBilling),
+      billingInvoiceCreated: Boolean(annualBilling?.invoiceCreated),
       annualReturnStatus,
       invoiceCount: clientInvoices.length,
       invoiceSaleMonthsReceived: invoiceCoverage.sale.doneCount,
@@ -412,7 +427,7 @@ export async function buildReport(rawQuery: ReportQuery, options: { exportAll?: 
       uploadRecordCount: clientUploads.length,
       breakdown,
       quotations: reportQuotations,
-      billingTargetBreakdown: billingRateRows(billing),
+      billingTargetBreakdown: billingRateRows(annualBilling),
       warnings: [
         ...(reportQuotations.some((quotation) => quotation.items.some((item) => !item.mapped)) ? ["Some quotation items could not be mapped to CAT-I–IV"] : []),
         ...(query.view === "accepted-targets" && targetTotal <= 0 ? ["No target recorded for the selected dimensions"] : []),

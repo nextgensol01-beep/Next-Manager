@@ -1,4 +1,5 @@
 "use client";
+import { chartRowAt, rankReportRows } from "@/lib/report-studio-view";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Palette, Sparkles } from "lucide-react";
@@ -8,6 +9,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Line,
   LineChart,
   Pie,
@@ -19,8 +21,9 @@ import {
   YAxis,
 } from "recharts";
 import type { PieSectorDataItem } from "recharts/types/polar/Pie";
-import { REPORT_STUDIO_FIELD_MAP, type ReportStudioResponse } from "@/lib/report-studio";
+import type { ReportStudioResponse } from "@/lib/report-studio";
 import { formatCurrency } from "@/lib/utils";
+import ReportSelect from "./ReportSelect";
 
 type ReportStudioChartProps = {
   report: ReportStudioResponse;
@@ -37,6 +40,18 @@ type ChartDatum = {
   color: string;
   groups: Array<{ label: string; value: string }>;
 };
+
+const COMPACT_RESULT_LIMIT = 10;
+const MAX_CHART_RESULTS = 20;
+
+const PREFERRED_METRICS = [
+  "target.overall.remaining",
+  "billing.outstanding",
+  "annualReturn.completionPercent",
+  "pwp.remaining",
+  "target.overall.achieved",
+  "target.overall.target",
+];
 
 type PaletteDefinition = {
   id: string;
@@ -87,6 +102,19 @@ const GROUP_LABEL_SEPARATOR = "\u0001";
 
 function quantity(value: number) {
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(value || 0);
+}
+
+function compactQuantity(value: number) {
+  return new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
+}
+
+function preferredMetric(metrics: string[]) {
+  return PREFERRED_METRICS.find((fieldId) => metrics.includes(fieldId)) || metrics[0] || "";
+}
+
+function chronologicalValue(value: unknown) {
+  const timestamp = Date.parse(String(value ?? ""));
+  return Number.isNaN(timestamp) ? String(value ?? "") : timestamp;
 }
 
 function truncate(value: string, maximum = 22) {
@@ -163,6 +191,7 @@ function ChartTooltip({
 
 export default function ReportStudioChart({ report, onRowClick }: ReportStudioChartProps) {
   const [chartType, setChartType] = useState<ChartType>("bar");
+  const [showMore, setShowMore] = useState(false);
   const [paletteId, setPaletteId] = useState(DEFAULT_PALETTE.id);
   const [customColors, setCustomColors] = useState<string[]>(DEFAULT_PALETTE.light);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -171,11 +200,21 @@ export default function ReportStudioChart({ report, onRowClick }: ReportStudioCh
   const dark = useDarkMode();
   const reducedMotion = useReducedMotion();
   const groupFields = report.config.groupBy;
-  const groupDefinitions = groupFields.map((field) => REPORT_STUDIO_FIELD_MAP.get(field)).filter(Boolean);
-  const metricField = report.config.metrics[0];
-  const metricDefinition = metricField ? REPORT_STUDIO_FIELD_MAP.get(metricField) : undefined;
+  const definitionsById = useMemo(() => new Map(report.columns.map((definition) => [definition.id, definition])), [report.columns]);
+  const groupDefinitions = groupFields.map((field) => definitionsById.get(field)).filter(Boolean);
+  const metricFields = report.config.metrics;
+  const [metricField, setMetricField] = useState(() => preferredMetric(metricFields));
+  const metricDefinition = metricField ? definitionsById.get(metricField) : undefined;
   const selectedPalette = PALETTES.find((palette) => palette.id === paletteId);
   const colors = paletteId === "custom" ? customColors : (dark ? selectedPalette?.dark : selectedPalette?.light) || DEFAULT_PALETTE.light;
+
+  useEffect(() => {
+    if (!metricFields.includes(metricField)) setMetricField(preferredMetric(metricFields));
+  }, [metricField, metricFields]);
+
+  useEffect(() => {
+    setShowMore(false);
+  }, [groupFields, metricField]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("report-chart-palette");
@@ -207,17 +246,35 @@ export default function ReportStudioChart({ report, onRowClick }: ReportStudioCh
     return () => document.removeEventListener("pointerdown", close);
   }, [paletteOpen]);
 
+  const rankedRows = useMemo(() => rankReportRows(report.rows, metricField, MAX_CHART_RESULTS), [metricField, report.rows]);
+  const chronologicalRows = useMemo(() => report.rows
+    .map((row, index) => ({ row, index, value: Number(row.values[metricField]) || 0 }))
+    .sort((left, right) => {
+      const leftValue = chronologicalValue(left.row.values[groupFields[0]]);
+      const rightValue = chronologicalValue(right.row.values[groupFields[0]]);
+      return typeof leftValue === "number" && typeof rightValue === "number"
+        ? leftValue - rightValue
+        : String(leftValue).localeCompare(String(rightValue));
+    })
+    .slice(-MAX_CHART_RESULTS), [groupFields, metricField, report.rows]);
+  const chartRows = chartType === "line" ? chronologicalRows : rankedRows;
+  const visibleRows = showMore || chartRows.length <= COMPACT_RESULT_LIMIT
+    ? chartRows
+    : chartType === "line"
+      ? chartRows.slice(-COMPACT_RESULT_LIMIT)
+      : chartRows.slice(0, COMPACT_RESULT_LIMIT);
+
   const secondaryValues = useMemo(() => {
     if (groupFields.length < 2) return [];
-    return Array.from(new Set(report.rows.slice(0, 20).map((row) => String(row.values[groupFields[1]] ?? "No value"))));
-  }, [groupFields, report.rows]);
+    return Array.from(new Set(chartRows.map(({ row }) => String(row.values[groupFields[1]] ?? "No value"))));
+  }, [chartRows, groupFields]);
 
-  const data = useMemo<ChartDatum[]>(() => report.rows.slice(0, 20).map((row, index) => {
+  const data = useMemo<ChartDatum[]>(() => visibleRows.map(({ row, index }, displayedIndex) => {
     const groups = groupFields.map((fieldId, groupIndex) => ({
       label: groupDefinitions[groupIndex]?.label || fieldId,
       value: String(row.values[fieldId] ?? "No value"),
     }));
-    const colorIndex = groupFields.length > 1 ? Math.max(0, secondaryValues.indexOf(groups[1]?.value)) : index;
+    const colorIndex = groupFields.length > 1 ? Math.max(0, secondaryValues.indexOf(groups[1]?.value)) : displayedIndex;
     return {
       name: groups.map((group) => group.value).join(" · "),
       axisLabel: groups.map((group) => group.value).join(GROUP_LABEL_SEPARATOR),
@@ -226,12 +283,15 @@ export default function ReportStudioChart({ report, onRowClick }: ReportStudioCh
       color: colors[colorIndex % colors.length],
       groups,
     };
-  }), [colors, groupDefinitions, groupFields, metricField, report.rows, secondaryValues]);
+  }), [colors, groupDefinitions, groupFields, metricField, secondaryValues, visibleRows]);
 
   if (!groupFields[0] || !metricField || !groupDefinitions[0] || !metricDefinition) return null;
 
   const total = data.reduce((sum, entry) => sum + entry.value, 0);
-  const formatValue = (value: number) => metricDefinition.type === "currency" ? formatCurrency(value) : quantity(value);
+  const formatValue = (value: number) => metricDefinition.type === "currency" ? formatCurrency(value)
+    : metricDefinition.type === "percentage" ? `${quantity(value)}%` : quantity(value);
+  const formatCompactValue = (value: number) => metricDefinition.type === "currency" ? `₹${compactQuantity(value)}`
+    : metricDefinition.type === "percentage" ? `${compactQuantity(value)}%` : compactQuantity(value);
   const groupTitle = groupDefinitions.map((definition) => definition?.label).filter(Boolean).join(" + ");
   const selectPalette = (palette: PaletteDefinition) => {
     setPaletteId(palette.id);
@@ -244,17 +304,23 @@ export default function ReportStudioChart({ report, onRowClick }: ReportStudioCh
   };
   const tooltip = <ChartTooltip metricLabel={metricDefinition.label} formatValue={formatValue} total={total} />;
   const animationProps = { isAnimationActive: !reducedMotion, animationDuration: reducedMotion ? 0 : 750, animationEasing: "ease-out" as const };
+  const resultSummary = report.rows.length <= COMPACT_RESULT_LIMIT
+    ? `All ${report.rows.length} groups`
+    : chartType === "line" ? `Latest ${data.length} of ${report.rows.length} periods`
+      : `Top ${data.length} of ${report.rows.length} groups`;
+  const chartOptions: ChartType[] = ["bar", "line", "donut"];
 
   return (
-    <div className="relative overflow-hidden p-4 sm:p-5">
+    <div className="report-chart-shell relative overflow-hidden px-4 pb-5 pt-4 sm:px-6 sm:pb-6 sm:pt-5">
       <div className="report-chart-ambient" />
-      <div className="relative mb-5 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-default">{metricDefinition.label} by {groupTitle}</p>
-          <p className="mt-1 text-[11px] text-muted">Top {data.length} results · hover to explore · click to open underlying records</p>
-          {secondaryValues.length > 0 && <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5">{secondaryValues.map((value, index) => <span key={value} className="inline-flex items-center gap-1.5 text-[10px] font-medium text-muted"><i className="h-2 w-2 rounded-full shadow-sm" style={{ background: colors[index % colors.length] }} />{value}</span>)}</div>}
+      <div className="report-chart-header relative z-[1] mb-3 flex flex-wrap items-start justify-between gap-x-5 gap-y-4">
+        <div className="min-w-[240px] flex-1">
+          <p className="report-chart-title text-[15px] font-semibold text-default">{metricDefinition.label} by {groupTitle}</p>
+          <p className="mt-1 text-[11px] leading-5 text-muted">{resultSummary} · hover to explore · click for details</p>
+          {secondaryValues.length > 0 && <div className="report-chart-legend mt-2.5 flex flex-wrap gap-x-3.5 gap-y-2" aria-label={`Legend for ${groupDefinitions[1]?.label || "chart groups"}`}>{secondaryValues.map((value, index) => <span key={value} className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted"><i className="h-2 w-2 shrink-0 rounded-full shadow-sm ring-1 ring-black/10 dark:ring-white/15" style={{ background: colors[index % colors.length] }} />{value}</span>)}</div>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {metricFields.length > 1 && <ReportSelect variant="bare" className="w-[180px] rounded-xl border border-base bg-card" value={metricField} onChange={setMetricField} ariaLabel="Chart metric" options={metricFields.map((fieldId) => ({ value: fieldId, label: definitionsById.get(fieldId)?.shortLabel || fieldId }))} />}
           <div ref={paletteRef} className="relative">
             <button type="button" onClick={() => setPaletteOpen((open) => !open)} aria-expanded={paletteOpen} className={`inline-flex h-9 items-center gap-2 rounded-xl border border-base bg-card px-3 text-[10px] font-semibold text-muted shadow-sm transition hover:-translate-y-0.5 hover:text-default hover:shadow-md ${paletteOpen ? "text-brand-600 ring-2 ring-brand-500/10" : ""}`}>
               <Palette className="h-3.5 w-3.5" />Colors<ChevronDown className={`h-3 w-3 transition-transform ${paletteOpen ? "rotate-180" : ""}`} />
@@ -275,8 +341,8 @@ export default function ReportStudioChart({ report, onRowClick }: ReportStudioCh
             </div>}
           </div>
           <div className="flex rounded-xl border border-base bg-surface/70 p-1 shadow-inner">
-            {(["bar", "line", "donut"] as const).map((type) => (
-              <button key={type} type="button" onClick={() => setChartType(type)} className={`rounded-lg px-3 py-1.5 text-[10px] font-semibold capitalize transition-all duration-200 ${chartType === type ? "bg-card text-brand-600 shadow-sm" : "text-muted hover:text-default"}`}>
+            {chartOptions.map((type) => (
+              <button key={type} type="button" title={`${type} chart`} onClick={() => setChartType(type)} className={`rounded-lg px-3 py-1.5 text-[10px] font-semibold capitalize transition-all duration-200 ${chartType === type ? "bg-card text-brand-600 shadow-sm" : "text-muted hover:text-default"}`}>
                 {type}
               </button>
             ))}
@@ -284,21 +350,24 @@ export default function ReportStudioChart({ report, onRowClick }: ReportStudioCh
         </div>
       </div>
 
-      {chartType === "bar" && <ResponsiveContainer width="100%" height={Math.max(380, data.length * 44)}>
-        <BarChart data={data} layout="vertical" margin={{ left: 18, right: 38, top: 8, bottom: 8 }}>
+      {chartType === "bar" && <div className="report-chart-scroll max-h-[560px] overflow-y-auto pr-1">
+        <ResponsiveContainer width="100%" height={Math.max(360, data.length * 42)}>
+        <BarChart data={data} layout="vertical" margin={{ left: 18, right: 112, top: 8, bottom: 8 }}>
           <defs>{colors.map((color, index) => <linearGradient key={color} id={`report-bar-${index}`} x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor={color} stopOpacity={0.78} /><stop offset="100%" stopColor={color} /></linearGradient>)}</defs>
-          <CartesianGrid stroke="var(--color-border)" strokeDasharray="4 6" horizontal={false} opacity={0.7} />
-          <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "var(--color-text-faint)" }} />
+          <CartesianGrid stroke="var(--color-border)" strokeDasharray="2 8" horizontal={false} opacity={0.46} />
+          <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "var(--color-text-faint)" }} tickFormatter={formatCompactValue} />
           <YAxis type="category" dataKey="axisLabel" width={190} axisLine={false} tickLine={false} interval={0} tick={<CategoryTick />} />
           <Tooltip content={tooltip} cursor={{ fill: "var(--reports-blue-soft)", radius: 10 }} />
           <Bar {...animationProps} dataKey="value" name={metricDefinition.label} radius={[0, 9, 9, 0]} cursor="pointer" maxBarSize={25} activeBar={{ stroke: "var(--color-card)", strokeWidth: 2, fillOpacity: 0.86 }} onClick={(entry: ChartDatum) => report.rows[entry.index] && onRowClick(report.rows[entry.index])}>
             {data.map((entry, index) => <Cell key={`${entry.name}-${index}`} fill={`url(#report-bar-${Math.max(0, colors.indexOf(entry.color))})`} />)}
+            <LabelList dataKey="value" position="right" offset={9} formatter={formatCompactValue} style={{ fill: "var(--color-text-muted)", fontSize: 11, fontWeight: 650, fontVariantNumeric: "tabular-nums" }} />
           </Bar>
         </BarChart>
-      </ResponsiveContainer>}
+        </ResponsiveContainer>
+      </div>}
 
       {chartType === "line" && <ResponsiveContainer width="100%" height={400}>
-        <LineChart data={data} margin={{ left: 8, right: 28, top: 14, bottom: 54 }} onClick={(state) => { const index = Number(state?.activeTooltipIndex); if (Number.isInteger(index) && report.rows[index]) onRowClick(report.rows[index]); }}>
+        <LineChart data={data} margin={{ left: 8, right: 28, top: 14, bottom: 54 }} onClick={(state) => { const row = chartRowAt(report.rows, data, state?.activeTooltipIndex); if (row) onRowClick(row); }}>
           <defs><linearGradient id="report-line" x1="0" y1="0" x2="1" y2="0">{colors.slice(0, 4).map((color, index) => <stop key={color} offset={`${(index / Math.max(1, Math.min(colors.length, 4) - 1)) * 100}%`} stopColor={color} />)}</linearGradient></defs>
           <CartesianGrid stroke="var(--color-border)" strokeDasharray="4 6" vertical={false} opacity={0.7} />
           <XAxis dataKey="name" axisLine={false} tickLine={false} angle={-28} textAnchor="end" interval={0} height={70} tick={{ fontSize: 9, fill: "var(--color-text-faint)" }} tickFormatter={(value) => truncate(String(value), 18)} />
@@ -321,6 +390,13 @@ export default function ReportStudioChart({ report, onRowClick }: ReportStudioCh
           <div className="mb-3 flex items-end justify-between gap-3 border-b border-base pb-3"><div><p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-faint">Displayed total</p><strong className="mt-1 block text-lg tabular-nums text-default">{formatValue(total)}</strong></div><span className="text-[10px] text-muted">{data.length} segments</span></div>
           <div className="max-h-72 space-y-1 overflow-y-auto pr-1">{data.map((entry, index) => <button key={`${entry.name}-legend-${index}`} type="button" onMouseEnter={() => setActivePieIndex(index)} onMouseLeave={() => setActivePieIndex(undefined)} onFocus={() => setActivePieIndex(index)} onBlur={() => setActivePieIndex(undefined)} onClick={() => report.rows[entry.index] && onRowClick(report.rows[entry.index])} className={`flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left transition ${activePieIndex === index ? "bg-card shadow-sm" : "hover:bg-card/70"}`}><i className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: entry.color }} /><span className="min-w-0 flex-1 truncate text-[10px] font-medium text-muted">{entry.name}</span><strong className="text-[10px] tabular-nums text-default">{total > 0 ? `${((entry.value / total) * 100).toFixed(1)}%` : "0%"}</strong></button>)}</div>
         </div>
+      </div>}
+
+      {chartRows.length > COMPACT_RESULT_LIMIT && <div className="report-chart-result-summary relative z-[1] mx-auto mt-4 flex w-fit flex-wrap items-center justify-center gap-2.5 rounded-full px-2 py-1.5 pl-3.5">
+        <span className="text-[11px] font-medium text-muted">{chartType === "line" ? "Showing latest" : "Showing top"} {data.length} of {report.rows.length} groups</span>
+        <button type="button" onClick={() => setShowMore((expanded) => !expanded)} className="rounded-full bg-card/80 px-3 py-1.5 text-[11px] font-semibold text-brand-600 shadow-sm ring-1 ring-inset ring-black/[0.06] transition hover:-translate-y-0.5 hover:bg-card hover:shadow-md dark:ring-white/[0.08]">
+          {showMore ? `Show top ${COMPACT_RESULT_LIMIT}` : `Show top ${Math.min(MAX_CHART_RESULTS, chartRows.length)}`}
+        </button>
       </div>}
     </div>
   );

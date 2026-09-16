@@ -95,6 +95,7 @@ interface ClientProfileModalsProps {
   billingForm: BillingForm;
   setBillingForm: SetState<BillingForm>;
   billingFormTotal: number;
+  billingLineItems: Array<{ description: string; quantity: number; rate: number; gstPercent: number; totalAmount: number }>;
   paymentModal: boolean;
   closePaymentModal: () => void;
   editingPaymentId: string | null;
@@ -150,6 +151,7 @@ export default function ClientProfileModals({
   billingForm,
   setBillingForm,
   billingFormTotal,
+  billingLineItems,
   paymentModal,
   closePaymentModal,
   editingPaymentId,
@@ -407,6 +409,17 @@ export default function ClientProfileModals({
             <p className="text-xs text-muted">Total Amount</p>
             <p className="text-lg font-bold text-default">{formatCurrency(billingFormTotal)}</p>
           </div>
+          {billingLineItems.length > 0 && (
+            <div className="space-y-2">
+              <div><p className="text-sm font-semibold text-default">Quotation Additional Items</p><p className="text-xs text-muted">Manage these itemised rows from the main Billing page.</p></div>
+              {billingLineItems.map((item, index) => (
+                <div key={`${item.description}-${index}`} className="flex items-start justify-between gap-4 rounded-xl border border-base bg-surface px-3 py-2.5">
+                  <div className="min-w-0"><p className="truncate text-sm font-medium text-default">{item.description}</p><p className="text-xs text-faint">{item.quantity} × {formatCurrency(item.rate)} · GST {item.gstPercent}%</p></div>
+                  <p className="shrink-0 text-sm font-semibold text-default">{formatCurrency(item.totalAmount)}</p>
+                </div>
+              ))}
+            </div>
+          )}
           <div><label className="label">Notes</label><textarea className="input-field" rows={3} value={billingForm.notes} onChange={(e) => setBillingForm({ ...billingForm, notes: e.target.value })} placeholder="Optional notes about this billing" /></div>
           <div className="flex gap-2 pt-2">
             <button type="submit" className="btn-primary flex-1 justify-center" disabled={inlineSaving}>{inlineSaving ? "Saving..." : editingBillingId ? "Save Billing" : "Create Billing"}</button>

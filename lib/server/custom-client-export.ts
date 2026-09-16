@@ -13,6 +13,7 @@ import ClientCustomField from "@/models/ClientCustomField";
 import {
   CUSTOM_CLIENT_EXPORT_FIELDS,
   CUSTOM_EXPORT_CLIENT_CATEGORIES,
+  isSafeCustomExportField,
   type CustomClientExportField,
   type CustomClientExportFieldDefinition,
   type CustomExportClientCategory,
@@ -190,7 +191,8 @@ function buildContactSummary(contacts: LinkedContactSummary[]) {
   };
 }
 
-function buildPaymentSummary(billing: FlatRecord | null, payments: FlatRecord[]) {
+function buildPaymentSummary(billings: FlatRecord[], payments: FlatRecord[]) {
+  const annualBillings = billings.filter((billing) => String(billing.billType || "annual_return") === "annual_return");
   const billingPaid = payments.reduce<number>(
     (sum, payment) => sum + (payment.paymentType === "advance" ? 0 : (Number(payment.amountPaid) || 0)),
     0
@@ -200,16 +202,20 @@ function buildPaymentSummary(billing: FlatRecord | null, payments: FlatRecord[])
     0
   );
   const totalReceived = billingPaid + advancePaid;
-  const totalBilled = Number(billing?.totalAmount) || 0;
+  const totalBilled = sumNumbers(billings.map((billing) => billing.totalAmount));
+  const annualAdditionalItemsTotal = annualBillings.reduce((sum, billing) => {
+    const lineItems = Array.isArray(billing.lineItems) ? billing.lineItems as FlatRecord[] : [];
+    return sum + sumNumbers(lineItems.map((item) => item.totalAmount));
+  }, 0);
   const latestPayment = getLatestByDate(payments, "paymentDate");
 
   return {
     fyBillingTotal: totalBilled,
-    fyBillingGovtCharges: Number(billing?.govtCharges) || 0,
-    fyBillingConsultancyCharges: Number(billing?.consultancyCharges) || 0,
-    fyBillingTargetCharges: Number(billing?.targetCharges) || 0,
-    fyBillingOtherCharges: Number(billing?.otherCharges) || 0,
-    fyBillingNotes: String(billing?.notes || ""),
+    fyBillingGovtCharges: sumNumbers(annualBillings.map((billing) => billing.govtCharges)),
+    fyBillingConsultancyCharges: sumNumbers(annualBillings.map((billing) => billing.consultancyCharges)),
+    fyBillingTargetCharges: sumNumbers(annualBillings.map((billing) => billing.targetCharges)),
+    fyBillingOtherCharges: sumNumbers(annualBillings.map((billing) => billing.otherCharges)) + annualAdditionalItemsTotal,
+    fyBillingNotes: joinUnique(billings.map((billing) => String(billing.notes || ""))),
     fyBillingPaid: billingPaid,
     fyAdvancePaid: advancePaid,
     fyTotalReceived: totalReceived,
@@ -218,7 +224,7 @@ function buildPaymentSummary(billing: FlatRecord | null, payments: FlatRecord[])
     fyLatestPaymentDate: formatDate(latestPayment?.paymentDate),
     fyPaymentModes: joinUnique(payments.map((payment) => String(payment.paymentMode || ""))),
     __latestPaymentTs: toTimestamp(latestPayment?.paymentDate),
-    __hasBilling: Boolean(billing),
+    __hasBilling: billings.length > 0,
     __hasPayments: payments.length > 0,
   };
 }
@@ -334,7 +340,11 @@ function normalizeRequest(request: CustomClientExportRequest) {
   const fy = typeof request.fy === "string" && FINANCIAL_YEARS.includes(request.fy)
     ? request.fy
     : CURRENT_FY;
-  const fields = Array.from(new Set<CustomClientExportField>(request.fields || []));
+  // Never trust the browser's field list. Older saved presets or crafted
+  // requests may still contain credential-like ids that the UI no longer
+  // exposes.
+  const fields = Array.from(new Set<CustomClientExportField>(request.fields || []))
+    .filter(isSafeCustomExportField);
   const categories = Array.from(
     new Set(
       (request.categories || []).filter((category): category is CustomExportClientCategory => (
@@ -388,6 +398,10 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
     }, {}),
     ...customFieldConfigs,
   };
+  options.fields = options.fields.filter((field) => Boolean(fieldConfigs[field]));
+  if (options.fields.length === 0) {
+    throw new Error("Select at least one safe field to export");
+  }
 
   const clientQuery: Record<string, unknown> = {};
   if (options.categories.length > 0) {
@@ -490,7 +504,11 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
   ));
 
   const financialYearMap = new Map(financialYears.map((record) => [String(record.clientId), record]));
-  const billingMap = new Map(billings.map((record) => [String(record.clientId), record]));
+  const billingMap = new Map<string, FlatRecord[]>();
+  billings.forEach((record) => {
+    const clientId = String(record.clientId || "");
+    billingMap.set(clientId, [...(billingMap.get(clientId) || []), record]);
+  });
   const annualReturnMap = new Map(annualReturns.map((record) => [String(record.clientId), record]));
 
   const paymentsMap = new Map<string, FlatRecord[]>();
@@ -565,7 +583,7 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
     const clientId = String(client.clientId || "");
     const contacts = (contactsMap.get(clientId) || []) as LinkedContactSummary[];
     const financialYear = financialYearMap.get(clientId) || null;
-    const billing = billingMap.get(clientId) || null;
+    const clientBillings = billingMap.get(clientId) || [];
     const clientPayments = paymentsMap.get(clientId) || [];
     const annualReturn = annualReturnMap.get(clientId) || null;
     const clientInvoices = invoicesMap.get(clientId) || [];
@@ -577,7 +595,7 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
     const latestInvoice = getLatestByDate(clientInvoices, "createdAt");
     const invoiceCoverage = buildInvoiceCoverageSummary(clientInvoices, options.fy);
     const contactSummary = buildContactSummary(contacts);
-    const paymentSummary = buildPaymentSummary(billing, clientPayments);
+    const paymentSummary = buildPaymentSummary(clientBillings, clientPayments);
     const uploadSummary = buildUploadSummary(clientUploads);
     const documentSummary = buildDocumentSummary(clientDocuments);
     const emailSummary = buildEmailSummary(clientEmails, options.fy);
@@ -621,7 +639,6 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
       registrationNumber: String(client.registrationNumber || ""),
       address: String(client.address || ""),
       cpcbLoginId: String(client.cpcbLoginId || ""),
-      cpcbPassword: String(client.cpcbPassword || ""),
       otpMobileNumber: String(client.otpMobileNumber || ""),
       createdAt: formatDate(client.createdAt),
       updatedAt: formatDate(client.updatedAt),

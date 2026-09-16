@@ -8,6 +8,10 @@
     "start": "next start",
     "lint": "next lint",
     "verify:report-metrics": "node scripts/verify-report-metrics.cjs",
+    "verify:report-security": "node scripts/verify-report-security.cjs",
+    "verify:report-interactions": "node scripts/verify-report-interactions.cjs",
+    "verify:report-custom-fields": "node scripts/verify-report-custom-fields.cjs",
+    "verify:quotation-additional-items": "node scripts/verify-quotation-additional-items.cjs",
     "resync:client-ids": "node scripts/resync-client-id-counters.js"
   },
   "dependencies": {

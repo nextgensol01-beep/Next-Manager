@@ -5,7 +5,7 @@ import { connectDB } from "@/lib/mongoose";
 import Quotation from "@/models/Quotation";
 import QuotationRevision from "@/models/QuotationRevision";
 import Client from "@/models/Client";
-import { calculateQuotationGrandTotal, calculateQuotationItems } from "@/lib/quotationRules";
+import { calculateQuotationAdditionalItems, calculateQuotationGrandTotal, calculateQuotationItems } from "@/lib/quotationRules";
 import { quotationCreateSchema, quotationListQuerySchema, validationErrorMessage } from "@/lib/quotationValidation";
 import { expireStaleQuotations } from "@/lib/quotationWorkflow";
 import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
@@ -87,7 +87,7 @@ export async function GET(req: NextRequest) {
     return {
       ...q,
       grandTotal: rev?.grandTotal ?? 0,
-      itemCount: rev?.items?.length ?? 0,
+      itemCount: (rev?.items?.length ?? 0) + (rev?.additionalItems?.length ?? 0),
     };
   });
 
@@ -113,6 +113,7 @@ export async function POST(req: NextRequest) {
     clientState,
     financialYear,
     items,
+    additionalItems,
     consultationCharges,
     consultationGstPercent,
     governmentFees,
@@ -121,9 +122,12 @@ export async function POST(req: NextRequest) {
   } = parsedBody.data;
 
   const { calculatedItems, itemsSubtotal, itemsGst } = calculateQuotationItems(items);
+  const { calculatedAdditionalItems, additionalItemsSubtotal, additionalItemsGst, additionalItemsTotal } = calculateQuotationAdditionalItems(additionalItems);
   const { consultationGstAmount, grandTotal } = calculateQuotationGrandTotal({
     itemsSubtotal,
     itemsGst,
+    additionalItemsSubtotal,
+    additionalItemsGst,
     consultationCharges,
     consultationGstPercent,
     governmentFees,
@@ -146,12 +150,16 @@ export async function POST(req: NextRequest) {
     quotationId: String(quotation._id),
     revisionNumber: 0,
     items: calculatedItems,
+    additionalItems: calculatedAdditionalItems,
     consultationCharges,
     consultationGstPercent,
     consultationGstAmount,
     governmentFees,
     itemsSubtotal,
     itemsGst,
+    additionalItemsSubtotal,
+    additionalItemsGst,
+    additionalItemsTotal,
     grandTotal,
     notes,
     validityDays,

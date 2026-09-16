@@ -5,6 +5,7 @@ import { connectDB } from "@/lib/mongoose";
 import Quotation from "@/models/Quotation";
 import QuotationRevision from "@/models/QuotationRevision";
 import {
+  calculateQuotationAdditionalItems,
   calculateQuotationGrandTotal,
   calculateQuotationItems,
   canEditQuotation,
@@ -63,6 +64,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     financialYear,
     validityDays,
     items,
+    additionalItems,
     consultationCharges,
     consultationGstPercent,
     governmentFees,
@@ -80,6 +82,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   );
   const hasRevisionEdits = (
     items !== undefined ||
+    additionalItems !== undefined ||
     notes !== undefined ||
     validityDays !== undefined ||
     consultationCharges !== undefined ||
@@ -125,34 +128,39 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "Current revision is locked. Create a new revision first." }, { status: 409 });
     }
 
-    if (items !== undefined) {
-      const { calculatedItems, itemsSubtotal, itemsGst } = calculateQuotationItems(items);
+    if (items !== undefined || additionalItems !== undefined || consultationCharges !== undefined || consultationGstPercent !== undefined || governmentFees !== undefined) {
+      let itemsSubtotal = Number(currentRev.itemsSubtotal || 0);
+      let itemsGst = Number(currentRev.itemsGst || 0);
+      let additionalItemsSubtotal = Number(currentRev.additionalItemsSubtotal || 0);
+      let additionalItemsGst = Number(currentRev.additionalItemsGst || 0);
+
+      if (items !== undefined) {
+        const calculated = calculateQuotationItems(items);
+        currentRev.items = calculated.calculatedItems;
+        currentRev.itemsSubtotal = calculated.itemsSubtotal;
+        currentRev.itemsGst = calculated.itemsGst;
+        itemsSubtotal = calculated.itemsSubtotal;
+        itemsGst = calculated.itemsGst;
+      }
+
+      if (additionalItems !== undefined) {
+        const calculated = calculateQuotationAdditionalItems(additionalItems);
+        currentRev.additionalItems = calculated.calculatedAdditionalItems;
+        currentRev.additionalItemsSubtotal = calculated.additionalItemsSubtotal;
+        currentRev.additionalItemsGst = calculated.additionalItemsGst;
+        currentRev.additionalItemsTotal = calculated.additionalItemsTotal;
+        additionalItemsSubtotal = calculated.additionalItemsSubtotal;
+        additionalItemsGst = calculated.additionalItemsGst;
+      }
+
       const cc = Number(consultationCharges ?? currentRev.consultationCharges);
       const ccPct = Number(consultationGstPercent ?? currentRev.consultationGstPercent);
       const gf = Number(governmentFees ?? currentRev.governmentFees);
       const { consultationGstAmount, grandTotal } = calculateQuotationGrandTotal({
         itemsSubtotal,
         itemsGst,
-        consultationCharges: cc,
-        consultationGstPercent: ccPct,
-        governmentFees: gf,
-      });
-
-      currentRev.items = calculatedItems;
-      currentRev.itemsSubtotal = itemsSubtotal;
-      currentRev.itemsGst = itemsGst;
-      currentRev.consultationCharges = cc;
-      currentRev.consultationGstPercent = ccPct;
-      currentRev.consultationGstAmount = consultationGstAmount;
-      currentRev.governmentFees = gf;
-      currentRev.grandTotal = grandTotal;
-    } else if (consultationCharges !== undefined || consultationGstPercent !== undefined || governmentFees !== undefined) {
-      const cc = Number(consultationCharges ?? currentRev.consultationCharges);
-      const ccPct = Number(consultationGstPercent ?? currentRev.consultationGstPercent);
-      const gf = Number(governmentFees ?? currentRev.governmentFees);
-      const { consultationGstAmount, grandTotal } = calculateQuotationGrandTotal({
-        itemsSubtotal: currentRev.itemsSubtotal,
-        itemsGst: currentRev.itemsGst,
+        additionalItemsSubtotal,
+        additionalItemsGst,
         consultationCharges: cc,
         consultationGstPercent: ccPct,
         governmentFees: gf,

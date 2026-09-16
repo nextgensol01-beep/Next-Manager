@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { connectDB } from "@/lib/mongoose";
-import { validateReportStudioConfig, type ReportStudioConfig } from "@/lib/report-studio";
+import { validateReportStudioConfig, type ReportStudioConfig, type ReportStudioFieldDefinition } from "@/lib/report-studio";
 import { currentSessionUserObjectId } from "@/lib/server/current-session-user";
+import { loadReportStudioCustomFields } from "@/lib/server/report-studio-fields";
 import ReportStudioSavedReport from "@/models/ReportStudioSavedReport";
 
 const MAX_SAVED_REPORTS = 100;
@@ -41,11 +42,11 @@ function validationMessage(error: unknown) {
   return error instanceof Error ? error.message : "Invalid saved report configuration";
 }
 
-function normalizedReport(value: unknown) {
+function normalizedReport(value: unknown, customFields: ReportStudioFieldDefinition[]) {
   const parsed = singleReportSchema.parse(value);
   return {
     name: parsed.name,
-    config: validateReportStudioConfig({ ...parsed.config as Record<string, unknown>, name: parsed.name }),
+    config: validateReportStudioConfig({ ...parsed.config as Record<string, unknown>, name: parsed.name }, customFields),
     migrationKey: parsed.migrationKey,
   };
 }
@@ -73,9 +74,10 @@ export async function POST(req: NextRequest) {
   await connectDB();
 
   try {
+    const customFields = await loadReportStudioCustomFields();
     if (body && typeof body === "object" && "reports" in body) {
       const migration = bulkMigrationSchema.parse(body);
-      const reports = migration.reports.map(normalizedReport);
+      const reports = migration.reports.map((report) => normalizedReport(report, customFields));
       const migrationKeys = reports.map((report) => report.migrationKey).filter((key): key is string => Boolean(key));
       if (migrationKeys.length !== reports.length || new Set(migrationKeys).size !== migrationKeys.length) {
         return NextResponse.json({ error: "Every migrated report must have a unique migration key" }, { status: 400 });
@@ -102,7 +104,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ reports: await listSavedReports(currentUser.userId), migrated: reports.length });
     }
 
-    const report = normalizedReport(body);
+    const report = normalizedReport(body, customFields);
     const count = await ReportStudioSavedReport.countDocuments({ userId: currentUser.userId });
     if (count >= MAX_SAVED_REPORTS) {
       return NextResponse.json({ error: `You can save up to ${MAX_SAVED_REPORTS} Report Studio configurations.` }, { status: 409 });

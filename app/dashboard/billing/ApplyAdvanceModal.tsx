@@ -10,7 +10,7 @@ interface ApplyAdvanceModalProps {
   billing: Billing | null;
   advanceBalance: number;
   clientName: (clientId: string) => string;
-  onOptimisticApply: (input: { clientId: string; financialYear: string; amountToApply: number; applyDate: string; notes?: string }) => () => void;
+  onOptimisticApply: (input: { billingId: string; clientId: string; financialYear: string; amountToApply: number; applyDate: string; notes?: string }) => () => void;
   onClose: () => void;
   onApplied: () => void;
 }
@@ -40,6 +40,7 @@ export default function ApplyAdvanceModal({ billing, advanceBalance, clientName,
     const amountToApply = Number(form.amountToApply);
     setSaving(true);
     const rollback = onOptimisticApply({
+      billingId: billing._id,
       clientId: form.clientId,
       financialYear: form.financialYear,
       amountToApply,
@@ -50,7 +51,7 @@ export default function ApplyAdvanceModal({ billing, advanceBalance, clientName,
       const response = await fetch("/api/payments/apply-advance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, amountToApply }),
+        body: JSON.stringify({ ...form, billingId: billing._id, amountToApply }),
       });
       if (!response.ok) {
         rollback();

@@ -43,6 +43,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const paymentType = body.paymentType === "advance" || body.paymentType === "billing"
       ? body.paymentType
       : existingPayment.paymentType;
+    const requestedBillingId = typeof body.billingId === "string" && body.billingId.trim()
+      ? body.billingId.trim()
+      : existingPayment.billingId;
 
     if (!clientId || !financialYear) {
       return NextResponse.json({ error: "clientId and financialYear are required" }, { status: 400 });
@@ -62,7 +65,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const [client, billing] = await Promise.all([
       Client.findOne({ clientId }).select("clientId").lean() as Promise<{ clientId?: string } | null>,
-      Billing.findOne({ clientId, financialYear }).select("totalAmount").lean() as Promise<{ totalAmount?: number } | null>,
+      (requestedBillingId
+        ? Billing.findOne({ _id: requestedBillingId, clientId }).select("_id totalAmount financialYear billType").lean()
+        : Billing.findOne({ clientId, financialYear, billType: { $in: ["annual_return", null] } }).select("_id totalAmount financialYear billType").lean()) as Promise<{ _id?: unknown; totalAmount?: number; financialYear?: string; billType?: string } | null>,
     ]);
 
     if (!client) {
@@ -76,11 +81,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     if (paymentType === "billing" && billing) {
+      const billingId = String(billing._id);
+      const billingFinancialYear = String(billing.financialYear || financialYear);
       const existingBillingPayments = await Payment.find({
         _id: { $ne: id },
         clientId,
-        financialYear,
         paymentType: { $ne: "advance" },
+        $or: [
+          { billingId },
+          ...((billing.billType || "annual_return") === "annual_return" ? [
+            { billingId: { $in: ["", null] }, financialYear: billingFinancialYear },
+            { billingId: { $exists: false }, financialYear: billingFinancialYear },
+          ] : []),
+        ],
       })
         .select("amountPaid")
         .lean() as Array<{ amountPaid?: number }>;
@@ -105,7 +118,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       id,
       {
         clientId,
-        financialYear,
+        billingId: paymentType === "billing" && billing ? String(billing._id) : "",
+        financialYear: paymentType === "billing" && billing?.financialYear ? String(billing.financialYear) : financialYear,
         amountPaid,
         paymentType,
         paymentDate,
@@ -117,13 +131,16 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     );
 
     // Keep denormalized totalPaid on Billing in sync
-    if (paymentType !== "advance") {
+    if (existingPayment.paymentType !== "advance") {
       await syncBillingTotalPaid(
         Billing.collection,
         Payment.collection,
-        clientId,
-        financialYear
+        existingPayment.clientId,
+        existingPayment.financialYear
       );
+    }
+    if (paymentType !== "advance") {
+      await syncBillingTotalPaid(Billing.collection, Payment.collection, clientId, String(billing?.financialYear || financialYear));
     }
 
 

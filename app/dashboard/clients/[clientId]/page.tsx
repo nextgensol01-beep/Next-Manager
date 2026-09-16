@@ -773,7 +773,12 @@ export default function ClientProfilePage() {
     scheduleActivityRefresh();
   };
 
-  const billing  = allBillings.find((b) => b.financialYear === selectedFy) || null;
+  const billings = allBillings.filter((record) => record.financialYear === selectedFy);
+  const billing = billings.find((record) => (record.billType || "annual_return") === "annual_return") || null;
+  const totalBilledForFy = billings.reduce((sum, record) => sum + Number(record.totalAmount || 0), 0);
+  const totalPaidForFy = billings.reduce((sum, record) => sum + Number(record.totalPaid || 0), 0);
+  const totalPendingForFy = billings.reduce((sum, record) => sum + Number(record.pendingAmount || 0), 0);
+  const outstandingBilling = billings.find((record) => Number(record.pendingAmount || 0) > 0) || null;
   const payments = allPayments.filter((p) => p.financialYear === selectedFy);
   const invoices = allInvoices.filter((invoice) => invoice.financialYear === selectedFy);
   const uploadRecords = allUploadRecords.filter((record) => record.financialYear === selectedFy);
@@ -784,11 +789,15 @@ export default function ClientProfilePage() {
     (quotation.status === "Sent" || quotation.status === "Accepted")
   ));
   const filteredActivities = activities;
+  const billingFormLineItems = editingBillingId
+    ? (allBillings.find((billing) => billing._id === editingBillingId)?.lineItems || [])
+    : [];
   const billingFormTotal =
     Number(billingForm.govtCharges || 0) +
     Number(billingForm.consultancyCharges || 0) +
     Number(billingForm.targetCharges || 0) +
-    Number(billingForm.otherCharges || 0);
+    Number(billingForm.otherCharges || 0) +
+    billingFormLineItems.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
   const fyGeneratedTotal = sumFyEntries(fyForm.generated);
   const fyTargetTotal = sumFyEntries(fyForm.targets);
 
@@ -1618,49 +1627,26 @@ export default function ClientProfilePage() {
 
     setInlineSaving(true);
     try {
-      const response = await fetch(`/api/quotations/${quotation._id}`);
-      if (!response.ok) {
-        toast.error(await readErrorMessage(response, "Unable to load quotation details."));
-        return;
-      }
-
-      const details = await response.json() as {
-        quotationNumber?: string;
-        clientId?: string;
-        financialYear?: string;
-        status?: string;
-        revisions?: Array<{
-          revisionNumber?: number;
-          itemsSubtotal?: number;
-          itemsGst?: number;
-          consultationCharges?: number;
-          consultationGstAmount?: number;
-          governmentFees?: number;
-          grandTotal?: number;
-        }>;
-      };
-      if (details.clientId !== client.clientId || details.status !== "Accepted") {
-        toast.error("This quotation is not an accepted linked quotation for this client.");
-        return;
-      }
-      const latestRevision = [...(details.revisions || [])]
-        .sort((a, b) => Number(b.revisionNumber || 0) - Number(a.revisionNumber || 0))[0];
-
-      if (!latestRevision) {
-        toast.error("This quotation has no revision totals to copy.");
-        return;
-      }
-
-      setEditingBillingId(null);
-      setBillingForm({
-        financialYear: details.financialYear || quotation.financialYear || selectedFy,
-        govtCharges: String(Number(latestRevision.governmentFees || 0)),
-        consultancyCharges: String(Number(latestRevision.consultationCharges || 0) + Number(latestRevision.consultationGstAmount || 0)),
-        targetCharges: String(Number(latestRevision.itemsSubtotal || 0) + Number(latestRevision.itemsGst || 0)),
-        otherCharges: "0",
-        notes: `Generated from accepted quotation ${details.quotationNumber || quotation.quotationNumber || quotation._id}. Final quotation amount: ${formatCurrency(Number(latestRevision.grandTotal || quotation.grandTotal || 0))}.`,
+      const response = await fetch(`/api/quotations/${quotation._id}/billing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dueDate: null }),
       });
-      setBillingModal(true);
+      if (!response.ok) {
+        const message = await readErrorMessage(response, "Unable to create billing from this quotation.");
+        if (response.status === 409 && message.toLowerCase().includes("already")) {
+          toast(message);
+          navigateToClientSection({ primary: "financial", secondary: "billing" });
+        } else {
+          toast.error(message);
+        }
+        return;
+      }
+      await mutateWorkspace();
+      await refreshAnnualReturnForFy(quotation.financialYear || selectedFy);
+      scheduleActivityRefresh();
+      toast.success("Billing created from the accepted quotation.");
+      navigateToClientSection({ primary: "financial", secondary: "billing" });
     } finally {
       setInlineSaving(false);
     }
@@ -1669,13 +1655,18 @@ export default function ClientProfilePage() {
   const saveBilling = async (e: React.FormEvent) => {
     e.preventDefault();
     setInlineSaving(true);
+    const editingLineItems = editingBillingId
+      ? (allBillings.find((billing) => billing._id === editingBillingId)?.lineItems || [])
+      : [];
     const payload = {
       clientId,
       financialYear: billingForm.financialYear,
+      billType: "annual_return" as const,
       govtCharges: Number(billingForm.govtCharges) || 0,
       consultancyCharges: Number(billingForm.consultancyCharges) || 0,
       targetCharges: Number(billingForm.targetCharges) || 0,
       otherCharges: Number(billingForm.otherCharges) || 0,
+      lineItems: editingLineItems,
       notes: billingForm.notes.trim(),
     };
 
@@ -1683,7 +1674,7 @@ export default function ClientProfilePage() {
     const optimisticBilling = {
       ...payload,
       _id: editingBillingId || "",
-      totalAmount: payload.govtCharges + payload.consultancyCharges + payload.targetCharges + payload.otherCharges,
+      totalAmount: payload.govtCharges + payload.consultancyCharges + payload.targetCharges + payload.otherCharges + editingLineItems.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0),
       totalPaid: editingBillingId ? (allBillings.find((b) => b._id === editingBillingId)?.totalPaid ?? 0) : 0,
       pendingAmount: editingBillingId ? (allBillings.find((b) => b._id === editingBillingId)?.pendingAmount ?? 0) : 0,
       paymentStatus: (editingBillingId ? (allBillings.find((b) => b._id === editingBillingId)?.paymentStatus) : "pending") as Billing["paymentStatus"],
@@ -2029,7 +2020,7 @@ export default function ClientProfilePage() {
   };
 
   const openReminderModal = async (targetBilling?: Billing | null) => {
-    const reminderBilling = targetBilling || billing;
+    const reminderBilling = targetBilling || outstandingBilling || billing || billings[0];
     if (!reminderBilling || !client) {
       toast.error("Create billing first before sending a reminder.");
       return;
@@ -2056,12 +2047,25 @@ export default function ClientProfilePage() {
         setReminderPreviewHtml(null);
       } else {
         const fmt = (value: number) => value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const breakdownRows = [
-          reminderBilling.govtCharges > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Govt Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">Rs. ${fmt(reminderBilling.govtCharges)}</td></tr>` : "",
-          reminderBilling.consultancyCharges > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Consultancy Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">Rs. ${fmt(reminderBilling.consultancyCharges)}</td></tr>` : "",
-          reminderBilling.targetCharges > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Target Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">Rs. ${fmt(reminderBilling.targetCharges)}</td></tr>` : "",
-          reminderBilling.otherCharges > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Other Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">Rs. ${fmt(reminderBilling.otherCharges)}</td></tr>` : "",
-        ].join("");
+        const escapeHtml = (value: string) => value
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+        const lineItemRows = (reminderBilling.lineItems || []).map((item) => {
+              const amount = Number(item.totalAmount || (item.quantity * item.rate * (1 + item.gstPercent / 100)));
+              return `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">${escapeHtml(item.description)}</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">Rs. ${fmt(amount)}</td></tr>`;
+            });
+        const breakdownRows = (reminderBilling.billType === "general"
+          ? lineItemRows
+          : [
+              reminderBilling.govtCharges > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Govt Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">Rs. ${fmt(reminderBilling.govtCharges)}</td></tr>` : "",
+              reminderBilling.consultancyCharges > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Consultancy Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">Rs. ${fmt(reminderBilling.consultancyCharges)}</td></tr>` : "",
+              reminderBilling.targetCharges > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Target Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">Rs. ${fmt(reminderBilling.targetCharges)}</td></tr>` : "",
+              reminderBilling.otherCharges > 0 ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;">Other Charges</td><td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600;text-align:right;">Rs. ${fmt(reminderBilling.otherCharges)}</td></tr>` : "",
+              ...lineItemRows,
+            ]).join("");
 
         setReminderPreviewHtml(
           template
@@ -2341,7 +2345,10 @@ export default function ClientProfilePage() {
   const isSIMP = client.category === "SIMP";
   const fyData = fyRecords.find((r) => r.financialYear === selectedFy);
   const fyLastUpdated = fyData ? getLatestTimestamp(fyData.updatedAt, fyData.createdAt) : "";
-  const billingLastUpdated = billing ? getLatestTimestamp(billing.updatedAt, billing.createdAt) : "";
+  const billingLastUpdated = billings
+    .map((record) => getLatestTimestamp(record.updatedAt, record.createdAt))
+    .filter(Boolean)
+    .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] || "";
   const portalLastUpdated = getLatestTimestamp(client.updatedAt, client.createdAt);
 
   const primaryContact  = client.contacts?.[0] ?? null;
@@ -2634,7 +2641,13 @@ export default function ClientProfilePage() {
   );
   const registrationStatus = isPWP ? "PWP" : client.registrationNumber ? "Registered" : "Registration not recorded";
   const validityLabel = validityField ? displayCustomFieldValue(validityField) : "not recorded";
-  const billingStatus = billing?.paymentStatus || "No billing";
+  const billingStatus = billings.length === 0
+    ? "No billing"
+    : totalPendingForFy <= 0
+      ? "Paid"
+      : totalPaidForFy > 0
+        ? "Partial"
+        : "Unpaid";
 
   const contactClient = () => {
     if (contactEmail !== "-") {
@@ -2803,30 +2816,30 @@ export default function ClientProfilePage() {
     },
     {
       label: "Outstanding",
-      value: formatCurrency(billing?.pendingAmount || 0),
-      sub: billing ? billing.paymentStatus : `No billing for FY ${selectedFy}`,
+      value: formatCurrency(totalPendingForFy),
+      sub: billings.length > 0 ? billingStatus : `No billing for FY ${selectedFy}`,
       icon: <Target className="w-4 h-4" />,
-      tone: billing && billing.pendingAmount > 0 ? "danger" : "success",
-      actionLabel: billing ? "Open" : "Create",
+      tone: totalPendingForFy > 0 ? "danger" : "success",
+      actionLabel: billings.length > 0 ? "Open" : "Create",
       detailRows: [
-        { label: "Billing Status", value: billing?.paymentStatus || "No billing" },
-        { label: "Total Billed", value: formatCurrency(billing?.totalAmount || 0) },
-        { label: "Paid", value: formatCurrency(billing?.totalPaid || 0) },
+        { label: "Billing Status", value: billingStatus },
+        { label: "Total Billed", value: formatCurrency(totalBilledForFy) },
+        { label: "Paid", value: formatCurrency(totalPaidForFy) },
       ],
-      onClick: () => billing
+      onClick: () => billings.length > 0
         ? navigateToClientSection({ primary: "financial", secondary: "billing" })
         : openBillingModalForRecord(),
     },
     {
       label: "Payment Status",
-      value: billing?.paymentStatus || "No billing",
-      sub: payments.length > 0 ? `${formatCurrency(billing?.totalPaid || 0)} paid in FY ${selectedFy}` : "No payments recorded",
+      value: billingStatus,
+      sub: payments.length > 0 ? `${formatCurrency(totalPaidForFy)} paid in FY ${selectedFy}` : "No payments recorded",
       icon: <Wallet className="w-4 h-4" />,
-      tone: billing && billing.pendingAmount <= 0 ? "success" : billing && billing.totalPaid > 0 ? "warning" : "neutral",
+      tone: billings.length > 0 && totalPendingForFy <= 0 ? "success" : totalPaidForFy > 0 ? "warning" : "neutral",
       actionLabel: latestPayment ? "Latest" : "Add",
       detailRows: [
-        { label: "Payment State", value: billing?.paymentStatus || "No billing" },
-        { label: "Paid", value: formatCurrency(billing?.totalPaid || 0) },
+        { label: "Payment State", value: billingStatus },
+        { label: "Paid", value: formatCurrency(totalPaidForFy) },
         { label: "Last Payment", value: latestPayment ? `${formatCurrency(latestPayment.amountPaid)} on ${formatDate(latestPayment.paymentDate)}` : "Not recorded" },
       ],
       onClick: () => latestPayment
@@ -3000,13 +3013,14 @@ export default function ClientProfilePage() {
   const renderBillingPayments = (view: "all" | "billing" | "payments" | "ledger" = "all") => (
     <ClientProfileBillingPayments
       selectedFy={selectedFy}
-      billing={billing}
+      billings={billings}
       payments={payments}
       billingLastUpdated={billingLastUpdated}
       hasFyData={Boolean(fyData)}
       isPWP={isPWP}
       openReminderModal={openReminderModal}
       openBillingModalForRecord={openBillingModalForRecord}
+      openBillingWorkspace={(record) => router.push(`/dashboard/billing?clientId=${encodeURIComponent(record.clientId)}&fy=${encodeURIComponent(record.financialYear)}`)}
       deleteBilling={deleteBilling}
       openFYModal={openFYModal}
       openPaymentModalForRecord={openPaymentModalForRecord}
@@ -3019,12 +3033,12 @@ export default function ClientProfilePage() {
     overview: (
       <FinancialOverviewPanel
         acceptedQuotationCount={acceptedQuotations.length}
-        billing={billing}
+        billings={billings}
         isPWP={isPWP}
         onAddPayment={() => openPaymentModalForRecord()}
         onCreateBilling={() => openBillingModalForRecord()}
         onOpenSection={setActiveFinancialSection}
-        onSendReminder={() => openReminderModal(billing || undefined)}
+        onSendReminder={() => openReminderModal(outstandingBilling || billing || billings[0])}
         payments={payments}
         selectedFy={selectedFy}
       />
@@ -3894,6 +3908,7 @@ export default function ClientProfilePage() {
         billingForm={billingForm}
         setBillingForm={setBillingForm}
         billingFormTotal={billingFormTotal}
+        billingLineItems={billingFormLineItems}
         paymentModal={paymentModal}
         closePaymentModal={closePaymentModal}
         editingPaymentId={editingPaymentId}

@@ -17,6 +17,7 @@ export type ClientOption = {
 
 export type CustomExportPreview = {
   fy: string;
+  sampleRows?: Array<Record<string, string | number>>;
   fields: CustomClientExportField[];
   previewColumns: Array<{
     id: CustomClientExportField;

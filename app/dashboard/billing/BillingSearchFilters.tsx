@@ -3,7 +3,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import type { MotionValue } from "framer-motion";
 import { LayoutGrid, LayoutList, Search, X } from "lucide-react";
-import type { BillingFilter, BillingFilterOption, ViewMode } from "./types";
+import type { BillingFilter, BillingFilterOption, BillTypeFilter, ViewMode } from "./types";
 
 interface BillingSearchFiltersProps {
   search: string;
@@ -13,6 +13,9 @@ interface BillingSearchFiltersProps {
   viewMode: ViewMode;
   onViewModeChange: (value: ViewMode) => void;
   filterOptions: BillingFilterOption[];
+  billTypeFilter?: BillTypeFilter;
+  onBillTypeFilterChange?: (value: BillTypeFilter) => void;
+  billTypeCounts?: { all: number; annual_return: number; general: number };
   merged?: boolean;
   docked?: boolean;
   dockOffset?: number;
@@ -47,6 +50,9 @@ export default function BillingSearchFilters({
   viewMode,
   onViewModeChange,
   filterOptions,
+  billTypeFilter = "all",
+  onBillTypeFilterChange = () => {},
+  billTypeCounts = { all: 0, annual_return: 0, general: 0 },
   merged = false,
   docked = false,
   dockOffset = 0,
@@ -150,7 +156,19 @@ export default function BillingSearchFilters({
         </div>
       </div>
 
-      {/* Filter chips row */}
+      <div className="flex items-center gap-1.5 overflow-x-auto border-b border-soft px-3 py-2 scrollbar-none">
+        {([
+          { value: "all" as BillTypeFilter, label: "All bills" },
+          { value: "annual_return" as BillTypeFilter, label: "Annual Return" },
+          { value: "general" as BillTypeFilter, label: "General" },
+        ]).map((option) => (
+          <button key={option.value} type="button" onClick={() => onBillTypeFilterChange(option.value)} className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${billTypeFilter === option.value ? "bg-brand-600 text-white shadow-sm" : "text-muted hover:bg-surface hover:text-default"}`}>
+            {option.label}<span className={`rounded-full px-1.5 py-0.5 text-[10px] ${billTypeFilter === option.value ? "bg-white/20 text-white" : "bg-surface text-faint"}`}>{billTypeCounts[option.value]}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Payment status filter chips row */}
       <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-2 scrollbar-none [-webkit-overflow-scrolling:touch]">
         {filterOptions.map((opt) => (
           <React.Fragment key={opt.value}>

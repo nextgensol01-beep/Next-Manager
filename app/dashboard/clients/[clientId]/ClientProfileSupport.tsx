@@ -82,6 +82,11 @@ export interface FYRecord {
 
 export interface Billing {
   _id: string; clientId: string; financialYear: string; totalAmount: number;
+  billType?: "annual_return" | "general"; billTitle?: string; billDate?: string;
+  lineItems?: Array<{
+    description: string; quantity: number; rate: number;
+    taxableAmount?: number; gstPercent: number; gstAmount?: number; totalAmount: number;
+  }>;
   govtCharges: number; consultancyCharges: number; targetCharges: number; otherCharges: number;
   notes?: string; dueDate?: string; invoiceNumber?: string; invoiceDate?: string; invoiceAmount?: number;
   totalPaid: number; pendingAmount: number; paymentStatus: string;
@@ -89,7 +94,7 @@ export interface Billing {
 }
 
 export interface Payment {
-  _id: string; clientId: string; amountPaid: number; paymentType?: "billing" | "advance";
+  _id: string; clientId: string; billingId?: string; amountPaid: number; paymentType?: "billing" | "advance";
   source?: "direct" | "advance_application";
   paymentDate: string; paymentMode: string; referenceNumber: string; notes?: string; financialYear?: string;
 }

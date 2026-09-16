@@ -38,7 +38,7 @@ export async function syncAnnualReturnStatus(
       .select("invoiceType status fromDate toDate createdAt updatedAt")
       .lean(),
     UploadRecord.exists({ clientId, financialYear }),
-    Billing.exists({ clientId, financialYear }),
+    Billing.exists({ clientId, financialYear, billType: { $in: ["annual_return", null] } }),
     Quotation.find({ clientId, financialYear }).select("status").lean(),
   ]);
 

@@ -6,10 +6,19 @@ export interface BillingTargetBreakdown {
   gstPercent: number; gstAmount: number; totalAmount: number;
   rateSource?: "transaction" | "manual";
 }
+export type BillingType = "annual_return" | "general";
+export interface BillingLineItem {
+  description: string; quantity: number; rate: number;
+  taxableAmount: number; gstPercent: number; gstAmount: number; totalAmount: number;
+  sourceQuotationId?: string; sourceQuotationNumber?: string;
+  sourceRevisionNumber?: number; sourceLineId?: string;
+}
 export interface Billing {
   _id: string; clientId: string; financialYear: string;
+  billType?: BillingType; billTitle?: string; billDate?: string | null;
   govtCharges: number; consultancyCharges: number; targetCharges: number; otherCharges: number;
   totalAmount: number; dueDate?: string | null; daysOverdue?: number;
+  lineItems?: BillingLineItem[];
   targetBreakdown?: BillingTargetBreakdown[]; notes?: string;
   sourceQuotationIds?: string[]; sourceQuotationNumbers?: string[];
   totalPaid: number; pendingAmount: number; paymentStatus: string;
@@ -26,6 +35,7 @@ export interface Payment {
 }
 export interface EmailOption { label: string; email: string; }
 export type BillingFilter = "all" | "pending" | "paid" | "partial" | "unpaid" | "advance" | "overdue" | "invoice-pending" | "invoice-created";
+export type BillTypeFilter = "all" | BillingType;
 export type ViewMode = "cards" | "table";
 export type BillingTab = "billing" | "advances";
 export type CreditType = "RECYCLING" | "EOL";

@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const body = await req.json();
-    const { clientName, financialYear, items, consultationCharges, consultationGst, governmentFees, notes } = body;
+    const { clientName, financialYear, items, additionalItems, consultationCharges, consultationGst, governmentFees, notes } = body;
 
     const calculatedItems: QuotationItem[] = (items || []).map((item: Partial<QuotationItem>) => {
       const subtotal = (item.quantity || 0) * (item.rate || 0);
@@ -27,16 +27,35 @@ export async function POST(req: NextRequest) {
 
     const itemsSubtotal = calculatedItems.reduce((s, i) => s + i.subtotal, 0);
     const itemsGst = calculatedItems.reduce((s, i) => s + i.gstAmount, 0);
+    const calculatedAdditionalItems = (additionalItems || []).map((item: Partial<QuotationItem> & { lineId?: string }) => {
+      const subtotal = (item.quantity || 0) * (item.rate || 0);
+      const gstAmount = subtotal * ((item.gstPercent || 0) / 100);
+      return {
+        lineId: item.lineId || "",
+        description: item.description || "",
+        quantity: item.quantity || 0,
+        rate: item.rate || 0,
+        gstPercent: item.gstPercent || 0,
+        subtotal,
+        gstAmount,
+        totalAmount: subtotal + gstAmount,
+      };
+    });
+    const additionalItemsSubtotal = calculatedAdditionalItems.reduce((sum: number, item: QuotationItem) => sum + item.subtotal, 0);
+    const additionalItemsGst = calculatedAdditionalItems.reduce((sum: number, item: QuotationItem) => sum + item.gstAmount, 0);
+    const additionalItemsTotal = additionalItemsSubtotal + additionalItemsGst;
     const cc = Number(consultationCharges) || 0;
     const ccGst = cc * ((Number(consultationGst) || 0) / 100);
     const gf = Number(governmentFees) || 0;
-    const grandTotal = itemsSubtotal + itemsGst + cc + ccGst + gf;
+    const grandTotal = itemsSubtotal + itemsGst + additionalItemsTotal + cc + ccGst + gf;
 
     return NextResponse.json({
       quoteNumber: `QT-${Date.now()}`,
       clientName, financialYear,
       items: calculatedItems,
+      additionalItems: calculatedAdditionalItems,
       itemsSubtotal, itemsGst,
+      additionalItemsSubtotal, additionalItemsGst, additionalItemsTotal,
       consultationCharges: cc,
       consultationGstPercent: Number(consultationGst) || 0,
       consultationGstAmount: ccGst,

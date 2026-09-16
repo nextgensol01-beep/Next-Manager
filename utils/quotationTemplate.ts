@@ -15,8 +15,16 @@ export interface QuotationResult {
     quantity: number; rate: number; gstPercent: number;
     subtotal: number; gstAmount: number; totalAmount: number;
   }[];
+  additionalItems?: {
+    lineId?: string; description: string;
+    quantity: number; rate: number; gstPercent: number;
+    subtotal: number; gstAmount: number; totalAmount: number;
+  }[];
   itemsSubtotal: number;
   itemsGst: number;
+  additionalItemsSubtotal?: number;
+  additionalItemsGst?: number;
+  additionalItemsTotal?: number;
   consultationCharges: number;
   consultationGstPercent: number;
   consultationGstAmount: number;
@@ -51,6 +59,22 @@ export function buildQuotationHTML(template: string, q: QuotationResult): string
       <td style="${td}"><div style="font-weight:600;">${escapeHtml(item.description)}</div><div style="${typeTagStyle}; margin-top:3px;">${escapeHtml(item.type)}</div></td>
       <td style="${tdMuted}"><span style="${categoryStyle}">${escapeHtml(item.category)}</span></td>
       <td style="${tdR}">${item.quantity.toLocaleString()} MT</td>
+      <td style="${tdR} white-space:nowrap;">₹${fmt(item.rate)}</td>
+      <td style="${tdR}">${item.gstPercent}%</td>
+      <td style="${tdR} font-weight:600; white-space:nowrap;">₹${fmt(item.totalAmount)}</td>
+    </tr>`;
+  }).join("\n");
+
+  const additionalItemRows = (q.additionalItems || []).map((item) => {
+    const borderB = "border-bottom:1px solid #e8e8ed;";
+    const td = `padding:14px 0; font-size:12px; color:#1d1d1f; vertical-align:top; ${borderB}`;
+    const tdMuted = `padding:14px 0; font-size:12px; color:#6e6e73; vertical-align:top; ${borderB}`;
+    const tdR = `padding:14px 0; font-size:12px; color:#1d1d1f; vertical-align:top; text-align:right; ${borderB}`;
+    return `
+    <tr>
+      <td style="${td}"><div style="font-weight:600;">${escapeHtml(item.description)}</div><div style="${typeTagStyle}; margin-top:3px;">Additional service or expense</div></td>
+      <td style="${tdMuted}"><span style="${categoryStyle}">Additional</span></td>
+      <td style="${tdR}">${item.quantity.toLocaleString("en-IN")}</td>
       <td style="${tdR} white-space:nowrap;">₹${fmt(item.rate)}</td>
       <td style="${tdR}">${item.gstPercent}%</td>
       <td style="${tdR} font-weight:600; white-space:nowrap;">₹${fmt(item.totalAmount)}</td>
@@ -116,6 +140,14 @@ export function buildQuotationHTML(template: string, q: QuotationResult): string
     ? `<tr><td style="${sumLabelStyle}">Government / Portal Fees</td><td style="${sumValueStyle}">₹${fmt(q.governmentFees)}</td></tr>`
     : "";
 
+  const additionalItemsRow = Number(q.additionalItemsSubtotal || 0) > 0
+    ? `<tr><td style="${sumLabelStyle}">Additional Items Subtotal</td><td style="${sumValueStyle}">₹${fmt(Number(q.additionalItemsSubtotal || 0))}</td></tr>`
+    : "";
+
+  const additionalItemsGstRow = Number(q.additionalItemsGst || 0) > 0
+    ? `<tr><td style="${sumLabelStyle}">GST on Additional Items</td><td style="${sumValueStyle}">₹${fmt(Number(q.additionalItemsGst || 0))}</td></tr>`
+    : "";
+
   // Notes block with inline styles for Gmail compatibility
   const notesBlock = q.notes
     ? `<div style="border-top:1px solid #e8e8ed; padding-top:18px; margin-top:24px;">
@@ -133,9 +165,11 @@ export function buildQuotationHTML(template: string, q: QuotationResult): string
     .replace(/{{clientState}}/g, escapeHtml(q.clientState || "—"))
     .replace(/{{financialYear}}/g, escapeHtml(q.financialYear))
     .replace(/{{generatedDate}}/g, fmtDate(q.generatedAt))
-    .replace(/{{itemRows}}/g, itemRows + feeRows)
+    .replace(/{{itemRows}}/g, itemRows + additionalItemRows + feeRows)
     .replace(/{{itemsSubtotal}}/g, fmt(q.itemsSubtotal))
     .replace(/{{itemsGst}}/g, fmt(q.itemsGst))
+    .replace(/{{additionalItemsRow}}/g, additionalItemsRow)
+    .replace(/{{additionalItemsGstRow}}/g, additionalItemsGstRow)
     .replace(/{{consultationRow}}/g, consultationRow)
     .replace(/{{consultationGstRow}}/g, consultationGstRow)
     .replace(/{{governmentFeesRow}}/g, governmentFeesRow)

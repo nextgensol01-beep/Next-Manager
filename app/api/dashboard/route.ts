@@ -256,14 +256,15 @@ export async function GET(req: NextRequest) {
     let partialBillingCount = 0;
     let unpaidBillingCount = 0;
     const billingByClient = new Map<string, { billed: number; paid: number; outstanding: number; paymentStatus: "Paid" | "Partial" | "Unpaid"; invoiceMissing: boolean }>();
+    const billingById = new Map<string, { billed: number; paid: number; outstanding: number; paymentStatus: "Paid" | "Partial" | "Unpaid"; invoiceMissing: boolean }>();
 
     for (const billing of billings) {
       const clientId = String(billing.clientId ?? "");
       const billingId = String(billing._id);
       const billed = numberValue(billing.totalAmount);
-      const paid = (billingPaymentsById.get(billingId) ?? 0) + (legacyBillingPaymentsByClient.get(clientId) ?? 0);
+      const paid = (billingPaymentsById.get(billingId) ?? 0) + (billing.billType === "general" ? 0 : (legacyBillingPaymentsByClient.get(clientId) ?? 0));
       const outstanding = Math.max(0, billed - paid);
-      const paymentStatus = outstanding <= 0 ? "Paid" : paid > 0 ? "Partial" : "Unpaid";
+      const paymentStatus: "Paid" | "Partial" | "Unpaid" = outstanding <= 0 ? "Paid" : paid > 0 ? "Partial" : "Unpaid";
       totalBilled += billed;
       totalCollected += paid;
       totalOutstanding += outstanding;
@@ -271,12 +272,24 @@ export async function GET(req: NextRequest) {
       if (paymentStatus === "Paid") paidBillingCount += 1;
       else if (paymentStatus === "Partial") partialBillingCount += 1;
       else unpaidBillingCount += 1;
-      billingByClient.set(clientId, {
+      const metric = {
         billed,
         paid,
         outstanding,
         paymentStatus,
         invoiceMissing: !billing.invoiceCreated,
+      };
+      billingById.set(billingId, metric);
+      const currentClientMetric = billingByClient.get(clientId);
+      const clientBilled = (currentClientMetric?.billed ?? 0) + billed;
+      const clientPaid = (currentClientMetric?.paid ?? 0) + paid;
+      const clientOutstanding = (currentClientMetric?.outstanding ?? 0) + outstanding;
+      billingByClient.set(clientId, {
+        billed: clientBilled,
+        paid: clientPaid,
+        outstanding: clientOutstanding,
+        paymentStatus: clientOutstanding <= 0 ? "Paid" : clientPaid > 0 ? "Partial" : "Unpaid",
+        invoiceMissing: Boolean(currentClientMetric?.invoiceMissing || !billing.invoiceCreated),
       });
     }
 
@@ -311,7 +324,7 @@ export async function GET(req: NextRequest) {
     const annualReturnByClient = new Map(annualReturns.map((record) => [String(record.clientId), String(record.status ?? "Not Started")]));
     const activeClientIds = new Set<string>();
     financialRecords.forEach((record) => activeClientIds.add(String(record.clientId)));
-    billings.forEach((record) => activeClientIds.add(String(record.clientId)));
+    billings.filter((record) => record.billType !== "general").forEach((record) => activeClientIds.add(String(record.clientId)));
     quotations.forEach((record) => { if (record.clientId) activeClientIds.add(String(record.clientId)); });
     const annualReturnPending = Array.from(activeClientIds).filter((clientId) => (
       !isTerminalAnnualReturnStatus((annualReturnByClient.get(clientId) ?? "Not Started") as AnnualReturnStatus)
@@ -332,7 +345,7 @@ export async function GET(req: NextRequest) {
 
     for (const billing of billings) {
       const clientId = String(billing.clientId ?? "");
-      const metric = billingByClient.get(clientId);
+      const metric = billingById.get(String(billing._id));
       if (!metric) continue;
       if (metric.outstanding > 0) {
         attentionItems.push({

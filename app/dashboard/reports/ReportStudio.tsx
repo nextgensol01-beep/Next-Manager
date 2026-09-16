@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { createPortal } from "react-dom";
 import {
@@ -22,6 +22,7 @@ import {
   Info,
   Layers3,
   Loader2,
+  Ellipsis,
   Play,
   Plus,
   RefreshCw,
@@ -32,27 +33,44 @@ import {
   Sparkles,
   Table2,
   Network,
+  PieChart,
   ShieldCheck,
   Target,
   Trash2,
   X,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import {
+  AnimatePresence,
+  animate as animateMotion,
+  motion,
+  type PanInfo,
+  useDragControls,
+  useMotionValue,
+  useReducedMotion,
+  useTransform,
+} from "framer-motion";
 import { FINANCIAL_YEARS, formatCurrency } from "@/lib/utils";
 import type { ReportType } from "@/lib/reports";
 import { fetchReportStudio, getCachedReportStudio } from "@/lib/reportStudioClientCache";
 import { REPORT_TYPES } from "./ReportsSupport";
 import ReportSelect from "./ReportSelect";
+import ReportOverview, { type ReportFocus } from "./ReportOverview";
+import { reportConfigKey, withoutFilter } from "@/lib/report-studio-view";
+import ReportQualityPanel from "./ReportQualityPanel";
+import { reportControlSpring, reportFadeTransition, reportPanelExitTransition, reportPanelSpring, reportSoftSpring } from "./report-motion";
+import "./reports-workspace.css";
 import {
   ACCEPTED_TARGET_COMPACT_COLUMNS,
   ACCEPTED_TARGET_DETAIL_COLUMNS,
-  REPORT_STUDIO_FIELD_MAP,
   REPORT_STUDIO_OPERATOR_LABELS,
   REPORT_STUDIO_SOURCES,
   createAcceptedTargetStudioConfig,
   fieldsForSource,
+  reportStudioFieldMap,
   reportStudioExcelColor,
   type ReportStudioCellValue,
+  type ReportStudioAnalysisBucket,
   type ReportStudioConfig,
   type ReportStudioFieldDefinition,
   type ReportStudioFilterClause,
@@ -77,6 +95,7 @@ type ReportTemplate = {
 type ReportStudioProps = {
   fy: string;
   ready: boolean;
+  customFields: ReportStudioFieldDefinition[];
   onFyChange: (financialYear: string) => void;
   onOpenCustomExport: () => void;
   onDownloadQuickReport: (type: ReportType) => void;
@@ -88,6 +107,11 @@ const SAVED_REPORTS_KEY = "reports.studio.saved.v1";
 const ReportStudioChart = dynamic(() => import("./ReportStudioChart"), {
   ssr: false,
   loading: () => <div className="flex min-h-72 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-brand-600" /></div>,
+});
+
+const ReportStudioAnalysis = dynamic(() => import("./ReportStudioAnalysis"), {
+  ssr: false,
+  loading: () => <div className="flex min-h-96 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-brand-600" /></div>,
 });
 
 const REPORT_TEMPLATES: ReportTemplate[] = [
@@ -141,6 +165,10 @@ function formatCell(value: ReportStudioCellValue, definition: ReportStudioFieldD
     if (definition.type === "currency") return formatCurrency(value);
     if (definition.type === "percentage") return percentage(value);
     return quantity(value);
+  }
+  if (definition.type === "date") {
+    const date = new Date(String(value));
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-IN");
   }
   return value;
 }
@@ -207,6 +235,17 @@ function removeFilterNode(group: ReportStudioFilterGroup, id: string): ReportStu
   };
 }
 
+function keepAvailableFilters(group: ReportStudioFilterGroup, availableFieldIds: ReadonlySet<string>): ReportStudioFilterGroup {
+  return {
+    ...group,
+    children: group.children.reduce<Array<ReportStudioFilterClause | ReportStudioFilterGroup>>((children, child) => {
+      if (child.kind !== "group") return availableFieldIds.has(child.field) ? [...children, child] : children;
+      const nested = keepAvailableFilters(child, availableFieldIds);
+      return nested.children.length > 0 ? [...children, nested] : children;
+    }, []),
+  };
+}
+
 function sortBySelectorOrder(ids: string[], fields: ReportStudioFieldDefinition[]) {
   const order = new Map(fields.map((definition, index) => [definition.id, index]));
   return [...ids].sort((left, right) => (order.get(left) ?? Number.MAX_SAFE_INTEGER) - (order.get(right) ?? Number.MAX_SAFE_INTEGER));
@@ -232,6 +271,7 @@ function defaultFrozenColumns(columns: string[]) {
 export default function ReportStudio({
   fy,
   ready,
+  customFields,
   onFyChange,
   onOpenCustomExport,
   onDownloadQuickReport,
@@ -241,9 +281,13 @@ export default function ReportStudio({
   if (!initialConfigRef.current) initialConfigRef.current = createAcceptedTargetStudioConfig(fy, false);
   const [draft, setDraft] = useState<ReportStudioConfig>(initialConfigRef.current);
   const [applied, setApplied] = useState<ReportStudioConfig>(initialConfigRef.current);
-  const [report, setReport] = useState<ReportStudioResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [reportData, setReport] = useState<ReportStudioResponse | null>(null);
+  const [fetching, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const report = reportData && reportConfigKey(reportData.config) === reportConfigKey(applied) ? reportData : null;
+  const loading = fetching || (!report && !error);
+  const [clientQuery, setClientQuery] = useState("");
+  const [qualityOpen, setQualityOpen] = useState(false);
   const [panel, setPanel] = useState<StudioPanel>(null);
   const [fieldSearch, setFieldSearch] = useState("");
   const [savedReports, setSavedReports] = useState<SavedStudioReport[]>([]);
@@ -258,11 +302,14 @@ export default function ReportStudio({
   const [relationshipClientId, setRelationshipClientId] = useState<string | null>(null);
   const [businessResultsOpen, setBusinessResultsOpen] = useState(false);
   const [setupExpanded, setSetupExpanded] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [frozenColumnIds, setFrozenColumnIds] = useState<string[]>(() => defaultFrozenColumns(initialConfigRef.current?.columns || []));
   const [refreshRequest, setRefreshRequest] = useState(0);
   const forceRefreshRef = useRef(false);
   const reportRequestRef = useRef(0);
   const savedReportsRequestRef = useRef(false);
+  const reduceMotion = useReducedMotion();
+  const fieldMap = useMemo(() => reportStudioFieldMap(customFields), [customFields]);
 
   const fetchReport = useCallback(async (config: ReportStudioConfig, refresh = false) => {
     const requestId = reportRequestRef.current + 1;
@@ -274,6 +321,7 @@ export default function ReportStudio({
       const cached = getCachedReportStudio(config);
       if (cached) {
         setReport(cached);
+        setLastUpdatedAt(cached.generatedAt ? new Date(cached.generatedAt) : null);
         setLoading(false);
         return;
       }
@@ -281,7 +329,10 @@ export default function ReportStudio({
 
     try {
       const body = await fetchReportStudio(config, { refresh });
-      if (reportRequestRef.current === requestId) setReport(body);
+      if (reportRequestRef.current === requestId) {
+        setReport(body);
+        setLastUpdatedAt(new Date(body.generatedAt || Date.now()));
+      }
     } catch (requestError) {
       if (reportRequestRef.current === requestId) {
         setError(requestError instanceof Error ? requestError.message : "Unable to run report");
@@ -347,7 +398,18 @@ export default function ReportStudio({
     void loadSavedReports();
   }, [panel, savedReportsLoaded]);
 
-  const availableFields = useMemo(() => fieldsForSource(draft.source), [draft.source]);
+  useEffect(() => { setClientQuery(applied.search || ""); }, [applied.search]);
+  useEffect(() => {
+    if (clientQuery.trim() === (applied.search || "")) return;
+    const timer = window.setTimeout(() => {
+      const search = clientQuery.trim();
+      setApplied((current) => ({ ...current, search, page: 1 }));
+      setDraft((current) => ({ ...current, search, page: 1 }));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [clientQuery, applied.search]);
+
+  const availableFields = useMemo(() => fieldsForSource(draft.source, customFields), [customFields, draft.source]);
   const fieldGroups = useMemo(() => {
     const search = fieldSearch.trim().toLowerCase();
     const filtered = search
@@ -365,7 +427,26 @@ export default function ReportStudio({
     visit(draft.filters);
     return result;
   }, [draft.filters]);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(applied);
+  const appliedConditions = applied.filters.children;
+  const filterLabel = (node: ReportStudioFilterGroup | ReportStudioFilterClause): string => node.kind === "group"
+    ? "(" + node.children.map(filterLabel).join(node.logic === "or" ? " or " : " and ") + ")"
+    : (fieldMap.get(node.field)?.shortLabel || node.field) + " " + REPORT_STUDIO_OPERATOR_LABELS[node.operator] + " " + (Array.isArray(node.value) ? node.value.join(", ") : String(node.value ?? "")) + (node.operator === "between" ? " and " + (node.secondValue ?? "") : "");
+  const removeAppliedFilter = (id: string) => {
+    setApplied((current) => ({ ...current, filters: withoutFilter(current.filters, id), page: 1 }));
+    setDraft((current) => ({ ...current, filters: withoutFilter(current.filters, id), page: 1 }));
+  };
+  const focusReport = ({ field, value = 0, operator = "gt", label }: ReportFocus) => {
+    const focusRootId = "focus-root-" + Date.now();
+    const update = (config: ReportStudioConfig): ReportStudioConfig => ({ ...config, page: 1, view: "table", groupBy: [],
+      sort: [{ field, direction: "desc" }], filters: { id: focusRootId, kind: "group", logic: "and", children: [
+        ...(config.filters.children.length ? [withoutFilter(config.filters, "overview-focus")] : []),
+        { id: "overview-focus", kind: "condition", field, operator, value },
+      ] } });
+    setApplied(update); setDraft(update);
+    window.requestAnimationFrame(() => document.getElementById("report-results")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    toast.success("Showing " + label.toLowerCase());
+  };
+  const dirty = reportConfigKey(draft) !== reportConfigKey(applied);
   const detailedPreset = draft.columns.length === ACCEPTED_TARGET_DETAIL_COLUMNS.length && ACCEPTED_TARGET_DETAIL_COLUMNS.every((column) => draft.columns.includes(column));
   const compactPreset = draft.columns.length === ACCEPTED_TARGET_COMPACT_COLUMNS.length && ACCEPTED_TARGET_COMPACT_COLUMNS.every((column) => draft.columns.includes(column));
 
@@ -378,6 +459,7 @@ export default function ReportStudio({
     } else {
       setApplied(next);
     }
+    onFyChange(next.financialYear);
     setDraft((current) => ({ ...current, page: 1 }));
     setPanel(null);
     setSetupExpanded(false);
@@ -503,7 +585,7 @@ export default function ReportStudio({
   };
 
   const changeFilterField = (condition: ReportStudioFilterClause, fieldId: string) => {
-    const definition = REPORT_STUDIO_FIELD_MAP.get(fieldId);
+    const definition = fieldMap.get(fieldId);
     if (!definition) return;
     updateFilter(condition.id, { field: fieldId, operator: definition.operators[0], value: definition.options?.[0] || "", secondValue: undefined });
   };
@@ -518,12 +600,21 @@ export default function ReportStudio({
     return { ...current, metrics: sortBySelectorOrder(metrics, metricFields), page: 1 };
   });
 
-  const toggleGroup = (fieldId: string) => setDraft((current) => {
-    const selected = current.groupBy.includes(fieldId);
-    const groupBy = selected ? current.groupBy.filter((entry) => entry !== fieldId) : current.groupBy.length < 2 ? [...current.groupBy, fieldId] : [current.groupBy[1], fieldId];
-    const orderedGroupBy = sortBySelectorOrder(groupBy, dimensionFields);
-    return { ...current, groupBy: orderedGroupBy, sort: orderedGroupBy.length > 0 ? [{ field: orderedGroupBy[0], direction: "asc" }] : current.sort, page: 1 };
-  });
+  const toggleGroup = (fieldId: string) => {
+    const selected = draft.groupBy.includes(fieldId);
+    if (!selected && draft.groupBy.length >= 2) {
+      toast.error("A report can use two grouping levels. Remove one before adding another.");
+      return;
+    }
+    setDraft((current) => {
+      const currentlySelected = current.groupBy.includes(fieldId);
+      if (!currentlySelected && current.groupBy.length >= 2) return current;
+      const groupBy = currentlySelected
+        ? current.groupBy.filter((entry) => entry !== fieldId)
+        : [...current.groupBy, fieldId];
+      return { ...current, groupBy, sort: groupBy.length > 0 ? [{ field: groupBy[0], direction: "asc" }] : current.sort, page: 1 };
+    });
+  };
 
   const createSavedReport = async (asCopy = false) => {
     const activeSavedReport = savedReports.find((entry) => entry.id === activeSavedReportId);
@@ -582,6 +673,8 @@ export default function ReportStudio({
   };
 
   const deleteSavedReport = async (id: string) => {
+    const savedReport = savedReports.find((entry) => entry.id === id);
+    if (!savedReport || !window.confirm(`Delete “${savedReport.name}”? This saved configuration cannot be recovered.`)) return;
     setDeletingSavedReportId(id);
     try {
       const response = await fetch(`/api/reports/studio/saved/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -601,15 +694,38 @@ export default function ReportStudio({
   };
 
   const loadSaved = (saved: SavedStudioReport) => {
-    const savedFields = fieldsForSource(saved.config.source);
+    const savedFields = fieldsForSource(saved.config.source, customFields);
+    const savedFieldIds = new Set(savedFields.map((definition) => definition.id));
     const savedDimensionFields = savedFields.filter((definition) => definition.role === "dimension");
     const savedMetricFields = savedFields.filter((definition) => definition.role === "metric");
+    const fallbackColumns = defaultConfigForSource(saved.config.source, saved.config.financialYear).columns;
+    const availableColumns = saved.config.columns.filter((fieldId, index, columns) => (
+      savedFieldIds.has(fieldId) && columns.indexOf(fieldId) === index
+    ));
+    const fallbackAnalysis = defaultConfigForSource(saved.config.source, saved.config.financialYear).analysis;
+    const requestedAnalysis = saved.config.analysis && savedFieldIds.has(saved.config.analysis.field)
+      ? saved.config.analysis
+      : fallbackAnalysis;
+    const requestedAnalysisField = savedFields.find((field) => field.id === requestedAnalysis.field);
+    const analysisTransformIsValid = requestedAnalysisField && (
+      requestedAnalysis.transform === "presence" ||
+      requestedAnalysis.transform === "value" ||
+      (requestedAnalysis.transform === "range" && ["number", "quantity", "currency", "percentage"].includes(requestedAnalysisField.type)) ||
+      (requestedAnalysis.transform === "timePeriod" && requestedAnalysisField.type === "date")
+    );
+    const savedAnalysis = analysisTransformIsValid ? requestedAnalysis : { ...requestedAnalysis, transform: "presence" as const };
     const config = {
       ...saved.config,
-      groupBy: sortBySelectorOrder(saved.config.groupBy, savedDimensionFields),
-      metrics: sortBySelectorOrder(saved.config.metrics, savedMetricFields),
+      columns: availableColumns.length > 0 ? availableColumns : fallbackColumns,
+      filters: keepAvailableFilters(saved.config.filters, savedFieldIds),
+      groupBy: saved.config.groupBy.filter((fieldId, index, groupBy) => (
+        savedDimensionFields.some((field) => field.id === fieldId) && groupBy.indexOf(fieldId) === index
+      )).slice(0, 2),
+      metrics: sortBySelectorOrder(saved.config.metrics.filter((fieldId) => savedMetricFields.some((field) => field.id === fieldId)), savedMetricFields),
+      sort: saved.config.sort.filter((entry) => savedFieldIds.has(entry.field)).slice(0, 3),
+      analysis: savedAnalysis,
       businessResultIds: saved.config.businessResultIds ?? null,
-      excelColumnColors: saved.config.excelColumnColors || {},
+      excelColumnColors: Object.fromEntries(Object.entries(saved.config.excelColumnColors || {}).filter(([fieldId]) => savedFieldIds.has(fieldId))),
     };
     setDraft(config);
     setApplied(config);
@@ -657,9 +773,13 @@ export default function ReportStudio({
   };
 
   const setPage = (page: number) => {
-    const next = { ...applied, page };
-    setApplied(next);
-    setDraft(next);
+    setApplied((current) => ({ ...current, page }));
+    setDraft((current) => ({ ...current, page }));
+  };
+
+  const setPageSize = (pageSize: number) => {
+    setApplied((current) => ({ ...current, pageSize, page: 1 }));
+    setDraft((current) => ({ ...current, pageSize, page: 1 }));
   };
 
   const updateTableConfig = (transform: (config: ReportStudioConfig) => ReportStudioConfig) => {
@@ -737,8 +857,8 @@ export default function ReportStudio({
 
   const showAllTableColumns = () => {
     if (applied.groupBy.length > 0) return;
-    const sourceFields = fieldsForSource(applied.source).map((definition) => definition.id);
-    updateTableConfig((config) => ({ ...config, columns: insertBySelectorOrder(config.columns, sourceFields, fieldsForSource(config.source)), page: 1 }));
+    const sourceFields = fieldsForSource(applied.source, customFields).map((definition) => definition.id);
+    updateTableConfig((config) => ({ ...config, columns: insertBySelectorOrder(config.columns, sourceFields, fieldsForSource(config.source, customFields)), page: 1 }));
   };
 
   const sortTableColumn = (fieldId: string, direction: "asc" | "desc" | null) => {
@@ -761,7 +881,7 @@ export default function ReportStudio({
   };
 
   const openTableColumnFilter = (fieldId: string) => {
-    const definition = REPORT_STUDIO_FIELD_MAP.get(fieldId);
+    const definition = fieldMap.get(fieldId);
     if (!definition) return;
     const condition: ReportStudioFilterClause = {
       id: `table-filter-draft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -851,81 +971,90 @@ export default function ReportStudio({
   };
 
   const changeResultView = (view: ReportStudioConfig["view"]) => {
-    const next = { ...applied, view };
-    setApplied(next);
+    setApplied((current) => ({ ...current, view }));
+    setDraft((current) => ({ ...current, view }));
+  };
+
+  const updateAnalysis = (patch: Partial<ReportStudioConfig["analysis"]>) => {
+    const update = (config: ReportStudioConfig): ReportStudioConfig => ({
+      ...config,
+      analysis: { ...config.analysis, ...patch },
+      view: "analysis",
+      page: 1,
+    });
+    setApplied(update);
+    setDraft(update);
+  };
+
+  const drillIntoAnalysisBucket = (bucket: ReportStudioAnalysisBucket) => {
+    if (bucket.filters.length === 0) return;
+    const timestamp = Date.now();
+    const conditions: ReportStudioFilterClause[] = bucket.filters.map((filter, index) => ({
+      id: `analysis-${timestamp}-${index}`,
+      kind: "condition",
+      ...filter,
+    }));
+    const bucketGroup: ReportStudioFilterGroup = {
+      id: `analysis-group-${timestamp}`,
+      kind: "group",
+      logic: "and",
+      children: conditions,
+    };
+    const next: ReportStudioConfig = {
+      ...applied,
+      name: `${applied.name} · ${bucket.label}`,
+      filters: {
+        id: `analysis-root-${timestamp}`,
+        kind: "group",
+        logic: "and",
+        children: applied.filters.children.length > 0 ? [applied.filters, bucketGroup] : [bucketGroup],
+      },
+      groupBy: [],
+      view: "table",
+      page: 1,
+    };
+    setDrilldownStack((current) => [...current, applied]);
     setDraft(next);
+    setApplied(next);
   };
 
   const sourceDefinition = REPORT_STUDIO_SOURCES.find((source) => source.id === draft.source);
   const viewOptions = [
     { id: "table" as const, label: "Table", Icon: Table2, available: true, help: "View detailed rows" },
+    { id: "analysis" as const, label: "Analyze", Icon: PieChart, available: true, help: "Analyze totals and field completeness" },
     { id: "pivot" as const, label: "Pivot", Icon: Sigma, available: applied.groupBy.length >= 2 && applied.metrics.length > 0, help: "Add two groupings and a metric to use Pivot" },
     { id: "chart" as const, label: "Chart", Icon: BarChart3, available: applied.groupBy.length > 0 && applied.metrics.length > 0, help: "Add a grouping and a metric to use Chart" },
     { id: "relationships" as const, label: "Relationships", Icon: Network, available: applied.groupBy.length === 0, help: "Open an ungrouped report to use Relationships" },
   ];
 
   return (
-    <div className="reports-page space-y-5 pb-8">
-      <header className="reports-hero flex flex-col gap-5 rounded-[28px] px-5 py-6 sm:px-7 xl:flex-row xl:items-end xl:justify-between">
-        <div className="max-w-2xl">
-          <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-600"><Sparkles className="h-3.5 w-3.5" />Report Studio</div>
-          <h1 className="text-[30px] font-semibold tracking-[-0.04em] text-default sm:text-[36px]">Turn your data into a clear answer</h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-muted">Choose an outcome, refine it only when needed, and export exactly what you see.</p>
-        </div>
-        <div className="reports-action-cluster flex flex-wrap gap-2 rounded-2xl p-1.5">
-          <button type="button" onClick={() => setPanel(panel === "saved" ? null : "saved")} className="glass-btn"><FolderOpen className="h-4 w-4" />Saved Reports</button>
-          <ExportMenu fy={fy} reportAvailable={Boolean(report)} downloadingCurrent={downloading} downloading={quickDownloading} onDownloadCurrent={() => void downloadExcel()} onDownload={onDownloadQuickReport} onOpenCustomExport={onOpenCustomExport} />
+    <div className="reports-page report-workspace">
+      <header className="report-workspace-header reports-hero report-restored-hero">
+        <div className="report-title-block"><span className="report-eyebrow"><Sparkles size={14} />Report Studio</span><h1>Turn your data into a clear answer</h1><p className="report-caption">Choose an outcome, refine it only when needed, and export exactly what you see.</p></div>
+        <div className="report-header-actions reports-action-cluster">
+          <motion.button type="button" onClick={() => setPanel("saved")} whileTap={reduceMotion ? undefined : { scale: 0.97 }} transition={reportControlSpring} className="report-secondary-button"><FolderOpen size={16} />Saved Reports</motion.button>
+          <ExportMenu fy={applied.financialYear} reportAvailable={Boolean(report) && !loading} totalRows={report?.pagination.totalRows} downloadingCurrent={downloading} downloading={quickDownloading} onDownloadCurrent={() => void downloadExcel()} onDownload={onDownloadQuickReport} onOpenCustomExport={onOpenCustomExport} />
         </div>
       </header>
-
-      <section aria-labelledby="report-templates-title" className="reports-template-strip rounded-[24px] p-3 sm:p-4">
-        <div className="mb-3 flex items-end justify-between gap-4 px-1">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-600">Quick start</p>
-            <h2 id="report-templates-title" className="mt-0.5 text-sm font-semibold text-default sm:text-base">What do you need to understand?</h2>
-          </div>
-          <span className="hidden text-xs text-muted sm:block">One click builds and runs the report</span>
-        </div>
-        <div className="reports-template-grid">
-          {REPORT_TEMPLATES.map((template) => {
-            const Icon = template.icon;
-            const active = applied.source === template.source && !activeSavedReportId;
-            return <button key={template.source} type="button" onClick={() => applyTemplate(template)} aria-pressed={active} className={`reports-template-card group ${active ? "is-active" : ""}`}>
-              <span className={`reports-template-icon ${template.tone}`}><Icon className="h-4 w-4" /></span>
-              <span className="min-w-0 flex-1">
-                <strong className="block text-[12px] font-semibold text-default sm:text-[13px]">{template.label}</strong>
-                <span className="mt-0.5 block text-[10px] leading-4 text-muted sm:text-[11px]">{template.description}</span>
-              </span>
-              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-brand-600" />
-            </button>;
-          })}
-        </div>
-      </section>
-
-      <section className="reports-glass-panel rounded-[24px] p-3.5 sm:p-4" aria-labelledby="report-setup-title">
-        {!setupExpanded ? <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-600">Current report</p>
-            <h2 id="report-setup-title" className="mt-1 truncate text-base font-semibold tracking-[-0.01em] text-default">{applied.name}</h2>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-muted">
-              <span className="reports-config-chip">{sourceDefinition?.label}</span>
-              <span className="reports-config-chip">FY {applied.financialYear}</span>
-              <span className="reports-config-chip">{applied.columns.length} columns</span>
-              <span className="reports-config-chip">{filterConditions.length} {filterConditions.length === 1 ? "filter" : "filters"}</span>
-            </div>
-          </div>
-          <div className="flex shrink-0 gap-2">
-            <button type="button" onClick={() => setSetupExpanded(true)} className="glass-btn h-10 text-xs"><SlidersHorizontal className="h-3.5 w-3.5" />Customize</button>
-            <button type="button" onClick={() => void fetchReport(applied)} disabled={loading} className="glass-btn h-10 text-xs">{loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}Refresh data</button>
-          </div>
-        </div> : <div className="flex flex-col gap-4">
+      <div className="report-navigation">
+        <nav aria-label="Report templates" className="report-template-tabs">{REPORT_TEMPLATES.map((template) => {
+          const Icon = template.icon; const active = applied.source === template.source && !activeSavedReportId;
+          return <button key={template.source} type="button" aria-pressed={active} onClick={() => applyTemplate(template)} className={active ? "is-active" : ""}><Icon size={16} /><span className="report-template-full">{template.label}</span><span className="report-template-short">{template.source === "clients" ? "Targets" : template.source === "billing" ? "Payments" : template.source === "annual-returns" ? "Returns" : "Credits"}</span></button>;
+        })}</nav>
+        <div className="report-year-control"><span>FY</span><ReportSelect variant="bare" value={applied.financialYear} onChange={onFyChange} ariaLabel="Report financial year" options={FINANCIAL_YEARS.map((year) => ({ value: year, label: year }))} /></div>
+      </div>
+      <div className="report-context-bar"><div className="report-filter-chips"><span className="report-context-label"><Filter size={14} />{appliedConditions.length ? (applied.filters.logic === "or" ? "Match any" : "Filtered by") : "All matching clients"}</span>{appliedConditions.map((condition) => <span key={condition.id} className="report-filter-chip"><button title={filterLabel(condition)} onClick={() => { setSetupExpanded(true); setPanel("filters"); }}>{filterLabel(condition)}</button><button aria-label={`Remove filter: ${filterLabel(condition)}`} onClick={() => removeAppliedFilter(condition.id)}><X size={12} /></button></span>)}</div>
+        <button type="button" onClick={() => setSetupExpanded((open) => !open)} className="report-text-button"><SlidersHorizontal size={15} />Customize{dirty && <span className="report-pending-dot" aria-label="Pending changes" />}</button>
+      </div>
+      <AnimatePresence initial={false}>{setupExpanded && <motion.section className="reports-glass-panel overflow-hidden rounded-[24px] p-3.5 sm:p-4" aria-labelledby="report-setup-title" initial={reduceMotion ? false : { opacity: 0, height: 0, y: -12 }} animate={{ opacity: 1, height: "auto", y: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0, y: -8 }} transition={reduceMotion ? { duration: 0.01 } : reportSoftSpring}>
+        <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-600">Customize report</p><h2 id="report-setup-title" className="mt-0.5 text-base font-semibold text-default">Choose the data and level of detail</h2></div>
             <button type="button" onClick={() => { setDraft(applied); setPanel(null); setSetupExpanded(false); }} className="rounded-xl px-3 py-2 text-xs font-semibold text-muted hover:bg-surface hover:text-default">Cancel</button>
           </div>
           <div className="grid gap-3 xl:grid-cols-[minmax(190px,1fr)_170px_minmax(240px,1.2fr)_auto]">
             <label className="text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">Report on<span className="mt-1.5 block"><ReportSelect value={draft.source} onChange={(value) => changeSource(value as ReportStudioSource)} ariaLabel="Report source" searchable options={REPORT_STUDIO_SOURCES.map((source) => ({ value: source.id, label: source.label }))} buttonClassName="text-sm" /></span></label>
-            <label className="text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">Financial year<span className="mt-1.5 block"><ReportSelect value={draft.financialYear} onChange={(value) => { onFyChange(value); setDraft((current) => ({ ...current, financialYear: value, page: 1 })); }} ariaLabel="Financial year" options={FINANCIAL_YEARS.map((year) => ({ value: year, label: year }))} buttonClassName="text-sm" /></span></label>
+            <label className="text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">Financial year<span className="mt-1.5 block"><ReportSelect value={draft.financialYear} onChange={(value) => setDraft((current) => ({ ...current, financialYear: value, page: 1 }))} ariaLabel="Financial year" options={FINANCIAL_YEARS.map((year) => ({ value: year, label: year }))} buttonClassName="text-sm" /></span></label>
             <label className="text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">Report name<input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} className="reports-control mt-1.5 h-11 w-full px-3 text-sm font-semibold" /></label>
             <div className="flex items-end"><button type="button" onClick={runReport} className="btn-primary h-11 w-full justify-center px-5 xl:w-auto">{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{loading ? "Applying…" : dirty ? "Apply changes" : "Refresh data"}</button></div>
           </div>
@@ -940,33 +1069,36 @@ export default function ReportStudio({
           </div>
           <div className="flex flex-wrap gap-2 text-xs text-muted">
             <span className="rounded-full bg-surface px-2.5 py-1">Each row: {sourceDefinition?.grain}</span>
-            {filterConditions.map((condition) => { const definition = REPORT_STUDIO_FIELD_MAP.get(condition.field); return <span key={condition.id} className="rounded-full border border-base bg-card px-2.5 py-1"><strong className="text-default">{definition?.shortLabel}</strong> {REPORT_STUDIO_OPERATOR_LABELS[condition.operator]} {Array.isArray(condition.value) ? condition.value.join(", ") : String(condition.value ?? "")}</span>; })}
+            {filterConditions.map((condition) => { const definition = fieldMap.get(condition.field); return <span key={condition.id} className="rounded-full border border-base bg-card px-2.5 py-1"><strong className="text-default">{definition?.shortLabel}</strong> {REPORT_STUDIO_OPERATOR_LABELS[condition.operator]} {Array.isArray(condition.value) ? condition.value.join(", ") : String(condition.value ?? "")}</span>; })}
           </div>
-        </div>}
-      </section>
+        </div>
+      </motion.section>}</AnimatePresence>
 
-      {panel && <StudioInspector panel={panel} dirty={dirty} onClose={() => setPanel(null)} onUndo={() => setDraft(applied)} onRun={runReport}>
+      <AnimatePresence>{panel && <StudioInspector key="studio-inspector" panel={panel} dirty={dirty} onClose={() => setPanel(null)} onUndo={() => setDraft(applied)} onRun={runReport}>
         {panel === "columns" && <ColumnPanel groups={fieldGroups} selected={draft.columns} colors={draft.excelColumnColors || {}} search={fieldSearch} onSearch={setFieldSearch} onToggle={toggleColumn} onToggleGroup={toggleColumnGroup} onReorder={reorderDraftColumn} onColor={setExcelColumnColor} onGroupColor={setExcelGroupColor} />}
-        {panel === "filters" && <FilterPanel group={draft.filters} fields={availableFields} onLogic={updateFilterLogic} onAdd={addFilter} onAddGroup={addFilterGroup} onField={changeFilterField} onUpdate={updateFilter} onRemove={removeFilter} />}
-        {panel === "group" && <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]"><ChoicePanel kind="group" fields={dimensionFields} selected={draft.groupBy} onToggle={toggleGroup} empty="No grouping — one result row per source record" /><GroupingImpactPreview source={draft.source} selected={draft.groupBy} metrics={draft.metrics} appliedSelected={applied.groupBy} configurationDirty={dirty} report={report} /></div>}
-        {panel === "metrics" && <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]"><ChoicePanel kind="metric" fields={metricFields} selected={draft.metrics} onToggle={toggleMetric} empty="Select metrics for KPI cards and grouped results" /><MetricImpactPreview selected={draft.metrics} groupBy={draft.groupBy} appliedSelected={applied.metrics} configurationDirty={dirty} report={report} /></div>}
-        {panel === "saved" && <SavedPanel reports={savedReports} name={saveName} activeId={activeSavedReportId} loading={savedReportsLoading} saving={savingSavedReport} deletingId={deletingSavedReportId} onName={setSaveName} onCreate={() => void createSavedReport()} onUpdate={() => void updateSavedReport()} onSaveCopy={() => void createSavedReport(true)} onLoad={loadSaved} onDelete={(id) => void deleteSavedReport(id)} />}
-      </StudioInspector>}
+        {panel === "filters" && <div className="mx-auto -mt-1 w-full max-w-[840px]"><FilterPanel group={draft.filters} fields={availableFields} onLogic={updateFilterLogic} onAdd={addFilter} onAddGroup={addFilterGroup} onField={changeFilterField} onUpdate={updateFilter} onRemove={removeFilter} /></div>}
+        {panel === "group" && <InspectorSplitLayout choice={<ChoicePanel kind="group" fields={dimensionFields} selected={draft.groupBy} onToggle={toggleGroup} empty="No grouping — one result row per source record" />} preview={<GroupingImpactPreview source={draft.source} fields={availableFields} selected={draft.groupBy} metrics={draft.metrics} appliedSelected={applied.groupBy} configurationDirty={dirty} report={report} />} />}
+        {panel === "metrics" && <InspectorSplitLayout choice={<ChoicePanel kind="metric" fields={metricFields} selected={draft.metrics} onToggle={toggleMetric} empty="Select metrics for KPI cards and grouped results" />} preview={<MetricImpactPreview fields={availableFields} selected={draft.metrics} groupBy={draft.groupBy} appliedSelected={applied.metrics} configurationDirty={dirty} report={report} />} />}
+        {panel === "saved" && <><div className="mb-4 rounded-xl border border-base bg-surface p-3"><p className="text-xs text-muted">Report configurations and custom export presets are saved to your account.</p><button className="report-text-button mt-1" onClick={() => { setPanel(null); onOpenCustomExport(); }}>Open custom export presets<ArrowRight size={14} /></button></div><SavedPanel reports={savedReports} name={saveName} activeId={activeSavedReportId} loading={savedReportsLoading} saving={savingSavedReport} deletingId={deletingSavedReportId} onName={setSaveName} onCreate={() => void createSavedReport()} onUpdate={() => void updateSavedReport()} onSaveCopy={() => void createSavedReport(true)} onLoad={loadSaved} onDelete={(id) => void deleteSavedReport(id)} /></>}
+      </StudioInspector>}</AnimatePresence>
 
       {error && <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-200"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><div><strong>Report could not run.</strong> {error}</div></div>}
-      {report?.quality.messages.length ? <div className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{report.quality.messages.join(" ")}</div> : null}
-
-      {report && report.pagination.totalRows > 0 && (report.summary.metrics.some((metric) => metric.field === "target.overall.target")
-        ? <TargetOutcomeSummary report={report} />
-        : <section className={`reports-metric-strip grid grid-cols-2 overflow-hidden rounded-[24px] ${report.summary.metrics.length >= 4 ? "xl:grid-cols-4" : "xl:grid-cols-3"}`}>
-            {report.summary.metrics.slice(0, 4).map((metric) => <div key={metric.field} className="reports-metric-item px-4 py-4 sm:px-5"><p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">{metric.label}</p><p className="mt-1 text-xl font-bold tracking-tight text-default">{metric.type === "currency" ? formatCurrency(metric.value) : metric.type === "percentage" ? percentage(metric.value) : quantity(metric.value)}</p></div>)}
-          </section>)}
-      {report && report.pagination.totalRows > 0 && report.summary.metrics.some((metric) => /^target\.cat[1-4]\.total\./.test(metric.field)) && <TargetCategorySummaries report={report} />}
-
-      <section className="reports-results-card relative overflow-hidden rounded-[24px]" aria-busy={loading}>
+      {!report && loading && <div className={`report-overview-skeleton ${["clients", "pibo-targets", "financial-years"].includes(applied.source) ? "with-target" : ""}`} aria-hidden="true"><div /><div /></div>}
+      {report && report.pagination.totalRows > 0 && applied.view !== "analysis" && <ReportOverview report={report} onFocus={focusReport} />}
+      {report?.quality.messages.length ? <div className="report-quality-notice"><AlertTriangle size={16} /><div><strong>Some records need attention</strong><p>{report.quality.messages.join(" ")}</p></div><button onClick={() => setQualityOpen(true)}>Review records<ArrowRight size={14} /></button></div> : null}
+      <ReportQualityPanel open={qualityOpen} financialYear={applied.financialYear} onClose={() => setQualityOpen(false)} />
+      <section id="report-results" className="reports-results-card relative overflow-hidden rounded-[24px]" aria-busy={loading}>
         {loading && report && <div role="status" className="absolute inset-x-0 top-0 z-20 flex h-1 overflow-hidden bg-brand-100/70 dark:bg-brand-950/50"><span className="h-full w-1/3 animate-pulse rounded-full bg-brand-500" /><span className="sr-only">Updating report data while keeping the current results available</span></div>}
-        <div className="flex flex-col gap-3 border-b border-base p-4 xl:flex-row xl:items-center xl:justify-between"><div><div className="flex items-center gap-2"><BarChart3 className="h-4 w-4 text-brand-600" /><h2 className="font-semibold text-default">{applied.name}</h2></div><p className="mt-1 text-xs text-muted">{loading ? "Refreshing data…" : `${report?.pagination.totalRows || 0} rows · ${report?.summary.matchedClients || 0} clients`}</p><p className="mt-1 text-[10px] text-faint sm:hidden">Swipe the table to see more columns</p></div><div className="flex flex-wrap items-center gap-2">{drilldownStack.length > 0 && <button type="button" onClick={returnFromDrilldown} className="glass-btn h-9 text-xs"><ChevronLeft className="h-3.5 w-3.5" />Back to grouped report</button>}{report && <button type="button" onClick={() => setBusinessResultsOpen((open) => !open)} className={`glass-btn h-9 text-xs ${businessResultsOpen ? "text-brand-600" : ""}`}><Calculator className="h-3.5 w-3.5" />Details ({report.summary.businessResults.length})</button>}<div className="reports-view-switcher flex rounded-xl bg-surface p-1">{viewOptions.map(({ id, Icon, label, available, help }) => <button key={id} type="button" onClick={() => available && changeResultView(id)} disabled={!available} title={available ? `${label} view` : help} aria-label={available ? `${label} view` : `${label} unavailable: ${help}`} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition ${applied.view === id ? "bg-card text-brand-600 shadow-sm" : "text-muted hover:text-default"} disabled:cursor-not-allowed disabled:opacity-35`}><Icon className="h-3.5 w-3.5" /><span className="hidden sm:inline">{label}</span></button>)}</div>{dirty && <button type="button" onClick={() => setSetupExpanded(true)} className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">Review changes</button>}</div></div>
-        {report && businessResultsOpen && <BusinessResultsPanel
+        <div className="report-results-toolbar">
+          <div className="report-results-heading"><h2>{applied.name || "Report details"}</h2><p className="report-caption" role="status">{loading ? "Loading your report…" : report ? `${report.pagination.totalRows} rows · ${report.summary.matchedClients} clients${lastUpdatedAt ? ` · Updated ${lastUpdatedAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}` : ""}` : "Report unavailable"}</p></div>
+          <div className="report-table-actions"><button onClick={() => void fetchReport(applied, true)} disabled={loading} aria-label="Refresh report data" className="report-icon-button">{loading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}</button><button onClick={() => { setSetupExpanded(true); setPanel("columns"); }} className="report-secondary-button"><Columns3 size={15} />Columns <span>{applied.columns.length}</span></button>{report && <button onClick={() => setBusinessResultsOpen((open) => !open)} aria-expanded={businessResultsOpen} className="report-secondary-button"><Calculator size={15} />Insights</button>}</div>
+        </div>
+        <div className="report-table-controls"><label className="report-client-search"><Search size={16} /><input value={clientQuery} maxLength={120} onChange={(event) => setClientQuery(event.target.value)} placeholder="Search clients, ID or registration…" aria-label="Search all report clients" />{clientQuery && <button onClick={() => setClientQuery("")} aria-label="Clear client search"><X size={14} /></button>}</label>
+          <div className="reports-view-switcher report-view-tabs">{viewOptions.map(({ id, Icon, label, available, help }) => <button key={id} aria-pressed={applied.view === id} onClick={() => { if (available) { changeResultView(id); return; } setSetupExpanded(true); setPanel(id === "relationships" || applied.groupBy.length < (id === "pivot" ? 2 : 1) ? "group" : "metrics"); toast(help); }} title={available ? `${label} view` : `${help}. Click to configure.`} aria-label={`${label} view`} className={applied.view === id ? "is-active" : ""}><Icon size={15} /><span>{label}</span></button>)}</div>
+        </div>
+        <AnimatePresence initial={false}>{dirty && <motion.div className="report-draft-notice" initial={reduceMotion ? false : { opacity: 0, height: 0, y: -8 }} animate={{ opacity: 1, height: "auto", y: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0, y: -6 }} transition={reduceMotion ? { duration: 0.01 } : reportSoftSpring}><span>You have unapplied changes. Results show the current report.</span><button onClick={() => setDraft(applied)}>Discard</button><button onClick={runReport}>Apply changes<ArrowRight size={14} /></button></motion.div>}</AnimatePresence>
+        <AnimatePresence initial={false}>{drilldownStack.length > 0 && <motion.button initial={reduceMotion ? false : { opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -6 }} transition={reduceMotion ? { duration: 0.01 } : reportControlSpring} onClick={returnFromDrilldown} className="report-text-button m-4"><ChevronLeft size={15} />Back to grouped report</motion.button>}</AnimatePresence>
+        <AnimatePresence initial={false}>{report && businessResultsOpen && <motion.div initial={reduceMotion ? false : { opacity: 0, height: 0, y: -10 }} animate={{ opacity: 1, height: "auto", y: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0, y: -8 }} transition={reduceMotion ? { duration: 0.01 } : reportSoftSpring} className="overflow-hidden"><BusinessResultsPanel
           results={report.summary.businessResults}
           options={report.summary.businessResultOptions}
           selectedIds={draft.businessResultIds}
@@ -975,11 +1107,11 @@ export default function ReportStudio({
           canEdit={draft.source === applied.source}
           dirty={dirty}
           onSelectionChange={setBusinessResultIds}
-        />}
-        {loading && !report ? <InitialReportSkeleton ready={ready} /> : report && report.rows.length > 0 ? <StudioResult report={report} availableFields={fieldsForSource(report.config.source)} frozenColumnIds={frozenColumnIds} onFrozenColumnsChange={setFrozenColumnIds} onRowClick={drillIntoRow} onReorderColumn={reorderTableColumn} onMoveColumn={moveTableColumn} onInsertColumn={insertTableColumn} onShowColumn={showTableColumn} onShowAllColumns={showAllTableColumns} onHideColumn={hideTableColumn} onSortColumn={sortTableColumn} onAddSort={addTableSort} onClearColumnSort={clearTableColumnSort} onClearAllSort={clearAllTableSort} onOpenColumnFilter={openTableColumnFilter} onClearColumnFilter={clearTableColumnFilter} onFilterCell={filterFromTableCell} /> : <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center"><span className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface text-faint"><Layers3 className="h-5 w-5" /></span><h3 className="font-semibold text-default">No records match this setup</h3><p className="mt-1 max-w-md text-sm leading-6 text-muted">Try the same report without filters, or open the filter builder to make a smaller adjustment.</p><div className="mt-4 flex flex-wrap justify-center gap-2">{filterConditions.length > 0 && <button type="button" onClick={showAllRecords} className="btn-primary h-9 px-4 text-xs"><Sparkles className="h-3.5 w-3.5" />Show all records</button>}<button type="button" onClick={() => setPanel("filters")} className="glass-btn h-9 text-xs"><Filter className="h-3.5 w-3.5" />Review filters</button></div></div>}
-        {report && report.pagination.totalRows > 0 && <div className="flex flex-col gap-3 border-t border-base px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs text-muted">Showing {Math.min((report.pagination.page - 1) * applied.pageSize + 1, report.pagination.totalRows)}–{Math.min(report.pagination.page * applied.pageSize, report.pagination.totalRows)} of {report.pagination.totalRows} rows</span><div className="flex items-center gap-2"><ReportSelect variant="bare" className="w-[96px] rounded-lg border border-base bg-surface" value={String(applied.pageSize)} onChange={(value) => { const next = { ...applied, pageSize: Number(value), page: 1 }; setApplied(next); setDraft(next); }} ariaLabel="Rows per page" options={[10, 25, 50, 100].map((size) => ({ value: String(size), label: `${size} rows` }))} /><span className="px-1 text-[11px] text-faint">Page {report.pagination.page} of {report.pagination.totalPages}</span><button type="button" aria-label="Previous page" onClick={() => setPage(Math.max(1, applied.page - 1))} disabled={applied.page <= 1} className="rounded-lg border border-base p-1.5 text-muted disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button><button type="button" aria-label="Next page" onClick={() => setPage(Math.min(report.pagination.totalPages, applied.page + 1))} disabled={applied.page >= report.pagination.totalPages} className="rounded-lg border border-base p-1.5 text-muted disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button></div></div>}
+        /></motion.div>}</AnimatePresence>
+        {loading && !report ? <InitialReportSkeleton ready={ready} /> : error && !report ? <div className="p-10 text-center"><p className="text-sm text-muted">Your report could not be loaded. Your setup has been kept.</p><button onClick={() => void fetchReport(applied, true)} className="report-secondary-button mx-auto mt-4"><RefreshCw size={15} />Try again</button></div> : report && report.rows.length > 0 ? <StudioResult report={report} availableFields={fieldsForSource(report.config.source, customFields)} onUpdateAnalysis={updateAnalysis} onDrilldownAnalysis={drillIntoAnalysisBucket} frozenColumnIds={frozenColumnIds} onFrozenColumnsChange={setFrozenColumnIds} onRowClick={drillIntoRow} onReorderColumn={reorderTableColumn} onMoveColumn={moveTableColumn} onInsertColumn={insertTableColumn} onShowColumn={showTableColumn} onShowAllColumns={showAllTableColumns} onHideColumn={hideTableColumn} onSortColumn={sortTableColumn} onAddSort={addTableSort} onClearColumnSort={clearTableColumnSort} onClearAllSort={clearAllTableSort} onOpenColumnFilter={openTableColumnFilter} onClearColumnFilter={clearTableColumnFilter} onFilterCell={filterFromTableCell} /> : <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center"><span className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface text-faint"><Layers3 className="h-5 w-5" /></span><h3 className="font-semibold text-default">No clients match this report</h3><p className="mt-1 max-w-md text-sm leading-6 text-muted">Try a different search, clear a filter, or choose another financial year.</p><div className="mt-4 flex flex-wrap justify-center gap-2">{appliedConditions.length > 0 && <button type="button" onClick={showAllRecords} className="btn-primary h-9 px-4 text-xs"><Sparkles className="h-3.5 w-3.5" />Show all records</button>}<button type="button" onClick={() => setPanel("filters")} className="glass-btn h-9 text-xs"><Filter className="h-3.5 w-3.5" />Review filters</button></div></div>}
+        {report && report.pagination.totalRows > 0 && (applied.view === "table" || applied.view === "relationships") && <div className="flex flex-col gap-3 border-t border-base px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs text-muted">Showing {Math.min((report.pagination.page - 1) * applied.pageSize + 1, report.pagination.totalRows)}–{Math.min(report.pagination.page * applied.pageSize, report.pagination.totalRows)} of {report.pagination.totalRows} rows</span><div className="flex items-center gap-2"><ReportSelect variant="bare" className="w-[116px] rounded-lg border border-base bg-surface" value={String(applied.pageSize)} onChange={(value) => setPageSize(Number(value))} ariaLabel="Rows per page" options={[10, 25, 50, 100].map((size) => ({ value: String(size), label: `${size} rows` }))} /><span className="px-1 text-[11px] text-faint">Page {report.pagination.page} of {report.pagination.totalPages}</span><button type="button" aria-label="Previous page" onClick={() => setPage(Math.max(1, applied.page - 1))} disabled={applied.page <= 1} className="rounded-lg border border-base p-1.5 text-muted disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button><button type="button" aria-label="Next page" onClick={() => setPage(Math.min(report.pagination.totalPages, applied.page + 1))} disabled={applied.page >= report.pagination.totalPages} className="rounded-lg border border-base p-1.5 text-muted disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button></div></div>}
       </section>
-      {relationshipClientId && <RelationshipDrawer clientId={relationshipClientId} financialYear={applied.financialYear} onClose={() => setRelationshipClientId(null)} />}
+      <AnimatePresence>{relationshipClientId && <RelationshipDrawer key={relationshipClientId} clientId={relationshipClientId} financialYear={applied.financialYear} onClose={() => setRelationshipClientId(null)} />}</AnimatePresence>
     </div>
   );
 }
@@ -988,9 +1120,10 @@ function InitialReportSkeleton({ ready }: { ready: boolean }) {
   return <div role="status" className="min-h-72 animate-pulse p-4 sm:p-5"><div className="mb-4 flex items-center gap-2 text-xs font-medium text-muted"><Loader2 className="h-4 w-4 animate-spin text-brand-600" />{ready ? "Loading report data…" : "Preparing your financial year…"}</div><div className="space-y-3"><div className="h-9 rounded-xl bg-surface" /><div className="grid grid-cols-3 gap-3"><div className="h-8 rounded-lg bg-surface" /><div className="h-8 rounded-lg bg-surface" /><div className="h-8 rounded-lg bg-surface" /></div>{Array.from({ length: 5 }, (_, index) => <div key={index} className="grid grid-cols-4 gap-3"><div className="h-7 rounded-lg bg-surface" /><div className="h-7 rounded-lg bg-surface" /><div className="h-7 rounded-lg bg-surface" /><div className="h-7 rounded-lg bg-surface" /></div>)}</div></div>;
 }
 
-function ExportMenu({ fy, reportAvailable, downloadingCurrent, downloading, onDownloadCurrent, onDownload, onOpenCustomExport }: {
+function ExportMenu({ fy, totalRows, reportAvailable, downloadingCurrent, downloading, onDownloadCurrent, onDownload, onOpenCustomExport }: {
   fy: string;
   reportAvailable: boolean;
+  totalRows?: number;
   downloadingCurrent: boolean;
   downloading: ReportType[];
   onDownloadCurrent: () => void;
@@ -999,6 +1132,7 @@ function ExportMenu({ fy, reportAvailable, downloadingCurrent, downloading, onDo
 }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     if (!open) return;
@@ -1018,18 +1152,18 @@ function ExportMenu({ fy, reportAvailable, downloadingCurrent, downloading, onDo
 
   return (
     <div ref={menuRef} className="relative">
-      <button type="button" onClick={() => setOpen((current) => !current)} aria-expanded={open} className={`glass-btn ${open ? "text-brand-600" : ""}`}>
-        <Download className="h-4 w-4" />Export<ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="reports-quick-export-menu reports-secondary-card fixed inset-x-4 top-24 rounded-2xl p-3 shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-[420px] sm:max-w-[calc(100vw-2rem)]">
+      <motion.button type="button" onClick={() => setOpen((current) => !current)} aria-expanded={open} whileTap={reduceMotion ? undefined : { scale: 0.97 }} transition={reportControlSpring} className="report-primary-button">
+        <Download className="h-4 w-4" />Export<motion.span animate={{ rotate: open ? 180 : 0 }} transition={reduceMotion ? { duration: 0.01 } : reportControlSpring}><ChevronDown className="h-3.5 w-3.5" /></motion.span>
+      </motion.button>
+      <AnimatePresence>{open && (
+        <motion.div className="reports-quick-export-menu reports-secondary-card fixed inset-x-4 top-24 rounded-2xl p-3 shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-[420px] sm:max-w-[calc(100vw-2rem)]" initial={reduceMotion ? false : { opacity: 0, scale: 0.975, y: -8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.985, y: -5 }} transition={reduceMotion ? { duration: 0.01 } : reportControlSpring} style={{ transformOrigin: "top right" }}>
           <div className="px-1 pb-2">
             <h2 className="text-sm font-semibold text-default">Export reports</h2>
-            <p className="mt-0.5 text-[11px] text-muted">Current view or a ready-made workbook for FY {fy}.</p>
+            <p className="mt-0.5 text-[11px] text-muted">Excel workbooks · FY {fy}</p>
           </div>
           <button type="button" onClick={() => { onDownloadCurrent(); setOpen(false); }} disabled={!reportAvailable || downloadingCurrent} className="mb-2 flex w-full items-center gap-3 rounded-xl border border-base bg-card px-3 py-2.5 text-left transition hover:bg-surface disabled:opacity-45">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-brand-50 text-brand-600 dark:bg-brand-950/30">{downloadingCurrent ? <Loader2 className="h-4 w-4 animate-spin" /> : <Table2 className="h-4 w-4" />}</span>
-            <span className="min-w-0 flex-1"><strong className="block text-xs font-semibold text-default">Current report</strong><span className="block text-[10px] text-muted">Export the active setup to Excel</span></span>
+            <span className="min-w-0 flex-1"><strong className="block text-xs font-semibold text-default">Export all matching rows</strong><span className="block text-[10px] text-muted">{totalRows ?? "—"} rows · applied filters · summary sheets</span></span>
             <Download className="h-3.5 w-3.5 text-faint" />
           </button>
           <p className="px-1 pb-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-faint">Ready-made workbooks</p>
@@ -1046,8 +1180,8 @@ function ExportMenu({ fy, reportAvailable, downloadingCurrent, downloading, onDo
             })}
           </div>
           <button type="button" onClick={() => { onOpenCustomExport(); setOpen(false); }} className="mt-2 flex w-full items-center gap-2 rounded-xl border-t border-base px-2.5 pt-3 text-left text-xs font-semibold text-default hover:text-brand-600"><SlidersHorizontal className="h-3.5 w-3.5" /><span className="flex-1">Build a custom client export</span><ChevronRight className="h-3.5 w-3.5" /></button>
-        </div>
-      )}
+        </motion.div>
+      )}</AnimatePresence>
     </div>
   );
 }
@@ -1069,26 +1203,204 @@ function StudioInspector({ panel, dirty, onClose, onUndo, onRun, children }: {
   children: ReactNode;
 }) {
   const { title, description, Icon } = INSPECTOR_DETAILS[panel];
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const closeRef = useRef(onClose);
+  const reduceMotion = useReducedMotion();
+  const isConfigPanel = panel !== "saved";
+  const usesSplitLayout = panel === "group" || panel === "metrics";
+  const [motionMode, setMotionMode] = useState<"bottom" | "right">(() => {
+    if (typeof window === "undefined") return "bottom";
+    return window.matchMedia("(max-width: 767px), ((pointer: coarse) and (orientation: portrait))").matches ? "bottom" : "right";
+  });
+  const [viewport, setViewport] = useState(() => ({
+    width: typeof window === "undefined" ? 1280 : window.innerWidth,
+    height: typeof window === "undefined" ? 800 : window.innerHeight,
+  }));
+  const [touchInput, setTouchInput] = useState(() => typeof navigator !== "undefined" && navigator.maxTouchPoints > 0);
+  const dragControls = useDragControls();
+  const panelX = useMotionValue(0);
+  const panelY = useMotionValue(0);
+  const panelScaleX = useMotionValue(1);
+  const panelScaleY = useMotionValue(1);
+  const desktopPanelWidth = viewport.width >= 1440 ? 920 : viewport.width >= 1024 ? 860 : 600;
+  const dragDistance = motionMode === "bottom"
+    ? Math.max(480, viewport.height * 0.94)
+    : Math.min(desktopPanelWidth, viewport.width - 24) + 24;
+  const scrimOpacityX = useTransform(panelX, [0, dragDistance], [1, 0.08]);
+  const scrimOpacityY = useTransform(panelY, [0, dragDistance], [1, 0.08]);
+  const gestureClosingRef = useRef(false);
+  const [gestureDismissed, setGestureDismissed] = useState(false);
+  const motionModeRef = useRef(motionMode);
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    const updateMotionMode = () => {
+      const nextMotionMode = window.matchMedia("(max-width: 767px), ((pointer: coarse) and (orientation: portrait))").matches ? "bottom" : "right";
+      if (motionModeRef.current !== nextMotionMode) {
+        motionModeRef.current = nextMotionMode;
+        panelX.set(0);
+        panelY.set(0);
+      }
+      setMotionMode(nextMotionMode);
+      setTouchInput(window.matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0);
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
+    };
+    updateMotionMode();
+    window.addEventListener("resize", updateMotionMode);
+    window.addEventListener("orientationchange", updateMotionMode);
+    return () => {
+      window.removeEventListener("resize", updateMotionMode);
+      window.removeEventListener("orientationchange", updateMotionMode);
+    };
+  }, [panelX, panelY]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     document.body.style.overflow = "hidden";
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", closeOnEscape);
+    const frame = window.requestAnimationFrame(() => {
+      const dialog = dialogRef.current;
+      const first = dialog?.querySelector<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])');
+      (first || dialog)?.focus();
+    });
+    const handleKeys = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'));
+      if (focusable.length === 0) { event.preventDefault(); dialogRef.current.focus(); return; }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
-  }, [onClose]);
+    document.addEventListener("keydown", handleKeys);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeys);
+      previousFocus?.focus();
+    };
+  }, []);
 
-  return createPortal(<div className="report-inspector-backdrop fixed inset-0 z-[80] flex items-end justify-center p-0 sm:items-center sm:p-5" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
-    <section role="dialog" aria-modal="true" aria-labelledby="report-inspector-title" className="report-inspector-shell flex h-[92vh] w-full flex-col overflow-hidden rounded-t-[30px] sm:h-[min(820px,calc(100vh-2.5rem))] sm:max-w-[1080px] sm:rounded-[30px]">
-      <header className="report-inspector-header flex shrink-0 items-center gap-3 px-4 py-3.5 sm:px-6 sm:py-4">
+  useLayoutEffect(() => {
+    if (!isConfigPanel || reduceMotion) return;
+    const activeValue = motionMode === "bottom" ? panelY : panelX;
+    const inactiveValue = motionMode === "bottom" ? panelX : panelY;
+    const activeScale = motionMode === "bottom" ? panelScaleY : panelScaleX;
+    const crossScale = motionMode === "bottom" ? panelScaleX : panelScaleY;
+    inactiveValue.set(0);
+    activeValue.set(dragDistance);
+    activeScale.set(0.965);
+    crossScale.set(1.008);
+    let entranceAnimations: Array<ReturnType<typeof animateMotion>> = [];
+    const frame = window.requestAnimationFrame(() => {
+      entranceAnimations = [
+        animateMotion(activeValue, 0, reportPanelSpring),
+        animateMotion(activeScale, 1, { type: "spring", stiffness: 360, damping: 22, mass: 0.7 }),
+        animateMotion(crossScale, 1, { type: "spring", stiffness: 380, damping: 28, mass: 0.7 }),
+      ];
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      entranceAnimations.forEach((animation) => animation.stop());
+    };
+    // Opening runs once for this mounted inspector. Responsive direction changes
+    // are handled by the motion-mode effect without replaying the entrance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const gestureEnabled = isConfigPanel && touchInput && !reduceMotion;
+  const startDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (!gestureEnabled || event.pointerType === "mouse") return;
+    if ((event.target as HTMLElement).closest("button, input, select, textarea, a")) return;
+    gestureClosingRef.current = false;
+    setGestureDismissed(false);
+    dragControls.start(event.nativeEvent, { snapToCursor: false });
+  };
+  const finishDrag = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    if (!gestureEnabled || gestureClosingRef.current) return;
+    const offset = motionMode === "bottom" ? info.offset.y : info.offset.x;
+    const velocity = motionMode === "bottom" ? info.velocity.y : info.velocity.x;
+    const threshold = motionMode === "bottom"
+      ? Math.min(150, window.innerHeight * 0.18)
+      : Math.min(180, window.innerWidth * 0.16);
+    const activeValue = motionMode === "bottom" ? panelY : panelX;
+
+    if (offset > threshold || velocity > 720) {
+      gestureClosingRef.current = true;
+      setGestureDismissed(true);
+      void animateMotion(activeValue, dragDistance, {
+        type: "spring",
+        stiffness: 320,
+        damping: 36,
+        mass: 0.82,
+        velocity,
+        restDelta: 0.8,
+        restSpeed: 8,
+      }).then(() => closeRef.current());
+      return;
+    }
+
+    void animateMotion(activeValue, 0, {
+      type: "spring",
+      stiffness: 420,
+      damping: 34,
+      mass: 0.78,
+      velocity,
+      restDelta: 0.5,
+      restSpeed: 5,
+    });
+  };
+
+  const panelInitial = reduceMotion
+    ? false
+    : panel === "saved"
+      ? { opacity: 0, scale: 0.98, y: 26 }
+      : false;
+  const panelExit = reduceMotion
+    ? { opacity: 0 }
+    : gestureDismissed
+      ? { opacity: 1, transition: { duration: 0.01 } }
+    : panel === "saved"
+      ? { opacity: 0, scale: 0.985, y: 18 }
+      : motionMode === "bottom"
+        ? { opacity: 1, y: [0, -10, dragDistance], scaleY: [1, 1.018, 0.965], scaleX: [1, 0.996, 1.006], transition: reportPanelExitTransition }
+        : { opacity: 1, x: [0, -12, dragDistance], scaleX: [1, 1.018, 0.965], scaleY: [1, 0.996, 1.006], transition: reportPanelExitTransition };
+
+  return createPortal(<motion.div className={`report-inspector-backdrop ${panel === "saved" ? "report-library-dialog" : "report-config-dialog"} fixed inset-0 z-[80] flex items-end justify-center p-0 sm:items-center sm:p-5`} initial={reduceMotion || isConfigPanel ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={isConfigPanel ? { opacity: 1 } : { opacity: 0 }} transition={reduceMotion ? { duration: 0.01 } : reportFadeTransition}>
+    <motion.div className="report-inspector-scrim absolute inset-0" aria-hidden="true" style={{ opacity: motionMode === "bottom" ? scrimOpacityY : scrimOpacityX }} onPointerDown={(event) => { if (event.button === 0) onClose(); }} />
+    <motion.section
+      ref={dialogRef}
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="report-inspector-title"
+      data-motion-mode={motionMode}
+      className={`report-inspector-shell flex w-full flex-col overflow-hidden rounded-t-[30px] sm:max-w-[1080px] sm:rounded-[30px] focus:outline-none ${panel === "saved" ? "h-auto max-h-[92vh] sm:max-h-[min(720px,calc(100vh-2.5rem))]" : "h-[92vh] sm:h-[min(820px,calc(100vh-2.5rem))]"}`}
+      initial={panelInitial}
+      animate={panel === "saved" ? { opacity: 1, scale: 1, x: 0, y: 0 } : { opacity: 1 }}
+      exit={panelExit}
+      transition={reduceMotion ? { duration: 0.01 } : reportPanelSpring}
+      style={{ x: panelX, y: panelY, scaleX: panelScaleX, scaleY: panelScaleY, transformOrigin: motionMode === "bottom" ? "center bottom" : "right center" }}
+      drag={gestureEnabled ? (motionMode === "bottom" ? "y" : "x") : false}
+      dragControls={dragControls}
+      dragListener={false}
+      dragConstraints={motionMode === "bottom" ? { top: 0, bottom: dragDistance } : { left: 0, right: dragDistance }}
+      dragElastic={0}
+      dragMomentum={false}
+      onDragEnd={finishDrag}
+    >
+      <header className={`report-inspector-header relative flex shrink-0 items-center gap-3 px-4 py-3.5 sm:px-6 sm:py-4 ${gestureEnabled ? "report-inspector-drag-zone" : ""}`} onPointerDown={startDrag}>
+        {gestureEnabled && <span className="report-inspector-grabber" aria-hidden="true" />}
         <span className="report-inspector-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[13px] text-brand-600"><Icon className="h-[18px] w-[18px]" /></span>
         <div className="min-w-0 flex-1"><h2 id="report-inspector-title" className="text-[16px] font-semibold tracking-[-0.018em] text-default">{title}</h2><p className="mt-0.5 max-w-3xl text-[11px] leading-4 text-muted sm:text-xs">{description}</p></div>
         <button type="button" onClick={onClose} aria-label={`Close ${title}`} className="report-inspector-close rounded-full p-2.5 text-faint transition-all hover:text-default"><X className="h-4 w-4" /></button>
       </header>
-      <div className="report-inspector-body min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">{children}</div>
+      <div className={`report-inspector-body min-h-0 flex-1 overflow-y-auto p-3 sm:p-5 ${usesSplitLayout ? "lg:overflow-hidden" : ""}`}><AnimatePresence mode="wait" initial={false}><motion.div key={panel} className={usesSplitLayout ? "min-h-0 lg:h-full" : undefined} initial={reduceMotion ? false : { opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -8 }} transition={reduceMotion ? { duration: 0.01 } : reportSoftSpring}>{children}</motion.div></AnimatePresence></div>
       <footer className="report-inspector-footer flex shrink-0 flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-6">
         <div className="report-inspector-status flex items-center gap-2 rounded-full px-3 py-1.5 text-[10px] font-medium text-muted">
           <span className={`h-1.5 w-1.5 rounded-full ${dirty ? "bg-amber-500" : "bg-emerald-500"}`} />
@@ -1100,8 +1412,8 @@ function StudioInspector({ panel, dirty, onClose, onUndo, onRun, children }: {
           {panel !== "saved" && dirty && <button type="button" onClick={onRun} className="btn-primary h-9 rounded-xl px-4 text-[11px] shadow-[0_8px_18px_-9px_rgba(0,113,227,0.75)]"><Play className="h-3.5 w-3.5" />Apply &amp; Run</button>}
         </div>
       </footer>
-    </section>
-  </div>, document.body);
+    </motion.section>
+  </motion.div>, document.body);
 }
 
 function InspectorSearch({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
@@ -1111,6 +1423,21 @@ function InspectorSearch({ value, onChange, placeholder }: { value: string; onCh
     <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="min-w-0 flex-1 bg-transparent text-[12px] text-default outline-none placeholder:text-faint" />
     {value && <button type="button" onClick={() => onChange("")} aria-label="Clear search" className="rounded-full p-1 text-faint hover:bg-surface hover:text-default"><X className="h-3 w-3" /></button>}
   </label>;
+}
+
+function InspectorSplitLayout({ choice, preview }: { choice: ReactNode; preview: ReactNode }) {
+  const [pane, setPane] = useState<"choose" | "preview">("choose");
+
+  return <div className="flex min-h-0 flex-col lg:h-full">
+    <div className="mb-3 flex w-full shrink-0 rounded-xl bg-surface p-1 text-[11px] font-semibold lg:hidden">
+      <button type="button" onClick={() => setPane("choose")} aria-pressed={pane === "choose"} className={`flex-1 rounded-lg px-3 py-2 transition-colors ${pane === "choose" ? "bg-card text-brand-600 shadow-sm" : "text-muted"}`}>Choose</button>
+      <button type="button" onClick={() => setPane("preview")} aria-pressed={pane === "preview"} className={`flex-1 rounded-lg px-3 py-2 transition-colors ${pane === "preview" ? "bg-card text-brand-600 shadow-sm" : "text-muted"}`}>Preview</button>
+    </div>
+    <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(420px,1.12fr)_minmax(350px,0.88fr)]">
+      <div className={`${pane === "choose" ? "min-h-0" : "hidden"} lg:block lg:min-h-0`}>{choice}</div>
+      <div className={`${pane === "preview" ? "min-h-0" : "hidden"} lg:block lg:min-h-0`}>{preview}</div>
+    </div>
+  </div>;
 }
 
 function ColumnPanel({ groups, selected, colors, search, onSearch, onToggle, onToggleGroup, onReorder, onColor, onGroupColor }: {
@@ -1126,36 +1453,38 @@ function ColumnPanel({ groups, selected, colors, search, onSearch, onToggle, onT
   onGroupColor: (fieldIds: string[], color: string) => void;
 }) {
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(groups[0]?.[0] ? [groups[0][0]] : []));
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const selectedDefinitions = selected.map((id) => REPORT_STUDIO_FIELD_MAP.get(id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry));
+  const definitionsById = new Map(groups.flatMap(([, fields]) => fields).map((definition) => [definition.id, definition]));
+  const selectedDefinitions = selected.map((id) => definitionsById.get(id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry));
   const toggleExpanded = (group: string) => setExpandedGroups((current) => {
     const next = new Set(current);
     if (next.has(group)) next.delete(group); else next.add(group);
     return next;
   });
 
-  return <div className={`grid min-h-0 gap-4 ${libraryOpen ? "lg:grid-cols-[minmax(270px,0.68fr)_minmax(480px,1.32fr)]" : ""}`}>
-    <section className={`report-inspector-panel min-w-0 overflow-hidden rounded-[22px] ${libraryOpen ? "hidden lg:block" : ""}`}>
-      <div className="flex items-center justify-between gap-3 border-b border-base px-3.5 py-3 sm:px-4"><div><div className="flex items-center gap-2"><h3 className="text-xs font-semibold text-default">Selected columns</h3><span className="rounded-full bg-brand-50 px-2 py-0.5 text-[9px] font-bold text-brand-600 dark:bg-brand-950/35">{selected.length}</span></div><p className="mt-0.5 text-[9px] leading-4 text-muted">Drag rows to set table and Excel order.</p></div><button type="button" onClick={() => setLibraryOpen((open) => !open)} className={`report-inspector-library-button inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[10px] font-semibold ${libraryOpen ? "text-default" : "text-brand-600"}`}><Plus className={`h-3.5 w-3.5 transition-transform ${libraryOpen ? "rotate-45" : ""}`} />{libraryOpen ? "Close library" : "Field library"}</button></div>
-      <div className={`report-inspector-selected-list max-h-[57vh] overflow-y-auto p-2 ${libraryOpen ? "space-y-1" : "grid grid-cols-1 gap-1 sm:grid-cols-2"}`}>{selectedDefinitions.map((definition, index) => {
+  return <div className={`grid min-h-0 items-stretch gap-4 ${libraryOpen ? "xl:grid-cols-[minmax(350px,0.9fr)_minmax(420px,1.1fr)]" : ""}`}>
+    <section className={`report-inspector-panel min-w-0 w-full flex-col overflow-hidden rounded-[22px] ${libraryOpen ? "hidden xl:flex" : "flex"}`}>
+      <div className="flex items-center justify-between gap-4 border-b border-base px-4 py-3.5"><div className="min-w-0"><div className="flex items-center gap-2"><h3 className="whitespace-nowrap text-xs font-semibold text-default">Selected columns</h3><span className="rounded-full bg-brand-50 px-2 py-0.5 text-[9px] font-bold text-brand-600 dark:bg-brand-950/35">{selected.length}</span></div><p className="mt-0.5 text-[9px] leading-4 text-muted">Drag rows to set table and Excel order.</p></div>{!libraryOpen && <button type="button" onClick={() => setLibraryOpen(true)} className="report-inspector-library-button inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[10px] font-semibold text-brand-600"><Plus className="h-3.5 w-3.5" />Field library</button>}</div>
+      <div className="report-inspector-selected-list min-h-0 max-h-[calc(100dvh-260px)] flex-1 space-y-1 overflow-y-auto p-2.5">{selectedDefinitions.map((definition, index) => {
         const color = reportStudioExcelColor(definition, colors);
-        return <div key={definition.id} draggable onDragStart={() => setDraggingId(definition.id)} onDragEnd={() => setDraggingId(null)} onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggingId) onReorder(draggingId, definition.id); setDraggingId(null); }} className={`report-inspector-column-row group flex min-h-[46px] items-center gap-2 rounded-xl px-2 transition-all ${draggingId === definition.id ? "scale-[0.985] opacity-45" : ""}`}>
+        return <div key={definition.id} draggable onDragStart={() => setDraggingId(definition.id)} onDragEnd={() => setDraggingId(null)} onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggingId) onReorder(draggingId, definition.id); setDraggingId(null); }} className={`report-inspector-column-row group flex min-h-[50px] items-center gap-2.5 rounded-xl px-2.5 transition-all ${draggingId === definition.id ? "scale-[0.985] opacity-45" : ""}`}>
           <GripVertical className="h-3.5 w-3.5 shrink-0 cursor-grab text-faint opacity-55 transition-opacity group-hover:opacity-100 active:cursor-grabbing" />
           <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[7px] bg-brand-600 px-1 text-[9px] font-bold text-white shadow-[0_3px_8px_-4px_rgba(0,113,227,0.8)]">{index + 1}</span>
-          <span className="min-w-0 flex-1"><strong className="block truncate text-[10px] font-semibold text-default">{definition.label}</strong><span className="block truncate text-[8px] text-faint">{definition.group}</span></span>
-          <label className="relative h-[18px] w-[18px] shrink-0 cursor-pointer rounded-full border border-black/10 shadow-sm ring-2 ring-white/80 dark:ring-black/30" style={{ backgroundColor: color }} title={`${definition.label} Excel header colour`}><input type="color" value={color} onInput={(event) => onColor(definition.id, event.currentTarget.value)} className="absolute inset-0 cursor-pointer opacity-0" aria-label={`${definition.label} Excel colour`} /></label>
-          <button type="button" onClick={() => onToggle(definition.id)} aria-label={`Remove ${definition.label}`} title={selected.length === 1 ? "At least one column is required" : `Remove ${definition.label}`} className="rounded-lg p-1 text-faint opacity-55 transition-all hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100 dark:hover:bg-rose-950/25"><X className="h-3 w-3" /></button>
+          <span className="min-w-0 flex-1"><strong className="block truncate text-[11px] font-semibold text-default">{definition.label}</strong><span className="mt-0.5 block truncate text-[9px] text-faint">{definition.group}</span></span>
+          {appearanceOpen && <label className="relative h-[18px] w-[18px] shrink-0 cursor-pointer rounded-full border border-black/10 shadow-sm ring-2 ring-white/80 dark:ring-black/30" style={{ backgroundColor: color }} title={`${definition.label} Excel header colour`}><input type="color" value={color} onInput={(event) => onColor(definition.id, event.currentTarget.value)} className="absolute inset-0 cursor-pointer opacity-0" aria-label={`${definition.label} Excel colour`} /></label>}
+          <button type="button" onClick={() => onToggle(definition.id)} aria-label={`Remove ${definition.label}`} disabled={selected.length === 1} title={selected.length === 1 ? "At least one column is required" : `Remove ${definition.label}`} className="rounded-lg p-1 text-faint opacity-55 transition-all hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100 dark:hover:bg-rose-950/25"><X className="h-3 w-3" /></button>
         </div>;
       })}</div>
-      <div className="flex items-center gap-2 border-t border-base px-3.5 py-2.5 text-[9px] leading-4 text-muted"><span className="h-3 w-3 shrink-0 rounded-full border border-black/10 bg-brand-500 shadow-sm" />Colour dots preview Excel header colours.</div>
+      <div className="flex items-center gap-2 border-t border-base px-3.5 py-2.5 text-[9px] leading-4 text-muted"><button onClick={() => setAppearanceOpen((open) => !open)} aria-expanded={appearanceOpen} className="report-text-button">{appearanceOpen ? "Hide" : "Edit"} Excel header colors<ChevronDown size={14} /></button></div>
     </section>
 
-    {libraryOpen && <section className="report-inspector-panel min-w-0 overflow-hidden rounded-[22px]">
-      <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-3.5"><div><h3 className="text-xs font-semibold text-default">Field library</h3><p className="mt-0.5 text-[9px] leading-4 text-muted">Browse related website sections and add only what matters.</p></div><div className="flex items-center gap-2"><span className="rounded-full bg-surface px-2.5 py-1 text-[9px] font-semibold text-muted">{selected.length} selected</span><button type="button" onClick={() => setLibraryOpen(false)} aria-label="Close field library" className="report-inspector-close rounded-full p-1.5 text-faint lg:hidden"><X className="h-3.5 w-3.5" /></button></div></div>
+    {libraryOpen && <section className="report-inspector-panel flex min-w-0 flex-col overflow-hidden rounded-[22px]">
+      <div className="flex items-start justify-between gap-4 px-4 pb-2.5 pt-3.5"><div className="min-w-0"><h3 className="text-xs font-semibold text-default">Field library</h3><p className="mt-0.5 max-w-[250px] text-[9px] leading-4 text-muted">Browse related website sections and add only what matters.</p></div><div className="flex shrink-0 items-center gap-2"><span className="rounded-full bg-surface px-2.5 py-1 text-[9px] font-semibold text-muted">{selected.length} selected</span><button type="button" onClick={() => setLibraryOpen(false)} aria-label="Close field library" className="report-inspector-library-button inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[10px] font-semibold text-default"><ChevronLeft className="h-3.5 w-3.5 xl:hidden" /><X className="hidden h-3.5 w-3.5 xl:block" /><span className="xl:hidden">Selected columns</span><span className="hidden xl:inline">Close</span></button></div></div>
       <div className="mx-3.5 mb-3"><InspectorSearch value={search} onChange={onSearch} placeholder="Search fields, sections or descriptions" /></div>
-      <div className="report-inspector-library max-h-[55vh] space-y-1 overflow-y-auto border-t border-base p-2">{groups.length === 0 ? <div className="rounded-xl border border-dashed border-base p-6 text-center text-xs text-muted">No fields match your search.</div> : groups.map(([group, fields]) => {
+      <div className="report-inspector-library min-h-0 max-h-[calc(100dvh-310px)] flex-1 space-y-1 overflow-y-auto border-t border-base p-2">{groups.length === 0 ? <div className="rounded-xl border border-dashed border-base p-6 text-center text-xs text-muted">No fields match your search.</div> : groups.map(([group, fields]) => {
         const fieldIds = fields.map((field) => field.id);
         const selectedCount = fieldIds.filter((fieldId) => selected.includes(fieldId)).length;
         const allSelected = selectedCount === fieldIds.length;
@@ -1186,18 +1515,18 @@ function ChoicePanel({ kind, fields, selected, onToggle, empty }: { kind: "group
   const [detailId, setDetailId] = useState<string | null>(null);
   const filteredFields = fields.filter((definition) => `${definition.label} ${definition.description} ${definition.group}`.toLowerCase().includes(search.trim().toLowerCase()));
   const visibleFields = view === "selected"
-    ? selected.map((id) => REPORT_STUDIO_FIELD_MAP.get(id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry))
+    ? selected.map((id) => fields.find((definition) => definition.id === id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry))
     : filteredFields;
   const fieldGroups = new Map<string, ReportStudioFieldDefinition[]>();
   visibleFields.forEach((definition) => fieldGroups.set(definition.group, [...(fieldGroups.get(definition.group) || []), definition]));
   const browseLabel = kind === "group" ? "Add grouping" : "Add metrics";
 
-  return <section className="min-w-0 rounded-2xl border border-base bg-card p-2.5 sm:p-3">
-    <div className="mb-3 grid gap-2 sm:grid-cols-[auto_minmax(240px,1fr)] sm:items-center"><div className="flex w-fit rounded-xl bg-surface p-1 text-[10px] font-semibold"><button type="button" onClick={() => setView("selected")} className={`rounded-lg px-2.5 py-1.5 ${view === "selected" ? "bg-card text-brand-600 shadow-sm" : "text-muted"}`}>Selected <span className="ml-1 text-faint">{selected.length}</span></button><button type="button" onClick={() => setView("all")} className={`rounded-lg px-2.5 py-1.5 ${view === "all" ? "bg-card text-brand-600 shadow-sm" : "text-muted"}`}>All fields <span className="ml-1 text-faint">{fields.length}</span></button></div>{view === "all" && <InspectorSearch value={search} onChange={setSearch} placeholder="Search fields" />}</div>
-    {visibleFields.length === 0 ? <div className="flex min-h-48 flex-col items-center justify-center rounded-xl border border-dashed border-base px-5 text-center"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-surface text-faint">{kind === "group" ? <Group className="h-4 w-4" /> : <Sigma className="h-4 w-4" />}</span><p className="mt-3 text-xs font-semibold text-default">{view === "selected" ? empty : "No matching fields"}</p>{view === "selected" && <button type="button" onClick={() => setView("all")} className="mt-2 text-[11px] font-semibold text-brand-600 hover:underline">{browseLabel}</button>}</div> : <div className="max-h-[53vh] space-y-3 overflow-y-auto pr-1">{Array.from(fieldGroups, ([group, definitions]) => <div key={group}><p className="mb-1 px-1 text-[9px] font-semibold uppercase tracking-[0.09em] text-faint">{group}</p><div className="space-y-1">{definitions.map((definition) => {
+  return <section className={`flex min-w-0 flex-col rounded-[20px] border border-base bg-card p-2.5 sm:p-3 ${visibleFields.length > 0 ? "lg:h-full lg:min-h-0" : ""}`}>
+    <div className={`mb-3 grid gap-2 ${view === "all" ? "sm:grid-cols-[auto_minmax(200px,1fr)] sm:items-center" : ""}`}><div className="flex w-fit rounded-xl bg-surface p-1 text-[10px] font-semibold"><button type="button" onClick={() => setView("selected")} className={`whitespace-nowrap rounded-lg px-2.5 py-1.5 ${view === "selected" ? "bg-card text-brand-600 shadow-sm" : "text-muted"}`}>Selected <span className="ml-1 text-faint">{selected.length}</span></button><button type="button" onClick={() => setView("all")} className={`whitespace-nowrap rounded-lg px-2.5 py-1.5 ${view === "all" ? "bg-card text-brand-600 shadow-sm" : "text-muted"}`}>All fields <span className="ml-1 text-faint">{fields.length}</span></button></div>{view === "all" && <InspectorSearch value={search} onChange={setSearch} placeholder="Search fields" />}</div>
+    {visibleFields.length === 0 ? <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-base px-5 text-center"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-surface text-faint">{kind === "group" ? <Group className="h-4 w-4" /> : <Sigma className="h-4 w-4" />}</span><p className="mt-3 text-xs font-semibold text-default">{view === "selected" ? empty : "No matching fields"}</p>{view === "selected" && <button type="button" onClick={() => setView("all")} className="mt-2 text-[11px] font-semibold text-brand-600 hover:underline">{browseLabel}</button>}</div> : <div className="min-h-0 max-h-[53vh] flex-1 space-y-3 overflow-y-auto pr-1 lg:max-h-none">{Array.from(fieldGroups, ([group, definitions]) => <div key={group}><p className="mb-1.5 px-1 text-[9px] font-semibold uppercase tracking-[0.09em] text-faint">{group}</p><div className="space-y-1.5">{definitions.map((definition) => {
       const active = selected.includes(definition.id);
       const selectedOrder = active ? selected.indexOf(definition.id) + 1 : null;
-      return <div key={definition.id} className={`rounded-xl border ${active ? "border-brand-200 bg-brand-50/60 dark:border-brand-900/60 dark:bg-brand-950/20" : "border-base bg-card hover:bg-surface"}`}><div className="flex items-center gap-2 px-2.5 py-2"><button type="button" onClick={() => onToggle(definition.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left"><span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border ${active ? "border-brand-600 bg-brand-600 text-white" : "border-base bg-card"}`}>{active && <Check className="h-3 w-3" />}</span>{selectedOrder && <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-bold text-white">{selectedOrder}</span>}<span className="min-w-0 flex-1"><strong className="block truncate text-[11px] text-default">{definition.label}</strong><span className="block truncate text-[9px] text-faint">{kind === "metric" ? aggregateLabel(definition.aggregate) : "Grouping field"}</span></span></button><button type="button" onClick={() => setDetailId((current) => current === definition.id ? null : definition.id)} aria-label={`About ${definition.label}`} className={`rounded-lg p-1.5 ${detailId === definition.id ? "bg-card text-brand-600 shadow-sm" : "text-faint hover:bg-surface hover:text-default"}`}><Info className="h-3.5 w-3.5" /></button></div>{detailId === definition.id && <p className="border-t border-base px-3 py-2 text-[9px] leading-4 text-muted">{definition.description}</p>}</div>;
+      return <div key={definition.id} className={`rounded-xl border ${active ? "border-brand-200 bg-brand-50/60 dark:border-brand-900/60 dark:bg-brand-950/20" : "border-base bg-card hover:bg-surface"}`}><div className="flex min-h-[50px] items-center gap-2.5 px-3 py-2.5"><button type="button" onClick={() => onToggle(definition.id)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left"><span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border ${active ? "border-brand-600 bg-brand-600 text-white" : "border-base bg-card"}`}>{active && <Check className="h-3 w-3" />}</span>{selectedOrder && <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-bold text-white">{selectedOrder}</span>}<span className="min-w-0 flex-1"><strong className="block truncate text-[11px] text-default">{definition.label}</strong><span className="mt-0.5 block truncate text-[9px] text-faint">{kind === "metric" ? aggregateLabel(definition.aggregate) : "Grouping field"}</span></span></button><button type="button" onClick={() => setDetailId((current) => current === definition.id ? null : definition.id)} aria-label={`About ${definition.label}`} className={`rounded-lg p-1.5 ${detailId === definition.id ? "bg-card text-brand-600 shadow-sm" : "text-faint hover:bg-surface hover:text-default"}`}><Info className="h-3.5 w-3.5" /></button></div>{detailId === definition.id && <p className="border-t border-base px-3 py-2.5 text-[9px] leading-4 text-muted">{definition.description}</p>}</div>;
     })}</div></div>)}</div>}
   </section>;
 }
@@ -1218,8 +1547,9 @@ function previewValue(value: ReportStudioCellValue | undefined, definition: Repo
   return formatCell(value, definition);
 }
 
-function GroupingImpactPreview({ source, selected, metrics, appliedSelected, configurationDirty, report }: {
+function GroupingImpactPreview({ source, fields, selected, metrics, appliedSelected, configurationDirty, report }: {
   source: ReportStudioSource;
+  fields: ReportStudioFieldDefinition[];
   selected: string[];
   metrics: string[];
   appliedSelected: string[];
@@ -1227,8 +1557,9 @@ function GroupingImpactPreview({ source, selected, metrics, appliedSelected, con
   report: ReportStudioResponse | null;
 }) {
   const sourceDefinition = REPORT_STUDIO_SOURCES.find((entry) => entry.id === source);
-  const groupDefinitions = selected.map((id) => REPORT_STUDIO_FIELD_MAP.get(id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry));
-  const metricDefinitions = metrics.map((id) => REPORT_STUDIO_FIELD_MAP.get(id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry)).slice(0, 3);
+  const definitionsById = new Map(fields.map((definition) => [definition.id, definition]));
+  const groupDefinitions = selected.map((id) => definitionsById.get(id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry));
+  const metricDefinitions = metrics.map((id) => definitionsById.get(id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry)).slice(0, 3);
   const unchanged = selectionsMatch(selected, appliedSelected);
   const rowMeaning = groupDefinitions.length === 0
     ? sourceDefinition?.grain || "One row per source record"
@@ -1237,34 +1568,36 @@ function GroupingImpactPreview({ source, selected, metrics, appliedSelected, con
   const actualPreviewRows = unchanged && !configurationDirty && report ? report.rows.slice(0, 3) : [];
   const sampleValues = groupDefinitions.map((definition) => definition.options?.[0] || `Each ${definition.shortLabel}`);
 
-  return <aside className="h-fit rounded-2xl border border-brand-200 bg-brand-50/50 p-3.5 dark:border-brand-900/60 dark:bg-brand-950/15">
+  return <aside className="flex h-fit min-h-0 flex-col rounded-[20px] border border-brand-200 bg-brand-50/50 p-3.5 dark:border-brand-900/60 dark:bg-brand-950/15">
     <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2"><Table2 className="h-4 w-4 text-brand-600" /><h4 className="text-xs font-semibold text-default">Impact Preview</h4></div><span className="rounded-full bg-card px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.07em] text-muted">Read only</span></div>
     <div className="mt-3 rounded-xl bg-card p-3 shadow-sm"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-faint">What each row will represent</p><p className="mt-1 text-xs font-semibold leading-5 text-default">{rowMeaning}</p><p className="mt-1 text-[10px] leading-4 text-muted">{groupDefinitions.length === 0 ? "Client or source-level records stay separate; selected metrics are not combined into category rows." : `Matching ${sourceDefinition?.label.toLowerCase() || "records"} will be combined into these groups. Numeric metrics will be recalculated for every group.`}</p></div>
-    <div className="mt-3"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-faint">Result structure</p>{previewColumns.length === 0 ? <p className="mt-2 text-xs text-muted">Select a grouping field or summary metric to preview the result columns.</p> : <div className="mt-2 overflow-hidden rounded-xl border border-base bg-card"><div className={`grid divide-x divide-base bg-surface`} style={{ gridTemplateColumns: `repeat(${previewColumns.length}, minmax(90px, 1fr))` }}>{previewColumns.map((definition) => <div key={definition.id} className="truncate px-2 py-2 text-[9px] font-semibold text-default" title={definition.label}>{definition.shortLabel}</div>)}</div>{actualPreviewRows.length > 0 ? actualPreviewRows.map((row) => <div key={row.id} className="grid divide-x divide-base border-t border-base" style={{ gridTemplateColumns: `repeat(${previewColumns.length}, minmax(90px, 1fr))` }}>{previewColumns.map((definition) => <div key={definition.id} className="truncate px-2 py-2 text-[10px] text-muted">{previewValue(row.values[definition.id], definition)}</div>)}</div>) : <div className="grid divide-x divide-base border-t border-base" style={{ gridTemplateColumns: `repeat(${previewColumns.length}, minmax(90px, 1fr))` }}>{previewColumns.map((definition, index) => <div key={definition.id} className="truncate px-2 py-2 text-[10px] text-muted">{index < sampleValues.length ? sampleValues[index] : "Calculated after Run"}</div>)}</div>}</div>}</div>
+    <div className="mt-3"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-faint">Result structure</p>{previewColumns.length === 0 ? <p className="mt-2 text-xs text-muted">Select a grouping field or summary metric to preview the result columns.</p> : <div className="mt-2 overflow-x-auto rounded-xl border border-base bg-card"><div className="grid divide-x divide-base bg-surface" style={{ gridTemplateColumns: `repeat(${previewColumns.length}, minmax(90px, 1fr))` }}>{previewColumns.map((definition) => <div key={definition.id} className="truncate px-2 py-2 text-[9px] font-semibold text-default" title={definition.label}>{definition.shortLabel}</div>)}</div>{actualPreviewRows.length > 0 ? actualPreviewRows.map((row) => <div key={row.id} className="grid divide-x divide-base border-t border-base" style={{ gridTemplateColumns: `repeat(${previewColumns.length}, minmax(90px, 1fr))` }}>{previewColumns.map((definition) => <div key={definition.id} className="truncate px-2 py-2 text-[10px] text-muted">{previewValue(row.values[definition.id], definition)}</div>)}</div>) : <div className="grid divide-x divide-base border-t border-base" style={{ gridTemplateColumns: `repeat(${previewColumns.length}, minmax(90px, 1fr))` }}>{previewColumns.map((definition, index) => <div key={definition.id} className="truncate px-2 py-2 text-[10px] text-muted">{index < sampleValues.length ? sampleValues[index] : "Calculated after Run"}</div>)}</div>}</div>}</div>
     <div className="mt-3 rounded-xl border border-dashed border-brand-200 px-3 py-2 text-[10px] leading-4 text-muted dark:border-brand-900/60">{!configurationDirty ? `Current result: ${report?.pagination.totalRows || 0} row${report?.pagination.totalRows === 1 ? "" : "s"}.` : unchanged ? "The row structure is unchanged, but other pending report settings may change the exact values and row count after you run the report." : "This is a structure preview. Exact group values and row count will be calculated from all matching records after you run the report."}</div>
   </aside>;
 }
 
-function MetricImpactPreview({ selected, groupBy, appliedSelected, configurationDirty, report }: {
+function MetricImpactPreview({ fields, selected, groupBy, appliedSelected, configurationDirty, report }: {
+  fields: ReportStudioFieldDefinition[];
   selected: string[];
   groupBy: string[];
   appliedSelected: string[];
   configurationDirty: boolean;
   report: ReportStudioResponse | null;
 }) {
-  const definitions = selected.map((id) => REPORT_STUDIO_FIELD_MAP.get(id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry));
-  const groupDefinitions = groupBy.map((id) => REPORT_STUDIO_FIELD_MAP.get(id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry));
+  const definitionsById = new Map(fields.map((definition) => [definition.id, definition]));
+  const definitions = selected.map((id) => definitionsById.get(id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry));
+  const groupDefinitions = groupBy.map((id) => definitionsById.get(id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry));
   const unchanged = selectionsMatch(selected, appliedSelected);
   const currentMetrics = new Map((report?.summary.metrics || []).map((metric) => [metric.field, metric]));
   const placementText = groupDefinitions.length > 0
     ? `Each metric becomes a calculated column for every ${groupDefinitions.map((entry) => entry.shortLabel).join(" + ")} group.`
     : "Metrics summarize all matching records while the table remains at its current client or source-record level.";
 
-  return <aside className="h-fit rounded-2xl border border-brand-200 bg-brand-50/50 p-3.5 dark:border-brand-900/60 dark:bg-brand-950/15">
+  return <aside className="flex min-h-0 flex-col rounded-[20px] border border-brand-200 bg-brand-50/50 p-3.5 lg:h-full dark:border-brand-900/60 dark:bg-brand-950/15">
     <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2"><Sigma className="h-4 w-4 text-brand-600" /><h4 className="text-xs font-semibold text-default">Impact Preview</h4></div><span className="rounded-full bg-card px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.07em] text-muted">Read only</span></div>
     <div className="mt-3 rounded-xl bg-card p-3 shadow-sm"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-faint">What will happen</p><p className="mt-1 text-xs font-semibold leading-5 text-default">{definitions.length === 0 ? "No summary calculations will be requested." : `${definitions.length} website calculation${definitions.length === 1 ? "" : "s"} will be included.`}</p><p className="mt-1 text-[10px] leading-4 text-muted">{placementText}</p></div>
-    <div className="mt-3 flex flex-wrap gap-1.5">{["KPI summary", groupDefinitions.length > 0 ? "Grouped columns" : "Report totals", "Total bar", "Excel"].map((location) => <span key={location} className="rounded-full border border-base bg-card px-2 py-1 text-[9px] font-semibold text-muted">{location}</span>)}</div>
-    <div className="mt-3"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-faint">Selected calculation preview</p>{definitions.length === 0 ? <p className="mt-2 rounded-xl border border-dashed border-base p-3 text-xs text-muted">Select a metric to see its source, calculation and output.</p> : <div className="mt-2 max-h-[290px] space-y-1.5 overflow-y-auto pr-1">{definitions.map((definition) => { const current = currentMetrics.get(definition.id); return <div key={definition.id} className="rounded-xl border border-base bg-card p-2.5"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><strong className="block text-[11px] text-default">{definition.label}</strong><span className="mt-0.5 block text-[9px] font-semibold uppercase tracking-[0.06em] text-faint">{definition.group} · {aggregateLabel(definition.aggregate)}</span></div><strong className="shrink-0 text-[11px] tabular-nums text-brand-600">{current ? formatCell(current.value, definition) : "After Run"}</strong></div><p className="mt-1 text-[10px] leading-4 text-muted">{definition.description}</p></div>; })}</div>}</div>
+    <div className="mt-3 flex flex-wrap gap-1">{["KPI summary", groupDefinitions.length > 0 ? "Grouped columns" : "Report totals", "Total bar", "Excel"].map((location) => <span key={location} className="rounded-full border border-base bg-card px-1.5 py-1 text-[9px] font-semibold text-muted">{location}</span>)}</div>
+    <div className="mt-3 flex min-h-0 flex-1 flex-col"><p className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.08em] text-faint">Selected calculation preview</p>{definitions.length === 0 ? <p className="mt-2 rounded-xl border border-dashed border-base p-3 text-xs text-muted">Select a metric to see its source, calculation and output.</p> : <div className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">{definitions.map((definition) => { const current = currentMetrics.get(definition.id); return <div key={definition.id} className="rounded-xl border border-base bg-card p-2.5"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><strong className="block text-[11px] text-default">{definition.label}</strong><span className="mt-0.5 block text-[9px] font-semibold uppercase tracking-[0.06em] text-faint">{definition.group} · {aggregateLabel(definition.aggregate)}</span></div><strong className="shrink-0 text-[11px] tabular-nums text-brand-600">{current ? formatCell(current.value, definition) : "After Run"}</strong></div><p className="mt-1 text-[10px] leading-4 text-muted">{definition.description}</p></div>; })}</div>}</div>
     <div className="mt-3 rounded-xl border border-dashed border-brand-200 px-3 py-2 text-[10px] leading-4 text-muted dark:border-brand-900/60">{!configurationDirty ? "Values shown come from the currently loaded report and all matching records, not only the visible page." : unchanged ? "These are the currently loaded values. Pending grouping, filters or other settings may change them after you run the report." : "Existing values are shown where available. Newly selected calculations will use all matching records after you run the report."}</div>
   </aside>;
 }
@@ -1300,22 +1633,22 @@ function FilterGroupEditor({ group, fields, depth, onLogic, onAdd, onAddGroup, o
   onUpdate: (id: string, patch: Partial<ReportStudioFilterClause>) => void;
   onRemove: (id: string) => void;
 }) {
-  return <div className={depth > 0 ? "rounded-xl border border-brand-100 bg-brand-50/40 p-3 dark:border-brand-900/50 dark:bg-brand-950/10" : ""}>
-    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+  return <div className={depth > 0 ? "rounded-2xl border border-brand-100 bg-brand-50/40 p-4 dark:border-brand-900/50 dark:bg-brand-950/10" : ""}>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-2"><div className="flex rounded-lg bg-surface p-1 text-[11px] font-semibold"><button type="button" onClick={() => onLogic(group.id, "and")} className={`rounded-md px-2 py-1 ${group.logic === "and" ? "bg-card text-brand-600 shadow-sm" : "text-muted"}`}>Match ALL</button><button type="button" onClick={() => onLogic(group.id, "or")} className={`rounded-md px-2 py-1 ${group.logic === "or" ? "bg-card text-brand-600 shadow-sm" : "text-muted"}`}>Match ANY</button></div>{depth > 0 && <span className="text-[10px] font-semibold uppercase tracking-wide text-brand-600">Nested group</span>}</div>
       <div className="flex gap-2"><button type="button" onClick={() => onAdd(group.id)} className="glass-btn h-9 text-xs"><Plus className="h-3.5 w-3.5" />Condition</button>{depth < 2 && <button type="button" onClick={() => onAddGroup(group.id)} className="glass-btn h-9 text-xs"><Group className="h-3.5 w-3.5" />Nested Group</button>}{depth > 0 && <button type="button" onClick={() => onRemove(group.id)} className="rounded-lg p-2 text-faint hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>}</div>
     </div>
-    {group.children.length === 0 ? <div className="rounded-xl border border-dashed border-base p-5 text-center text-xs text-muted">No filters. All source records can qualify.</div> : <div className="space-y-2">{group.children.map((child, index) => child.kind === "group" ? <FilterGroupEditor key={child.id} group={child} fields={fields} depth={depth + 1} onLogic={onLogic} onAdd={onAdd} onAddGroup={onAddGroup} onField={onField} onUpdate={onUpdate} onRemove={onRemove} /> : <FilterConditionEditor key={child.id} condition={child} prefix={index === 0 ? "Where" : group.logic} fields={fields} onField={onField} onUpdate={onUpdate} onRemove={onRemove} />)}</div>}
+    {group.children.length === 0 ? <div className="rounded-2xl border border-dashed border-base p-6 text-center text-xs text-muted">No filters. All source records can qualify.</div> : <div className="space-y-3">{group.children.map((child, index) => child.kind === "group" ? <FilterGroupEditor key={child.id} group={child} fields={fields} depth={depth + 1} onLogic={onLogic} onAdd={onAdd} onAddGroup={onAddGroup} onField={onField} onUpdate={onUpdate} onRemove={onRemove} /> : <FilterConditionEditor key={child.id} condition={child} prefix={index === 0 ? "Where" : group.logic} fields={fields} onField={onField} onUpdate={onUpdate} onRemove={onRemove} />)}</div>}
   </div>;
 }
 
 function FilterConditionEditor({ condition, prefix, fields, onField, onUpdate, onRemove }: { condition: ReportStudioFilterClause; prefix: string; fields: ReportStudioFieldDefinition[]; onField: (condition: ReportStudioFilterClause, fieldId: string) => void; onUpdate: (id: string, patch: Partial<ReportStudioFilterClause>) => void; onRemove: (id: string) => void }) {
-  const definition = REPORT_STUDIO_FIELD_MAP.get(condition.field) || fields[0];
+  const definition = fields.find((field) => field.id === condition.field) || fields[0];
   if (!definition) return null;
   const noValue = condition.operator === "empty" || condition.operator === "not_empty";
   const inputType = ["number", "quantity", "currency", "percentage"].includes(definition.type) ? "number" : definition.type === "date" ? "date" : "text";
-  return <div className="grid items-center gap-2 rounded-xl border border-base bg-card p-2 sm:grid-cols-[44px_minmax(170px,1fr)_minmax(150px,0.8fr)_minmax(150px,1fr)_auto]">
-    <span className="text-center text-[10px] font-semibold uppercase text-faint">{prefix}</span>
+  return <div className="grid items-center gap-3 rounded-2xl border border-base bg-card p-3 lg:grid-cols-[44px_minmax(170px,1fr)_minmax(140px,0.8fr)_minmax(160px,1fr)_auto]">
+    <span className="text-left text-[10px] font-semibold uppercase text-faint lg:text-center">{prefix}</span>
     <ReportSelect value={condition.field} onChange={(value) => onField(condition, value)} ariaLabel="Filter field" searchable options={fields.map((entry) => ({ value: entry.id, label: entry.label, group: entry.group }))} buttonClassName="min-h-9 text-xs" />
     <ReportSelect value={condition.operator} onChange={(value) => onUpdate(condition.id, { operator: value as ReportStudioOperator })} ariaLabel="Filter operator" options={definition.operators.map((operator) => ({ value: operator, label: REPORT_STUDIO_OPERATOR_LABELS[operator] }))} buttonClassName="min-h-9 text-xs" />
     {noValue
@@ -1324,7 +1657,7 @@ function FilterConditionEditor({ condition, prefix, fields, onField, onUpdate, o
         ? <ReportSelect value={String(condition.value ?? "")} onChange={(value) => onUpdate(condition.id, { value: parseFilterInput(value, definition, condition.operator) })} ariaLabel="Filter value" searchable={definition.options.length > 8} options={definition.options.map((option) => ({ value: option, label: option }))} buttonClassName="min-h-9 text-xs" />
         : <input type={inputType} value={Array.isArray(condition.value) ? condition.value.join(", ") : String(condition.value ?? "")} onChange={(event) => onUpdate(condition.id, { value: parseFilterInput(event.target.value, definition, condition.operator) })} placeholder={condition.operator === "in" || condition.operator === "not_in" ? "Comma-separated values" : "Value"} className="input-field h-9 rounded-lg text-xs" />}
     <button type="button" onClick={() => onRemove(condition.id)} aria-label="Remove condition" className="rounded-lg p-2 text-faint hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/20"><Trash2 className="h-4 w-4" /></button>
-    {condition.operator === "between" && <input type={inputType} value={String(condition.secondValue ?? "")} onChange={(event) => onUpdate(condition.id, { secondValue: parseFilterInput(event.target.value, definition, condition.operator) })} placeholder="And" className="input-field h-9 rounded-lg text-xs sm:col-start-4" />}
+    {condition.operator === "between" && <input type={inputType} value={String(condition.secondValue ?? "")} onChange={(event) => onUpdate(condition.id, { secondValue: parseFilterInput(event.target.value, definition, condition.operator) })} placeholder="And" className="input-field h-9 rounded-lg text-xs lg:col-start-4" />}
   </div>;
 }
 
@@ -1395,6 +1728,8 @@ function BusinessResultsPanel({ results, options, selectedIds, automaticIds, rel
 type StudioTableActions = {
   report: ReportStudioResponse;
   availableFields: ReportStudioFieldDefinition[];
+  onUpdateAnalysis: (patch: Partial<ReportStudioConfig["analysis"]>) => void;
+  onDrilldownAnalysis: (bucket: ReportStudioAnalysisBucket) => void;
   frozenColumnIds: string[];
   onFrozenColumnsChange: (fieldIds: string[]) => void;
   onRowClick: (row: ReportStudioResponse["rows"][number]) => void;
@@ -1414,11 +1749,19 @@ type StudioTableActions = {
 };
 
 function StudioResult(props: StudioTableActions) {
-  const { report, onRowClick } = props;
-  if (report.config.view === "pivot") return <PivotView report={report} onRowClick={onRowClick} />;
-  if (report.config.view === "chart") return <ReportStudioChart report={report} onRowClick={onRowClick} />;
-  if (report.config.view === "relationships") return <RelationshipCards report={report} onRowClick={onRowClick} />;
-  return <StudioTable {...props} />;
+  const { report, availableFields, onRowClick, onUpdateAnalysis, onDrilldownAnalysis } = props;
+  const reduceMotion = useReducedMotion();
+  const view = report.config.view;
+  const content = view === "analysis"
+    ? <ReportStudioAnalysis report={report} availableFields={availableFields} onChange={onUpdateAnalysis} onDrilldown={onDrilldownAnalysis} />
+    : view === "pivot"
+    ? <PivotView report={report} onRowClick={onRowClick} />
+    : view === "chart"
+      ? <ReportStudioChart report={report} onRowClick={onRowClick} />
+      : view === "relationships"
+        ? <RelationshipCards report={report} onRowClick={onRowClick} />
+        : <StudioTable {...props} />;
+  return <AnimatePresence mode="wait" initial={false}><motion.div key={view} className="min-w-0" initial={reduceMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -6 }} transition={reduceMotion ? { duration: 0.01 } : reportSoftSpring}>{content}</motion.div></AnimatePresence>;
 }
 
 type TableContext = {
@@ -1479,6 +1822,7 @@ function StudioTable({
   const [frozenOffsets, setFrozenOffsets] = useState<Record<string, number>>({});
   const tableRef = useRef<HTMLTableElement | null>(null);
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const grouped = report.config.groupBy.length > 0;
   const frozenSet = useMemo(() => new Set(grouped ? [] : frozenColumnIds), [frozenColumnIds, grouped]);
   const displayedColumns = useMemo(() => {
@@ -1514,6 +1858,7 @@ function StudioTable({
   };
   useEffect(() => {
     if (!context) return;
+    const focusFrame = window.requestAnimationFrame(() => contextMenuRef.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus());
     const close = () => {
       setContext(null);
       setContextView("root");
@@ -1524,11 +1869,20 @@ function StudioTable({
     window.addEventListener("resize", close);
     window.addEventListener("keydown", escape);
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       window.removeEventListener("click", close);
       window.removeEventListener("resize", close);
       window.removeEventListener("keydown", escape);
     };
   }, [context]);
+
+  const openColumnMenu = (event: React.MouseEvent<HTMLButtonElement>, column: ReportStudioFieldDefinition) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setContextView("root");
+    setContextSearch("");
+    setContext({ x: rect.right - 8, y: rect.bottom + 6, column });
+  };
 
   useEffect(() => {
     if (!context) return;
@@ -1987,14 +2341,17 @@ function StudioTable({
             title={!grouped ? "Drag to reorder within this column area · right-click for options" : "Right-click for column options"}
           >
             <span className="block text-[9px] font-semibold uppercase tracking-[0.08em] text-faint">{column.group}</span>
-            <span className="mt-0.5 flex items-center gap-1 text-[11px] font-semibold text-default">{column.shortLabel}{sortIndex >= 0 && <span className="text-[9px] text-brand-600">{report.config.sort[sortIndex].direction === "asc" ? "▲" : "▼"}{report.config.sort.length > 1 ? sortIndex + 1 : ""}</span>}</span>
+            <span className="mt-0.5 flex items-center justify-between gap-2 text-[11px] font-semibold text-default">
+              <button type="button" onClick={(event) => { event.stopPropagation(); const direction = sortIndex < 0 ? "asc" : report.config.sort[sortIndex].direction === "asc" ? "desc" : null; onSortColumn(column.id, direction); }} className="flex min-w-0 items-center gap-1 rounded-md text-left hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500" aria-label={`Sort by ${column.label}${sortIndex < 0 ? " ascending" : report.config.sort[sortIndex].direction === "asc" ? " descending" : ", clear sorting"}`}><span className="truncate">{column.shortLabel}</span>{sortIndex >= 0 && <span className="text-[9px] text-brand-600">{report.config.sort[sortIndex].direction === "asc" ? "▲" : "▼"}{report.config.sort.length > 1 ? sortIndex + 1 : ""}</span>}</button>
+              <button type="button" onClick={(event) => openColumnMenu(event, column)} className="rounded-md p-1 text-faint hover:bg-surface hover:text-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500" aria-label={`Open options for ${column.label}`} aria-haspopup="menu"><Ellipsis className="h-3.5 w-3.5" /></button>
+            </span>
           </th>;
         })}</tr></thead>
-        <tbody className="divide-y divide-base">{report.rows.map((row) => <tr key={row.id} onClick={() => onRowClick(row)} className="cursor-pointer hover:bg-surface/70" title={grouped ? "Open underlying clients" : "Explore client relationships"}>{displayedColumns.map((column) => {
+        <tbody className="divide-y divide-base">{report.rows.map((row) => <tr key={row.id} tabIndex={0} aria-label={`${String(row.values["client.companyName"] || row.id)}. ${grouped ? "Open underlying clients" : "Explore client relationships"}`} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onRowClick(row); return; } if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); const column = displayedColumns[0]; if (!column) return; const rect = event.currentTarget.getBoundingClientRect(); setContextView("root"); setContextSearch(""); setContext({ x: rect.left + 36, y: rect.top + 30, column, row, value: row.values[column.id] ?? null }); } }} onClick={() => onRowClick(row)} className="cursor-pointer hover:bg-surface/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500" title={grouped ? "Open underlying clients" : "Explore client relationships"}>{displayedColumns.map((column) => {
           const value = row.values[column.id] ?? null;
           const numeric = typeof value === "number";
           const frozen = frozenSet.has(column.id);
-          return <td key={column.id} style={frozen ? { left: frozenOffsets[column.id] || 0 } : undefined} className={`px-3 py-3 ${numeric ? "text-right font-medium tabular-nums text-default" : "text-muted"} ${frozen ? "report-studio-frozen-column" : ""} ${lastFrozenId === column.id ? "report-studio-last-frozen" : ""}`}>{formatCell(value, column)}</td>;
+          return <td key={column.id} style={frozen ? { left: frozenOffsets[column.id] || 0 } : undefined} className={`px-3 py-3 ${numeric ? "text-right font-medium tabular-nums text-default" : "text-muted"} ${frozen ? "report-studio-frozen-column" : ""} ${lastFrozenId === column.id ? "report-studio-last-frozen" : ""}`}>{column.id === "client.companyName" ? <span className="report-client-cell"><strong>{formatCell(value, column)}</strong><small>{row.clientIds[0]}</small></span> : column.id === "target.overall.progress" ? <span className="report-cell-progress">{typeof value === "number" ? <><span>{percentage(value)}</span><i><b style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></i></> : <span className="text-faint">No target</span>}</span> : formatCell(value, column)}</td>;
         })}</tr>)}</tbody>
         <tfoot className="sticky bottom-0 z-20 bg-[#245b88] text-white shadow-[0_-1px_0_rgba(255,255,255,0.18)]"><tr>{displayedColumns.map((column, index) => {
           const result = totalBarResult(column);
@@ -2003,7 +2360,7 @@ function StudioTable({
         })}</tr></tfoot>
       </table>
     </div>
-    {context && <div role="menu" data-report-column-menu="true" onClick={(event) => event.stopPropagation()} className="fixed z-[70] max-h-[calc(100vh-16px)] w-[310px] overflow-y-auto rounded-xl border border-base bg-card py-1 text-xs shadow-2xl" style={{ left: Math.max(8, context.x), top: Math.max(8, context.y) }}>
+    {context && <div ref={contextMenuRef} role="menu" aria-label={`Options for ${context.column.label}`} data-report-column-menu="true" onClick={(event) => event.stopPropagation()} className="fixed z-[70] max-h-[calc(100vh-16px)] w-[310px] overflow-y-auto rounded-xl border border-base bg-card py-1 text-xs shadow-2xl" style={{ left: Math.max(8, context.x), top: Math.max(8, context.y) }}>
       <div className="flex items-start gap-2 border-b border-base px-3 py-2">
         {contextView !== "root" && <button type="button" onClick={() => showContextView("root")} aria-label="Back to column options" className="mt-0.5 rounded-md p-1 text-muted hover:bg-surface hover:text-default"><ChevronLeft className="h-3.5 w-3.5" /></button>}
         <div className="min-w-0"><p className="truncate font-semibold text-default">{contextView === "root" ? context.column.label : contextView === "add-left" ? "Add column to left" : contextView === "add-right" ? "Add column to right" : contextView === "sort-add" ? "Add to sorting" : contextView === "move" ? "Move column" : contextView === "hidden" ? "Show hidden columns" : "Column summary"}</p><p className="mt-0.5 text-[9px] text-faint">{contextView === "root" ? "Column options" : context.column.shortLabel}</p></div>
@@ -2051,16 +2408,21 @@ function ContextButton({ label, active, disabled, disabledReason, hint, onClick 
 
 function PivotView({ report, onRowClick }: { report: ReportStudioResponse; onRowClick: (row: ReportStudioResponse["rows"][number]) => void }) {
   const [rowField, columnField] = report.config.groupBy;
-  const metricField = report.config.metrics[0];
+  const metricFields = report.config.metrics;
+  const [metricField, setMetricField] = useState(metricFields[0] || "");
+  useEffect(() => {
+    if (!metricFields.includes(metricField)) setMetricField(metricFields[0] || "");
+  }, [metricField, metricFields]);
   if (!rowField || !columnField || !metricField) return <ViewGuidance title="Pivot needs two groupings" detail="Choose two dimensions in Group By and at least one Summary Metric, then run the report." />;
-  const rowDefinition = REPORT_STUDIO_FIELD_MAP.get(rowField);
-  const columnDefinition = REPORT_STUDIO_FIELD_MAP.get(columnField);
-  const metricDefinition = REPORT_STUDIO_FIELD_MAP.get(metricField);
+  const definitionsById = new Map(report.columns.map((definition) => [definition.id, definition]));
+  const rowDefinition = definitionsById.get(rowField);
+  const columnDefinition = definitionsById.get(columnField);
+  const metricDefinition = definitionsById.get(metricField);
   if (!rowDefinition || !columnDefinition || !metricDefinition) return null;
   const rowKeys = Array.from(new Set(report.rows.map((row) => String(row.values[rowField] ?? "No value"))));
   const columnKeys = Array.from(new Set(report.rows.map((row) => String(row.values[columnField] ?? "No value"))));
-  const findRow = (rowKey: string, columnKey: string) => report.rows.find((row) => String(row.values[rowField] ?? "No value") === rowKey && String(row.values[columnField] ?? "No value") === columnKey);
-  return <div className="overflow-auto p-4"><div className="mb-3 text-xs text-muted"><strong className="text-default">{rowDefinition.label}</strong> × <strong className="text-default">{columnDefinition.label}</strong> · {metricDefinition.label}</div><div className="reports-pivot-shell overflow-hidden rounded-2xl"><table className="reports-pivot-table min-w-full text-xs"><thead><tr><th className="px-3 py-2.5 text-left text-default">{rowDefinition.shortLabel}</th>{columnKeys.map((key) => <th key={key} className="px-3 py-2.5 text-right text-default">{key}</th>)}</tr></thead><tbody>{rowKeys.map((rowKey) => <tr key={rowKey}><td className="px-3 py-2.5 font-semibold text-default">{rowKey}</td>{columnKeys.map((columnKey) => { const row = findRow(rowKey, columnKey); return <td key={columnKey} onClick={() => row && onRowClick(row)} className="cursor-pointer px-3 py-2.5 text-right font-medium text-brand-600 transition-colors hover:bg-brand-50/70 dark:text-[#4aa8ff] dark:hover:bg-brand-950/20">{row ? formatCell(row.values[metricField] ?? null, metricDefinition) : "–"}</td>; })}</tr>)}</tbody></table></div></div>;
+  const rowMap = new Map(report.rows.map((row) => [`${String(row.values[rowField] ?? "No value")}\u0000${String(row.values[columnField] ?? "No value")}`, row]));
+  return <div className="overflow-auto p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="text-xs text-muted"><strong className="text-default">{rowDefinition.label}</strong> × <strong className="text-default">{columnDefinition.label}</strong></div>{metricFields.length > 1 && <ReportSelect variant="bare" className="w-[190px] rounded-xl border border-base bg-card" value={metricField} onChange={setMetricField} ariaLabel="Pivot metric" options={metricFields.map((fieldId) => ({ value: fieldId, label: definitionsById.get(fieldId)?.shortLabel || fieldId }))} />}</div><div className="reports-pivot-shell overflow-hidden rounded-2xl"><table className="reports-pivot-table min-w-full text-xs"><thead><tr><th className="px-3 py-2.5 text-left text-default">{rowDefinition.shortLabel}</th>{columnKeys.map((key) => <th key={key} className="px-3 py-2.5 text-right text-default">{key}</th>)}</tr></thead><tbody>{rowKeys.map((rowKey) => <tr key={rowKey}><td className="px-3 py-2.5 font-semibold text-default">{rowKey}</td>{columnKeys.map((columnKey) => { const row = rowMap.get(`${rowKey}\u0000${columnKey}`); return <td key={columnKey} tabIndex={row ? 0 : undefined} onKeyDown={(event) => { if (row && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onRowClick(row); } }} onClick={() => row && onRowClick(row)} className="cursor-pointer px-3 py-2.5 text-right font-medium text-brand-600 transition-colors hover:bg-brand-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500 dark:text-[#4aa8ff] dark:hover:bg-brand-950/20">{row ? formatCell(row.values[metricField] ?? null, metricDefinition) : "–"}</td>; })}</tr>)}</tbody></table></div></div>;
 }
 
 function RelationshipCards({ report, onRowClick }: { report: ReportStudioResponse; onRowClick: (row: ReportStudioResponse["rows"][number]) => void }) {
@@ -2093,6 +2455,7 @@ type RelationshipData = {
 function RelationshipDrawer({ clientId, financialYear, onClose }: { clientId: string; financialYear: string; onClose: () => void }) {
   const [data, setData] = useState<RelationshipData | null>(null);
   const [error, setError] = useState("");
+  const reduceMotion = useReducedMotion();
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/reports/studio/relationships/${encodeURIComponent(clientId)}?fy=${encodeURIComponent(financialYear)}`, { cache: "no-store" })
@@ -2104,49 +2467,28 @@ function RelationshipDrawer({ clientId, financialYear, onClose }: { clientId: st
   const clientName = String(data?.client?.companyName || clientId);
   const billingTotal = Number(data?.billing?.totalAmount) || 0;
   const paid = data?.payments.reduce((sum, payment) => sum + (Number(payment.amountPaid) || 0), 0) || 0;
-  return <div className="fixed inset-0 z-50 flex justify-end bg-black/25 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><aside className="h-full w-full max-w-2xl overflow-y-auto border-l border-base bg-card shadow-2xl"><div className="sticky top-0 z-10 flex items-start justify-between border-b border-base bg-card/95 p-5 backdrop-blur-xl"><div><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-600">Relationship Explorer · {financialYear}</p><h2 className="mt-1 text-xl font-semibold text-default">{clientName}</h2><a href={`/dashboard/clients/${encodeURIComponent(clientId)}`} className="mt-1 inline-block text-xs font-semibold text-brand-600 hover:underline">Open client profile</a></div><button type="button" onClick={onClose} className="rounded-xl p-2 text-muted hover:bg-surface"><X className="h-5 w-5" /></button></div>{error ? <div className="m-5 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</div> : !data ? <div className="flex min-h-80 items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-brand-600" /></div> : <div className="space-y-4 p-5"><RelationshipNode title="People" detail={`${data.contacts.length} related contact${data.contacts.length === 1 ? "" : "s"}`} tone="violet" /><RelationshipNode title={`Financial Year ${financialYear}`} detail={data.financialYearRecord ? "Financial Year record available" : "No Financial Year record"} tone="blue" /><div className="ml-5 grid gap-3 border-l border-base pl-4 sm:grid-cols-2"><RelationshipNode title="Targets / Credits" detail={data.financialYearRecord ? "Open the target columns in this report for CAT/type values" : "No target or generated-credit record"} tone="blue" /><RelationshipNode title="Annual Return" detail={String(data.annualReturn?.status || "Not recorded")} tone="indigo" /><RelationshipNode title="Invoice Tracking" detail={`${data.invoiceCoverage.sale.doneCount}/12 sale · ${data.invoiceCoverage.purchase.doneCount}/12 purchase months`} tone="teal" /><RelationshipNode title="CPCB Upload" detail={`${data.uploads.count} records · ${quantity(data.uploads.quantity)} quantity`} tone="teal" /></div><RelationshipNode title="Linked Quotations" detail={`${data.quotations.length} linked · ${data.quotations.filter((quotation) => quotation.status === "Accepted").length} accepted`} tone="emerald" /><div className="ml-5 grid gap-3 border-l border-base pl-4 sm:grid-cols-2"><RelationshipNode title="Billing" detail={data.billing ? `${formatCurrency(billingTotal)} billed` : "No billing record"} tone="amber" /><RelationshipNode title="Payments" detail={`${data.payments.length} records · ${formatCurrency(paid)} received · ${formatCurrency(billingTotal - paid)} outstanding`} tone="amber" /></div><div className="grid gap-3 sm:grid-cols-3"><RelationshipNode title="Documents" detail={`${data.documents.length} recent records`} tone="slate" /><RelationshipNode title="Tasks" detail={`${data.tasks.filter((task) => task.status === "open").length} open · ${data.tasks.length} recent`} tone="slate" /><RelationshipNode title="Activity" detail={`${data.activities.length} recent events`} tone="slate" /></div><RelationshipNode title="Credit Transactions" detail={`${data.transactions.inboundCount} inbound · ${data.transactions.outboundCount} outbound`} tone="violet" /></div>}</aside></div>;
+  return <motion.div
+    className="fixed inset-0 z-50 flex justify-end bg-black/25 backdrop-blur-[2px]"
+    initial={reduceMotion ? false : { opacity: 0 }}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    transition={reduceMotion ? { duration: 0.01 } : reportFadeTransition}
+    onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+  >
+    <motion.aside
+      className="h-full w-full max-w-2xl overflow-y-auto border-l border-base bg-card shadow-2xl"
+      initial={reduceMotion ? false : { x: 52 }}
+      animate={{ x: 0 }}
+      exit={reduceMotion ? { opacity: 0 } : { x: 42 }}
+      transition={reduceMotion ? { duration: 0.01 } : reportPanelSpring}
+    >
+      <div className="sticky top-0 z-10 flex items-start justify-between border-b border-base bg-card/95 p-5 backdrop-blur-xl"><div><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-600">Relationship Explorer · {financialYear}</p><h2 className="mt-1 text-xl font-semibold text-default">{clientName}</h2><a href={`/dashboard/clients/${encodeURIComponent(clientId)}`} className="mt-1 inline-block text-xs font-semibold text-brand-600 hover:underline">Open client profile</a></div><button type="button" onClick={onClose} className="rounded-xl p-2 text-muted hover:bg-surface"><X className="h-5 w-5" /></button></div>
+      {error ? <div className="m-5 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</div> : !data ? <div className="flex min-h-80 items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-brand-600" /></div> : <motion.div className="space-y-4 p-5" initial={reduceMotion ? false : "hidden"} animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.025, delayChildren: 0.06 } } }}><RelationshipNode title="People" detail={`${data.contacts.length} related contact${data.contacts.length === 1 ? "" : "s"}`} tone="violet" /><RelationshipNode title={`Financial Year ${financialYear}`} detail={data.financialYearRecord ? "Financial Year record available" : "No Financial Year record"} tone="blue" /><div className="ml-5 grid gap-3 border-l border-base pl-4 sm:grid-cols-2"><RelationshipNode title="Targets / Credits" detail={data.financialYearRecord ? "Open the target columns in this report for CAT/type values" : "No target or generated-credit record"} tone="blue" /><RelationshipNode title="Annual Return" detail={String(data.annualReturn?.status || "Not recorded")} tone="indigo" /><RelationshipNode title="Invoice Tracking" detail={`${data.invoiceCoverage.sale.doneCount}/12 sale · ${data.invoiceCoverage.purchase.doneCount}/12 purchase months`} tone="teal" /><RelationshipNode title="CPCB Upload" detail={`${data.uploads.count} records · ${quantity(data.uploads.quantity)} quantity`} tone="teal" /></div><RelationshipNode title="Linked Quotations" detail={`${data.quotations.length} linked · ${data.quotations.filter((quotation) => quotation.status === "Accepted").length} accepted`} tone="emerald" /><div className="ml-5 grid gap-3 border-l border-base pl-4 sm:grid-cols-2"><RelationshipNode title="Billing" detail={data.billing ? `${formatCurrency(billingTotal)} billed` : "No billing record"} tone="amber" /><RelationshipNode title="Payments" detail={`${data.payments.length} records · ${formatCurrency(paid)} received · ${formatCurrency(billingTotal - paid)} outstanding`} tone="amber" /></div><div className="grid gap-3 sm:grid-cols-3"><RelationshipNode title="Documents" detail={`${data.documents.length} recent records`} tone="slate" /><RelationshipNode title="Tasks" detail={`${data.tasks.filter((task) => task.status === "open").length} open · ${data.tasks.length} recent`} tone="slate" /><RelationshipNode title="Activity" detail={`${data.activities.length} recent events`} tone="slate" /></div><RelationshipNode title="Credit Transactions" detail={`${data.transactions.inboundCount} inbound · ${data.transactions.outboundCount} outbound`} tone="violet" /></motion.div>}
+    </motion.aside>
+  </motion.div>;
 }
 
 function RelationshipNode({ title, detail, tone }: { title: string; detail: string; tone: string }) {
   const tones: Record<string, string> = { blue: "bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-200", violet: "bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-200", indigo: "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-200", teal: "bg-teal-50 text-teal-700 dark:bg-teal-950/30 dark:text-teal-200", emerald: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200", amber: "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-200", slate: "bg-surface text-muted" };
-  return <div className={`rounded-2xl p-4 ${tones[tone] || tones.slate}`}><strong className="block text-xs">{title}</strong><span className="mt-1 block text-[11px] leading-4 opacity-80">{detail}</span></div>;
-}
-
-function TargetOutcomeSummary({ report }: { report: ReportStudioResponse }) {
-  const metricValue = (field: string) => report.summary.metrics.find((metric) => metric.field === field)?.value || 0;
-  const target = metricValue("target.overall.target");
-  const achieved = metricValue("target.overall.achieved");
-  const remaining = metricValue("target.overall.remaining");
-  const clients = metricValue("client.count") || report.summary.matchedClients;
-  const progress = target > 0 ? Math.min(100, Math.max(0, (achieved / target) * 100)) : 0;
-
-  return <section className="reports-outcome-card overflow-hidden rounded-[26px]">
-    <div className="grid gap-5 p-5 sm:p-6 xl:grid-cols-[minmax(240px,0.8fr)_minmax(0,1.5fr)] xl:items-center">
-      <div>
-        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-600">Overall progress</p>
-        <div className="mt-1 flex items-end gap-2"><strong className="text-[42px] font-semibold leading-none tracking-[-0.05em] text-default sm:text-[48px]">{percentage(progress)}</strong><span className="pb-1 text-xs font-medium text-muted">achieved</span></div>
-        <p className="mt-2 text-xs leading-5 text-muted">{quantity(remaining)} remains across {quantity(clients)} clients.</p>
-      </div>
-      <div>
-        <div className="reports-progress-track"><span style={{ width: `${progress}%` }} /></div>
-        <div className="mt-4 grid grid-cols-3 divide-x divide-base">
-          <div className="pr-3"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-faint">Target</p><strong className="mt-1 block text-sm text-default sm:text-base">{quantity(target)}</strong></div>
-          <div className="px-3"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-faint">Achieved</p><strong className="mt-1 block text-sm text-emerald-600 sm:text-base">{quantity(achieved)}</strong></div>
-          <div className="pl-3"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-faint">Remaining</p><strong className="mt-1 block text-sm text-amber-600 sm:text-base">{quantity(remaining)}</strong></div>
-        </div>
-      </div>
-    </div>
-  </section>;
-}
-
-function TargetCategorySummaries({ report }: { report: ReportStudioResponse }) {
-  const romans = ["I", "II", "III", "IV"];
-  const metricValue = (field: string) => report.summary.metrics.find((metric) => metric.field === field)?.value || 0;
-  return <section aria-labelledby="category-progress-title"><div className="mb-2 flex items-center justify-between px-1"><h2 id="category-progress-title" className="text-xs font-semibold text-default">Progress by category</h2><span className="text-[10px] text-faint">Swipe to compare</span></div><div className="reports-category-grid">{["1", "2", "3", "4"].map((categoryId, index) => {
-    const target = metricValue(`target.cat${categoryId}.total.target`);
-    const achieved = metricValue(`target.cat${categoryId}.total.achieved`);
-    const remaining = metricValue(`target.cat${categoryId}.total.remaining`);
-    const progress = target > 0 ? Math.min(100, Math.max(0, achieved / target * 100)) : 0;
-    return <div key={categoryId} className="reports-secondary-card rounded-[20px] p-4"><div className="mb-3 flex items-center justify-between"><h3 className="text-xs font-semibold text-default">CAT {romans[index]}</h3><span className="text-[10px] font-semibold text-brand-600">{percentage(progress)}</span></div><div className="reports-category-progress"><span style={{ width: `${progress}%` }} /></div><div className="mt-3 grid grid-cols-3 gap-2"><div><p className="text-[8px] uppercase tracking-wide text-faint">Target</p><strong className="mt-1 block text-xs text-default">{quantity(target)}</strong></div><div><p className="text-[8px] uppercase tracking-wide text-faint">Achieved</p><strong className="mt-1 block text-xs text-emerald-600">{quantity(achieved)}</strong></div><div><p className="text-[8px] uppercase tracking-wide text-faint">Remaining</p><strong className="mt-1 block text-xs text-amber-600">{quantity(remaining)}</strong></div></div></div>;
-  })}</div></section>;
+  return <motion.div variants={{ hidden: { opacity: 0, y: 8 }, visible: { opacity: 1, y: 0, transition: reportSoftSpring } }} className={`rounded-2xl p-4 ${tones[tone] || tones.slate}`}><strong className="block text-xs">{title}</strong><span className="mt-1 block text-[11px] leading-4 opacity-80">{detail}</span></motion.div>;
 }

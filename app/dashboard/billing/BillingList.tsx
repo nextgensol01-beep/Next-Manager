@@ -19,7 +19,7 @@ interface BillingListProps {
   loading: boolean;
   viewMode: ViewMode;
   expandedRows: Set<string>;
-  paymentsByClient: Map<string, Payment[]>;
+  paymentsByBilling: Map<string, Payment[]>;
   advanceByClient: Map<string, number>;
   clientName: (id: string) => string;
   onToggleRow: (id: string) => void;
@@ -34,13 +34,22 @@ interface BillingListProps {
   onDeletePayment: (id: string) => void;
 }
 
+function BillTypeBadge({ billing }: { billing: Billing }) {
+  const isGeneral = billing.billType === "general";
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${isGeneral ? "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-900/25 dark:text-violet-300" : "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-900/25 dark:text-blue-300"}`}>
+      {isGeneral ? "General" : "Annual Return"}
+    </span>
+  );
+}
+
 export default function BillingList({
   billings,
   filteredBillings,
   loading,
   viewMode,
   expandedRows,
-  paymentsByClient,
+  paymentsByBilling,
   advanceByClient,
   clientName,
   onToggleRow,
@@ -119,6 +128,7 @@ export default function BillingList({
                       <td className="table-cell">
                         <p className="font-medium text-default truncate" title={clientName(billing.clientId)}>{clientName(billing.clientId)}</p>
                         <p className="text-xs text-faint">{billing.clientId} · FY {billing.financialYear}</p>
+                        <div className="mt-1 flex items-center gap-1.5"><BillTypeBadge billing={billing} />{billing.billTitle && <span className="max-w-40 truncate text-[11px] text-muted">{billing.billTitle}</span>}</div>
                       </td>
                       <td className="table-cell text-right font-semibold text-default">{formatCurrency(billing.totalAmount)}</td>
                       <td className="table-cell text-right font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrency(billing.totalPaid)}</td>
@@ -188,6 +198,7 @@ export default function BillingList({
                   <div className="min-w-0">
                     <p className="font-semibold text-default text-sm truncate">{clientName(billing.clientId)}</p>
                     <p className="text-[11px] text-faint">{billing.clientId} · FY {billing.financialYear}</p>
+                    <div className="mt-1 flex items-center gap-1.5"><BillTypeBadge billing={billing} />{billing.billTitle && <span className="truncate text-[11px] text-muted">{billing.billTitle}</span>}</div>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button onClick={() => onOpenPaymentModal(billing)} className="p-1.5 text-faint hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors" title="Add payment"><CreditCard className="w-4 h-4" /></button>
@@ -258,9 +269,11 @@ export default function BillingList({
     <div className="space-y-3">
       {filteredBillings.map((billing) => {
         const expanded = expandedRows.has(billing._id);
-        const cPayments = paymentsByClient.get(billing.clientId) ?? [];
+        const cPayments = paymentsByBilling.get(billing._id) ?? [];
         const pct = getPaymentPercentage(billing.totalPaid, billing.totalAmount);
         const targetBreakdown = billing.targetBreakdown || [];
+        const generalLineItems = billing.lineItems || [];
+        const lineItemsTotal = generalLineItems.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
         const hasTargetBreakdown = targetBreakdown.length > 0;
         const targetBreakdownTotal = targetBreakdown.reduce((s, r) => s + Number(r.totalAmount || 0), 0);
         const advance = advanceByClient.get(billing.clientId) || 0;
@@ -275,6 +288,7 @@ export default function BillingList({
                 <div className="min-w-0 flex-1">
                   <h3 className="font-semibold text-default truncate">{clientName(billing.clientId)}</h3>
                   <p className="text-xs text-faint mt-0.5">{billing.clientId} · FY {billing.financialYear}</p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5"><BillTypeBadge billing={billing} /><span className="truncate text-xs font-medium text-muted">{billing.billTitle || "Annual Return Filing"}</span>{billing.billDate && <span className="text-[11px] text-faint">· {formatDate(billing.billDate)}</span>}</div>
                   {billing.dueDate && billing.pendingAmount > 0 && (
                     <p className="text-xs mt-0.5">
                       {isOverdue ? (
@@ -352,17 +366,22 @@ export default function BillingList({
               )}
 
               {/* Charge breakdown */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
-                {[
+              <div className={`grid grid-cols-2 ${billing.billType === "general" ? "sm:grid-cols-3" : generalLineItems.length > 0 ? "sm:grid-cols-5" : "sm:grid-cols-4"} gap-2 mb-3`}>
+                {(billing.billType === "general" ? [
+                  { label: "Line Items", value: generalLineItems.length, count: true },
+                  { label: "Taxable", value: generalLineItems.reduce((sum, item) => sum + Number(item.taxableAmount || 0), 0) },
+                  { label: "GST", value: generalLineItems.reduce((sum, item) => sum + Number(item.gstAmount || 0), 0) },
+                ] : [
                   { label: "Govt", value: billing.govtCharges },
                   { label: "Consultancy", value: billing.consultancyCharges },
                   { label: "Target", value: billing.targetCharges, extra: hasTargetBreakdown },
                   { label: "Other", value: billing.otherCharges },
-                ].map((item) => (
+                  ...(generalLineItems.length > 0 ? [{ label: "Additional", value: lineItemsTotal }] : []),
+                ]).map((item) => (
                   <div key={item.label} className="bg-surface rounded-lg px-2.5 py-2">
                     <p className="text-[10px] font-medium text-faint uppercase tracking-wide">{item.label}</p>
-                    <p className="font-semibold text-sm text-default mt-0.5">{formatCurrency(item.value)}</p>
-                    {item.extra && (
+                    <p className="font-semibold text-sm text-default mt-0.5">{"count" in item && item.count ? `${item.value} item${item.value === 1 ? "" : "s"}` : formatCurrency(item.value)}</p>
+                    {"extra" in item && item.extra && (
                       <button type="button" onClick={() => onToggleRow(billing._id)} className="mt-0.5 inline-flex items-center gap-0.5 text-[10px] font-medium text-brand-600 dark:text-brand-300">
                         GST incl. {expanded ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
                       </button>
@@ -408,7 +427,7 @@ export default function BillingList({
                   <BookOpen className="w-3.5 h-3.5" /> Ledger
                 </button>
                 <button className="flex items-center justify-center gap-1.5 rounded-xl border border-base bg-surface px-3 py-2 text-xs font-semibold text-muted transition-colors active:opacity-80" onClick={() => onToggleRow(billing._id)}>
-                  <FileText className="w-3.5 h-3.5" /> {hasTargetBreakdown ? "Details" : "Payments"} {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  <FileText className="w-3.5 h-3.5" /> {hasTargetBreakdown || generalLineItems.length > 0 ? "Details" : "Payments"} {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                 </button>
                 {advance > 0 && billing.pendingAmount > 0 && (
                   <button className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-xs font-semibold text-amber-700 dark:text-amber-300 transition-colors active:opacity-80" onClick={() => onOpenApplyAdvanceModal(billing)}>
@@ -427,7 +446,7 @@ export default function BillingList({
                 <button className="glass-pill" onClick={() => onOpenLedgerModal(billing.clientId)}><BookOpen className="w-3.5 h-3.5" /> Ledger</button>
                 <button className="glass-pill" onClick={() => onOpenEmailModal(billing)}><Send className="w-3.5 h-3.5" /> Send Reminder</button>
                 <button className="glass-pill" onClick={() => onToggleRow(billing._id)}>
-                  <FileText className="w-3.5 h-3.5" /> {hasTargetBreakdown ? "Details" : "Payments"} {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  <FileText className="w-3.5 h-3.5" /> {hasTargetBreakdown || generalLineItems.length > 0 ? "Details" : "Payments"} {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                 </button>
               </div>
             </div>
@@ -435,6 +454,21 @@ export default function BillingList({
             {/* Expanded details */}
             {expanded && (
               <div className="border-t border-soft bg-surface/30">
+                {generalLineItems.length > 0 && (
+                  <div className="border-b border-soft p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-sm font-semibold text-default">{billing.billType === "general" ? "General Bill Items" : "Additional Items"}</p><p className="text-xs text-faint">Itemised services, rates, and GST.</p></div><p className="text-sm font-bold text-default">{formatCurrency(lineItemsTotal)}</p></div>
+                    <div className="space-y-2">
+                      {generalLineItems.map((item, index) => (
+                        <div key={`${billing._id}-general-${index}`} className="grid gap-2 rounded-xl border border-base bg-card p-3 sm:grid-cols-[minmax(160px,1fr)_80px_110px_120px] sm:items-center">
+                          <div><p className="text-sm font-semibold text-default">{item.description}</p><p className="text-xs text-faint">GST {Number(item.gstPercent || 0)}% · {formatCurrency(item.gstAmount)}</p></div>
+                          <p className="text-xs text-muted">Qty {Number(item.quantity || 0).toLocaleString("en-IN")}</p>
+                          <p className="text-xs text-muted">{formatCurrency(item.rate)} / unit</p>
+                          <p className="text-right text-sm font-bold text-default">{formatCurrency(item.totalAmount)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {hasTargetBreakdown && (
                   <div className="p-4 border-b border-soft">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
@@ -516,7 +550,7 @@ export default function BillingList({
                     </div>
                   </div>
                 )}
-                {hasTargetBreakdown && (
+                {(hasTargetBreakdown || generalLineItems.length > 0) && (
                   <div className="px-4 pt-4">
                     <p className="text-sm font-semibold text-default mb-0.5">Payment History</p>
                     <p className="text-xs text-faint mb-3">Payments recorded against this billing.</p>

@@ -8,6 +8,8 @@ import Quotation from "@/models/Quotation";
 import QuotationRevision from "@/models/QuotationRevision";
 import { mongoObjectIdSchema, validationErrorMessage } from "@/lib/quotationValidation";
 import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
+import { ensureBillingSchema } from "@/lib/billing-utils";
+import { roundMoney } from "@/lib/quotationRules";
 
 function quotationTargetBreakdown(items: Array<{
   category?: string;
@@ -48,6 +50,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   await connectDB();
+  await ensureBillingSchema(Billing.collection);
   const { id } = await params;
   const parsedId = mongoObjectIdSchema.safeParse(id);
   if (!parsedId.success) return NextResponse.json({ error: validationErrorMessage(parsedId.error) }, { status: 400 });
@@ -71,6 +74,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   await connectDB();
+  await ensureBillingSchema(Billing.collection);
   const { id } = await params;
   const parsedId = mongoObjectIdSchema.safeParse(id);
   if (!parsedId.success) return NextResponse.json({ error: validationErrorMessage(parsedId.error) }, { status: 400 });
@@ -106,9 +110,29 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const targetCharges = Number(revision.itemsSubtotal || 0) + Number(revision.itemsGst || 0);
   const consultancyCharges = Number(revision.consultationCharges || 0) + Number(revision.consultationGstAmount || 0);
   const govtCharges = Number(revision.governmentFees || 0);
+  const additionalLineItems = (revision.additionalItems || []).map((item) => ({
+    description: String(item.description || "").trim(),
+    quantity: Number(item.quantity || 0),
+    rate: Number(item.rate || 0),
+    taxableAmount: Number(item.subtotal || 0),
+    gstPercent: Number(item.gstPercent || 0),
+    gstAmount: Number(item.gstAmount || 0),
+    totalAmount: Number(item.totalAmount || 0),
+    sourceQuotationId: id,
+    sourceQuotationNumber: quotation.quotationNumber,
+    sourceRevisionNumber: revision.revisionNumber,
+    sourceLineId: String(item.lineId || ""),
+  })).filter((item) => item.description && item.quantity > 0 && item.totalAmount > 0);
+  const convertedTotal = roundMoney(
+    targetCharges + consultancyCharges + govtCharges +
+    additionalLineItems.reduce((sum, item) => sum + item.totalAmount, 0)
+  );
+  if (Math.abs(convertedTotal - Number(revision.grandTotal || 0)) >= 0.01) {
+    return NextResponse.json({ error: "Quotation totals are inconsistent. Re-save the draft or create a revision before billing." }, { status: 409 });
+  }
   const sourceNote = `Accepted quotation ${quotation.quotationNumber} (Rev ${revision.revisionNumber})`;
 
-  const existing = await Billing.findOne({ clientId: quotation.clientId, financialYear: quotation.financialYear });
+  const existing = await Billing.findOne({ clientId: quotation.clientId, financialYear: quotation.financialYear, billType: "annual_return" });
   let billing;
   let created = false;
   if (existing) {
@@ -116,6 +140,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     existing.consultancyCharges = Number(existing.consultancyCharges || 0) + consultancyCharges;
     existing.targetCharges = Number(existing.targetCharges || 0) + targetCharges;
     existing.targetBreakdown = [...(existing.targetBreakdown || []), ...targetBreakdown];
+    existing.lineItems = [...(existing.lineItems || []), ...additionalLineItems];
     existing.sourceQuotationIds = [...(existing.sourceQuotationIds || []), id];
     existing.sourceQuotationNumbers = [...(existing.sourceQuotationNumbers || []), quotation.quotationNumber];
     existing.notes = [existing.notes, sourceNote].filter(Boolean).join("\n");
@@ -126,6 +151,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     billing = await Billing.create({
       clientId: quotation.clientId,
       financialYear: quotation.financialYear,
+      billType: "annual_return",
+      billTitle: "Annual Return Filing",
       govtCharges,
       consultancyCharges,
       targetCharges,
@@ -133,6 +160,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       totalPaid: 0,
       dueDate,
       targetBreakdown,
+      lineItems: additionalLineItems,
       notes: sourceNote,
       sourceQuotationIds: [id],
       sourceQuotationNumbers: [quotation.quotationNumber],

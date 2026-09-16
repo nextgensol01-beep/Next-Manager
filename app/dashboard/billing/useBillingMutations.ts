@@ -52,8 +52,7 @@ export function useBillingMutations({
       if (payment.paymentType !== "advance") {
         mutateBillings((current) =>
           (current || []).map((billing) =>
-            billing.clientId === payment.clientId &&
-            billing.financialYear === payment.financialYear
+            billing._id === payment.billingId
               ? withBillingPaymentDelta(billing, Number(payment.amountPaid || 0))
               : billing
           )
@@ -70,6 +69,7 @@ export function useBillingMutations({
 
   const applyOptimisticAdvanceApplication = useCallback(
     (input: {
+      billingId: string;
       clientId: string;
       financialYear: string;
       amountToApply: number;
@@ -81,6 +81,7 @@ export function useBillingMutations({
       const optimisticPayment: Payment = {
         _id: `optimistic-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         clientId: input.clientId,
+        billingId: input.billingId,
         financialYear: input.financialYear,
         amountPaid: input.amountToApply,
         paymentType: "billing",
@@ -116,8 +117,7 @@ export function useBillingMutations({
 
       mutateBillings((current) =>
         (current || []).map((billing) =>
-          billing.clientId === input.clientId &&
-          billing.financialYear === input.financialYear
+          billing._id === input.billingId
             ? withBillingPaymentDelta(billing, input.amountToApply)
             : billing
         )

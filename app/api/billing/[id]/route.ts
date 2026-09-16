@@ -21,15 +21,31 @@ async function fetchBillingAggregated(id: unknown) {
       {
         $lookup: {
           from: Payment.collection.name,
-          let: { billingClientId: "$clientId", billingFinancialYear: "$financialYear" },
+          let: {
+            billingRecordId: { $toString: "$_id" },
+            billingClientId: "$clientId",
+            billingFinancialYear: "$financialYear",
+            billingType: { $ifNull: ["$billType", "annual_return"] },
+          },
           pipeline: [
             {
               $match: {
                 $expr: {
                   $and: [
-                    { $eq: ["$clientId", "$$billingClientId"] },
-                    { $eq: ["$financialYear", "$$billingFinancialYear"] },
                     { $ne: ["$paymentType", "advance"] },
+                    {
+                      $or: [
+                        { $eq: ["$billingId", "$$billingRecordId"] },
+                        {
+                          $and: [
+                            { $eq: ["$$billingType", "annual_return"] },
+                            { $eq: ["$clientId", "$$billingClientId"] },
+                            { $eq: ["$financialYear", "$$billingFinancialYear"] },
+                            { $in: [{ $ifNull: ["$billingId", ""] }, ["", null]] },
+                          ],
+                        },
+                      ],
+                    },
                   ],
                 },
               },
@@ -107,10 +123,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     await connectDB();
     const body = normalizeBillingBody(await req.json());
     const { id } = await params;
-    const previous = await Billing.findById(id).lean() as { totalAmount?: number } | null;
+    if (body.billType === "general" && (!body.billTitle || body.lineItems.length === 0)) {
+      return NextResponse.json({ error: "General bills require a title and at least one valid line item" }, { status: 400 });
+    }
+    const previous = await Billing.findById(id).lean() as { totalAmount?: number; billType?: string } | null;
     const record = await Billing.findByIdAndUpdate(id, { ...body, updatedAt: new Date() }, { new: true, runValidators: true });
     if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    await syncAnnualReturnStatus(record.clientId, record.financialYear);
+    if ((record.billType || "annual_return") === "annual_return") {
+      await syncAnnualReturnStatus(record.clientId, record.financialYear);
+    }
     // Re-fetch through aggregation pipeline so response includes totalPaid, pendingAmount, paymentStatus
     const full = await fetchBillingAggregated(record._id);
     await recordActivityEvent({
@@ -149,6 +170,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       data: billing.toObject(),
     });
     await Billing.findByIdAndDelete(id);
+    if ((billing.billType || "annual_return") === "annual_return") {
+      await syncAnnualReturnStatus(billing.clientId, billing.financialYear);
+    }
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("DELETE /api/billing/[id]:", error);

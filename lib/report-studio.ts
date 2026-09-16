@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { QUOTATION_STATUSES } from "@/lib/quotationRules";
 import { ANNUAL_RETURN_STATUSES } from "@/lib/annualReturnStatus";
+import type { ClientCustomFieldDefinition, ClientCustomFieldType } from "@/lib/clientCustomFields";
 
 export const REPORT_STUDIO_SOURCE_IDS = [
   "clients", "financial-years", "pibo-targets", "pwp-credits", "annual-returns",
@@ -77,6 +78,7 @@ export type ReportStudioFieldDefinition = {
   operators: ReportStudioOperator[];
   options?: string[];
   sources?: ReportStudioSource[];
+  applicableCategories?: string[];
 };
 
 function field(definition: Omit<ReportStudioFieldDefinition, "operators" | "aggregate"> & Partial<Pick<ReportStudioFieldDefinition, "operators" | "aggregate">>): ReportStudioFieldDefinition {
@@ -93,6 +95,7 @@ const ALL_SOURCES = [...REPORT_STUDIO_SOURCE_IDS];
 const CLIENT_CATEGORIES = ["PWP", "Producer", "Importer", "Brand Owner", "SIMP"];
 
 const BASE_FIELDS: ReportStudioFieldDefinition[] = [
+  field({ id: "target.overall.progress", label: "Target Progress", shortLabel: "Progress", description: "Achievement divided by target; clients with no target have no percentage", group: "Overall Targets", type: "percentage", role: "metric", aggregate: "average", sources: ALL_SOURCES }),
   field({ id: "client.companyName", label: "Company Name", shortLabel: "Client", description: "Saved client company name", group: "Client", type: "string", role: "dimension", sources: ALL_SOURCES }),
   field({ id: "client.legalName", label: "Legal Name", shortLabel: "Legal Name", description: "Saved legal entity name", group: "Client", type: "string", role: "dimension", sources: ALL_SOURCES }),
   field({ id: "client.clientId", label: "Client ID", shortLabel: "Client ID", description: "Relational client identifier", group: "Client", type: "string", role: "dimension", sources: ALL_SOURCES }),
@@ -217,6 +220,60 @@ const CATEGORY_RATE_FIELDS: ReportStudioFieldDefinition[] = RATE_FIELD_SOURCES.f
 export const REPORT_STUDIO_FIELDS: ReportStudioFieldDefinition[] = [...BASE_FIELDS, ...TARGET_FIELDS, ...OVERALL_TARGET_FIELDS, ...CATEGORY_RATE_FIELDS];
 export const REPORT_STUDIO_FIELD_MAP = new Map(REPORT_STUDIO_FIELDS.map((definition) => [definition.id, definition]));
 
+export const REPORT_STUDIO_CUSTOM_FIELD_PREFIX = "client.custom.";
+
+const CUSTOM_FIELD_TYPE_MAP: Record<Exclude<ClientCustomFieldType, "password">, ReportStudioFieldType> = {
+  text: "string",
+  number: "number",
+  date: "date",
+  checkbox: "boolean",
+  url: "string",
+  textarea: "string",
+};
+
+export function reportStudioCustomFieldId(key: string) {
+  return `${REPORT_STUDIO_CUSTOM_FIELD_PREFIX}${key}`;
+}
+
+export function reportStudioCustomFieldKey(fieldId: string) {
+  return fieldId.startsWith(REPORT_STUDIO_CUSTOM_FIELD_PREFIX)
+    ? fieldId.slice(REPORT_STUDIO_CUSTOM_FIELD_PREFIX.length)
+    : null;
+}
+
+export function buildReportStudioCustomFields(
+  definitions: Array<Pick<ClientCustomFieldDefinition, "key" | "label" | "type" | "active" | "applicableCategories">>,
+): ReportStudioFieldDefinition[] {
+  return definitions.flatMap((definition) => {
+    const id = reportStudioCustomFieldId(String(definition.key || "").trim());
+    if (
+      definition.active === false ||
+      definition.type === "password" ||
+      definition.key === "legalName" ||
+      !/^[a-zA-Z][a-zA-Z0-9]*$/.test(definition.key) ||
+      id.length > 120
+    ) return [];
+
+    const type = CUSTOM_FIELD_TYPE_MAP[definition.type];
+    return [field({
+      id,
+      label: definition.label,
+      shortLabel: definition.label,
+      description: "Custom client field configured in Settings",
+      group: "Custom Client Fields",
+      type,
+      role: definition.type === "number" ? "metric" : "dimension",
+      aggregate: definition.type === "number" ? "sum" : "first",
+      sources: ALL_SOURCES,
+      applicableCategories: definition.applicableCategories || [],
+    })];
+  });
+}
+
+export function reportStudioFieldMap(additionalFields: ReportStudioFieldDefinition[] = []) {
+  return new Map([...REPORT_STUDIO_FIELDS, ...additionalFields].map((definition) => [definition.id, definition]));
+}
+
 export const REPORT_STUDIO_EXCEL_GROUP_COLORS: Record<string, string> = {
   Client: "#263B5E",
   "Financial Year": "#3F5F85",
@@ -274,12 +331,24 @@ const filterGroupSchema: z.ZodType<ReportStudioFilterGroup> = z.object({
   children: z.array(filterNodeSchema).max(30),
 });
 
+export const REPORT_STUDIO_ANALYSIS_TRANSFORMS = ["presence", "value", "range", "timePeriod"] as const;
+export type ReportStudioAnalysisTransform = (typeof REPORT_STUDIO_ANALYSIS_TRANSFORMS)[number];
+export type ReportStudioAnalysisTimePeriod = "month" | "quarter" | "year";
+
+const analysisSchema = z.object({
+  field: z.string().trim().min(1).max(120).default("client.gstNumber"),
+  transform: z.enum(REPORT_STUDIO_ANALYSIS_TRANSFORMS).default("presence"),
+  bucketCount: z.number().int().min(2).max(12).default(5),
+  timePeriod: z.enum(["month", "quarter", "year"]).default("month"),
+});
+
 export const reportStudioConfigSchema = z.object({
   name: z.string().trim().max(120).default("Untitled report"),
   source: z.enum(REPORT_STUDIO_SOURCE_IDS).default("clients"),
   financialYear: z.string().trim().min(1),
   columns: z.array(z.string().trim().min(1)).min(1).max(120),
   filters: filterGroupSchema,
+  search: z.string().trim().max(120).default(""),
   metrics: z.array(z.string().trim().min(1)).max(20).default([]),
   groupBy: z.array(z.string().trim().min(1)).max(2).default([]),
   sort: z.array(z.object({ field: z.string().trim().min(1), direction: z.enum(["asc", "desc"]) })).max(3).default([]),
@@ -290,7 +359,8 @@ export const reportStudioConfigSchema = z.object({
     .nullable()
     .default(null),
   excelColumnColors: z.record(z.string().trim().min(1).max(120), z.string().regex(/^#[0-9a-fA-F]{6}$/)).default({}),
-  view: z.enum(["table", "pivot", "chart", "relationships"]).default("table"),
+  analysis: analysisSchema.default({ field: "client.gstNumber", transform: "presence", bucketCount: 5, timePeriod: "month" }),
+  view: z.enum(["table", "pivot", "chart", "analysis", "relationships"]).default("table"),
   page: z.number().int().min(1).default(1),
   pageSize: z.number().int().min(10).max(100).default(25),
 });
@@ -314,35 +384,65 @@ export type ReportStudioColumnResult = {
   field: string;
   results: ReportStudioResultValue[];
 };
+export type ReportStudioAnalysisBucketFilter = {
+  field: string;
+  operator: ReportStudioOperator;
+  value?: ReportStudioFilterValue;
+  secondValue?: ReportStudioFilterValue;
+};
+export type ReportStudioAnalysisBucket = {
+  id: string;
+  label: string;
+  value: number;
+  filters: ReportStudioAnalysisBucketFilter[];
+  tone?: "recorded" | "missing" | "excluded" | "value";
+};
+export type ReportStudioAnalysisResult = {
+  field: ReportStudioFieldDefinition;
+  transform: ReportStudioAnalysisTransform;
+  chart: "donut" | "bar" | "line";
+  total: number;
+  applicable: number;
+  recorded: number;
+  missing: number;
+  excluded: number;
+  coveragePercent: number;
+  buckets: ReportStudioAnalysisBucket[];
+};
 export type ReportStudioResponse = {
+  generatedAt?: string;
   config: ReportStudioConfig;
   columns: ReportStudioFieldDefinition[];
   rows: ReportStudioResultRow[];
   summary: {
     matchedClients: number;
+    focusOptions?: Array<{ field: string; operator: "eq" | "gt" | "lt"; value: string | number; label: string; count: number }>;
     metrics: Array<{ field: string; label: string; type: ReportStudioFieldType; value: number }>;
     businessResults: ReportStudioResultValue[];
     businessResultOptions: ReportStudioResultValue[];
     automaticBusinessResultIds: string[];
     relatedBusinessResultIds: string[];
     columnResults: ReportStudioColumnResult[];
+    analysis: ReportStudioAnalysisResult;
   };
   pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
   quality: { messages: string[] };
 };
 
-export function fieldsForSource(source: ReportStudioSource) {
-  return REPORT_STUDIO_FIELDS.filter((definition) => !definition.sources || definition.sources.includes(source));
+export function fieldsForSource(source: ReportStudioSource, additionalFields: ReportStudioFieldDefinition[] = []) {
+  return [...REPORT_STUDIO_FIELDS, ...additionalFields]
+    .filter((definition) => !definition.sources || definition.sources.includes(source));
 }
 
-export function validateReportStudioConfig(input: unknown): ReportStudioConfig {
+export function validateReportStudioConfig(input: unknown, additionalFields: ReportStudioFieldDefinition[] = []): ReportStudioConfig {
   const config = reportStudioConfigSchema.parse(input);
-  const allowedFields = new Map(fieldsForSource(config.source).map((definition) => [definition.id, definition]));
+  const allowedFields = new Map(fieldsForSource(config.source, additionalFields).map((definition) => [definition.id, definition]));
   const referenced = [
     ...config.columns,
     ...config.metrics,
     ...config.groupBy,
     ...config.sort.map((entry) => entry.field),
+    config.analysis.field,
   ];
   const visitFilters = (group: ReportStudioFilterGroup) => {
     group.children.forEach((child) => {
@@ -366,6 +466,14 @@ export function validateReportStudioConfig(input: unknown): ReportStudioConfig {
   config.groupBy.forEach((fieldId) => {
     if (allowedFields.get(fieldId)?.role !== "dimension") throw new Error(`Group field must be a dimension: ${fieldId}`);
   });
+  const analysisField = allowedFields.get(config.analysis.field);
+  if (!analysisField) throw new Error(`Field is not available for this source: ${config.analysis.field}`);
+  if (config.analysis.transform === "range" && !["number", "quantity", "currency", "percentage"].includes(analysisField.type)) {
+    throw new Error(`Range analysis requires a numeric field: ${analysisField.label}`);
+  }
+  if (config.analysis.transform === "timePeriod" && analysisField.type !== "date") {
+    throw new Error(`Time-period analysis requires a date field: ${analysisField.label}`);
+  }
   visitFilters(config.filters);
   return config;
 }
@@ -380,9 +488,8 @@ export const ACCEPTED_TARGET_DETAIL_COLUMNS = [
 ];
 
 export const ACCEPTED_TARGET_COMPACT_COLUMNS = [
-  "client.companyName", "client.category", "financialYear.year",
-  ...["1", "2", "3", "4"].flatMap((categoryId) => TARGET_MEASURES.map((measure) => `target.cat${categoryId}.total.${measure.id}`)),
-  ...TARGET_MEASURES.map((measure) => `target.overall.${measure.id}`),
+  "client.companyName", "client.category", "target.overall.target",
+  "target.overall.achieved", "target.overall.remaining", "target.overall.progress",
 ];
 
 export function createAcceptedTargetStudioConfig(financialYear: string, detailed = true): ReportStudioConfig {

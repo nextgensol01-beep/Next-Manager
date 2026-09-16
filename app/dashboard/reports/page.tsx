@@ -1,14 +1,16 @@
 ﻿"use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import toast from "react-hot-toast";
 import { useFinancialYearState } from "@/app/providers";
 import { useCache } from "@/lib/useCache";
 import type { ClientCustomFieldDefinition } from "@/lib/clientCustomFields";
+import { buildReportStudioCustomFields } from "@/lib/report-studio";
 import ReportStudio from "./ReportStudio";
 import {
   CUSTOM_CLIENT_EXPORT_FIELDS,
   REPORT_FILE_PREFIX,
+  isSafeCustomExportField,
   type CustomExportClientCategory,
   type CustomExportPresetConfig,
   type CustomExportPresetDefinition,
@@ -41,15 +43,15 @@ const CustomExportModal = dynamic(() => import("./CustomExportModal"), {
   loading: () => null,
 });
 
-const SENSITIVE_EXPORT_FIELD_PATTERN = /(password|passcode|secret|token|credential|one[-_ ]?time|otp|\bpin\b)/i;
-
 export default function ReportsPage() {
   const [fy, setFy, financialYearReady] = useFinancialYearState();
   const [downloading, setDownloading] = useState<ReportType[]>([]);
   const [customExportOpen, setCustomExportOpen] = useState(false);
   const [customDownloading, setCustomDownloading] = useState(false);
   const [customFields, setCustomFields] = useState<CustomClientExportField[]>(DEFAULT_CUSTOM_FIELDS);
-  const [customFy, setCustomFy] = useFinancialYearState();
+  const [customFy, setCustomFy] = useState(fy);
+  const [presetsLoaded, setPresetsLoaded] = useState(false);
+  const savingPresetRef = useRef(false);
   const [customCategories, setCustomCategories] = useState<CustomExportClientCategory[]>([]);
   const [availableClients, setAvailableClients] = useState<ClientOption[]>([]);
   const [clientsLoading, setClientsLoading] = useState(false);
@@ -69,15 +71,19 @@ export default function ReportsPage() {
   const [showAdvancedControls, setShowAdvancedControls] = useState(false);
   const [activeAdvancedSection, setActiveAdvancedSection] = useState<AdvancedCustomExportSection>("presets");
   const { data: clientCustomFields } = useCache<ClientCustomFieldDefinition[]>("/api/client-custom-fields", {
-    enabled: customExportOpen,
+    enabled: true,
     initialData: [],
   });
+  const reportStudioCustomFields = useMemo(
+    () => buildReportStudioCustomFields(clientCustomFields),
+    [clientCustomFields],
+  );
   const allCustomExportFields = useMemo(() => [
     ...CUSTOM_CLIENT_EXPORT_FIELDS,
     ...clientCustomFields
       .filter((field) => (
         field.key !== "legalName" &&
-        !SENSITIVE_EXPORT_FIELD_PATTERN.test(`${field.key} ${field.label}`)
+        isSafeCustomExportField(`${field.key} ${field.label}`)
       ))
       .map((field) => ({
         id: `custom:${field.key}`,
@@ -126,22 +132,21 @@ export default function ReportsPage() {
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(CUSTOM_EXPORT_USER_PRESETS_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return;
-      setUserPresets(parsed.filter((preset) => preset && typeof preset.id === "string" && typeof preset.name === "string"));
-    } catch {
-      // Ignore malformed preset storage and continue with no saved presets.
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(CUSTOM_EXPORT_USER_PRESETS_KEY, JSON.stringify(userPresets));
-  }, [userPresets]);
+    if (!customExportOpen || presetsLoaded) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        let legacy: CustomExportPresetDefinition[] = [];
+        try { const parsed = JSON.parse(window.localStorage.getItem(CUSTOM_EXPORT_USER_PRESETS_KEY) || "[]"); if (Array.isArray(parsed)) legacy = parsed.filter((entry) => entry?.id && entry?.name && entry?.config?.fields?.length); } catch { /* Keep malformed browser data untouched. */ }
+        const response = await fetch("/api/reports/custom-export/presets", legacy.length ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ presets: legacy.map((entry) => ({ name: entry.name, config: entry.config, migrationKey: entry.id })) }) } : { cache: "no-store" });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "Could not load export presets");
+        if (legacy.length) window.localStorage.removeItem(CUSTOM_EXPORT_USER_PRESETS_KEY);
+        if (!cancelled) { setUserPresets(body.presets || []); setPresetsLoaded(true); }
+      } catch (error) { if (!cancelled) toast.error(error instanceof Error ? error.message : "Could not load export presets"); }
+    };
+    void load(); return () => { cancelled = true; };
+  }, [customExportOpen, presetsLoaded]);
 
   useEffect(() => {
     const firstGroup = customExportGroups[0]?.[0];
@@ -170,6 +175,7 @@ export default function ReportsPage() {
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     const timeout = window.setTimeout(async () => {
       setClientsLoading(true);
       setClientsLoadError("");
@@ -183,7 +189,7 @@ export default function ReportsPage() {
           params.set("categories", customCategories.join(","));
         }
 
-        const response = await fetch(`/api/clients?${params.toString()}`, { cache: "no-store" });
+        const response = await fetch(`/api/clients?${params.toString()}`, { cache: "no-store", signal: controller.signal });
         if (!response.ok) throw new Error("Failed to load clients");
         const data = await response.json();
         if (cancelled) return;
@@ -195,7 +201,8 @@ export default function ReportsPage() {
             })).filter((client) => client.clientId && client.companyName)
           : [];
         setAvailableClients(nextClients);
-      } catch {
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         if (!cancelled) {
           setClientsLoadError("Unable to load clients for custom export");
           toast.error("Unable to load clients for custom export");
@@ -207,6 +214,7 @@ export default function ReportsPage() {
 
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearTimeout(timeout);
     };
   }, [clientLoadAttempt, clientSearch, customCategories, customExportOpen, hasClientQuery]);
@@ -218,7 +226,10 @@ export default function ReportsPage() {
       return;
     }
 
+    setPreview(null);
+    setPreviewLoading(true);
     let cancelled = false;
+    const controller = new AbortController();
     const timeout = window.setTimeout(async () => {
       setPreviewLoading(true);
       setPreviewError("");
@@ -227,6 +238,7 @@ export default function ReportsPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
+          signal: controller.signal,
           body: JSON.stringify({
             fields: customFields,
             fy: customFy,
@@ -246,7 +258,8 @@ export default function ReportsPage() {
           return;
         }
         setPreview(body as CustomExportPreview);
-      } catch {
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         if (!cancelled) {
           setPreview(null);
           setPreviewError("Failed to load preview");
@@ -258,6 +271,7 @@ export default function ReportsPage() {
 
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearTimeout(timeout);
     };
   }, [
@@ -316,6 +330,7 @@ export default function ReportsPage() {
       return;
     }
 
+    if (previewLoading || previewError || !preview?.previewColumns.length || (dateFrom && dateTo && dateFrom > dateTo)) { toast.error("Review the export preview and correct any errors first"); return; }
     setCustomDownloading(true);
     try {
       const r = await fetch("/api/reports/custom-export", {
@@ -378,7 +393,8 @@ export default function ReportsPage() {
   };
 
   const applyPreset = (config: CustomExportPresetConfig) => {
-    setCustomFields(config.fields.length > 0 ? [...config.fields] : [...DEFAULT_CUSTOM_FIELDS]);
+    const safeFields = config.fields.filter((fieldId) => allCustomExportFields.some((field) => field.id === fieldId));
+    setCustomFields(safeFields.length > 0 ? safeFields : [...DEFAULT_CUSTOM_FIELDS]);
     setCustomCategories([...(config.categories || [])]);
     setSelectedClientIds([...(config.clientIds || [])]);
     setDateFrom(config.dateFrom || "");
@@ -399,7 +415,8 @@ export default function ReportsPage() {
     customFy === (config.fy || customFy)
   );
 
-  const saveCurrentPreset = () => {
+  const saveCurrentPreset = async () => {
+    if (savingPresetRef.current) return;
     const trimmedName = presetName.trim();
     if (!trimmedName) {
       toast.error("Enter a preset name");
@@ -409,7 +426,7 @@ export default function ReportsPage() {
     const preset: CustomExportPresetDefinition = {
       id: `user-${Date.now()}`,
       name: trimmedName,
-      description: "Saved in this browser",
+      description: "Saved to your account",
       config: {
         fields: customFields,
         fy: customFy,
@@ -422,13 +439,21 @@ export default function ReportsPage() {
       },
     };
 
-    setUserPresets((current) => [preset, ...current]);
-    setPresetName("");
-    toast.success("Preset saved");
+    savingPresetRef.current = true;
+    try {
+      const response = await fetch("/api/reports/custom-export/presets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: preset.name, config: preset.config }) });
+      const body = await response.json(); if (!response.ok) throw new Error(body.error || "Could not save preset");
+      setUserPresets(body.presets || []); setPresetName(""); toast.success("Export preset saved to your account");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not save preset"); }
+    finally { savingPresetRef.current = false; }
   };
 
-  const deletePreset = (presetId: string) => {
-    setUserPresets((current) => current.filter((preset) => preset.id !== presetId));
+  const deletePreset = async (presetId: string) => {
+    try {
+      const response = await fetch("/api/reports/custom-export/presets?id=" + encodeURIComponent(presetId), { method: "DELETE" });
+      const body = await response.json(); if (!response.ok) throw new Error(body.error || "Could not delete preset");
+      setUserPresets(body.presets || []); toast.success("Preset deleted");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not delete preset"); }
   };
 
   const toggleFieldGroup = (groupName: string) => {
@@ -459,13 +484,14 @@ export default function ReportsPage() {
       <ReportStudio
         fy={fy}
         ready={financialYearReady}
+        customFields={reportStudioCustomFields}
         onFyChange={setFy}
         onOpenCustomExport={openCustomExport}
         onDownloadQuickReport={downloadReport}
         quickDownloading={downloading}
       />
 
-      {customExportOpen && <CustomExportModal
+      <CustomExportModal
         customExportOpen={customExportOpen}
         customDownloading={customDownloading}
         allCustomExportFields={allCustomExportFields}
@@ -520,7 +546,7 @@ export default function ReportsPage() {
         toggleCategory={toggleCategory}
         toggleClientSelection={toggleClientSelection}
         downloadCustomExport={downloadCustomExport}
-      />}
+      />
     </div>
   );
 }

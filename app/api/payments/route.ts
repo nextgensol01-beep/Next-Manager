@@ -73,8 +73,8 @@ export async function POST(req: NextRequest) {
     const [client, billing] = await Promise.all([
       Client.findOne({ clientId }).select("clientId").lean() as Promise<{ clientId?: string } | null>,
       (requestedBillingId
-        ? Billing.findOne({ _id: requestedBillingId, clientId }).select("_id totalAmount financialYear").lean()
-        : Billing.findOne({ clientId, financialYear }).select("_id totalAmount financialYear").lean()) as Promise<{ _id?: unknown; totalAmount?: number; financialYear?: string } | null>,
+        ? Billing.findOne({ _id: requestedBillingId, clientId }).select("_id totalAmount financialYear billType").lean()
+        : Billing.findOne({ clientId, financialYear, billType: { $in: ["annual_return", null] } }).select("_id totalAmount financialYear billType").lean()) as Promise<{ _id?: unknown; totalAmount?: number; financialYear?: string; billType?: string } | null>,
     ]);
 
     if (!client) {
@@ -99,8 +99,10 @@ export async function POST(req: NextRequest) {
         paymentType: { $ne: "advance" },
         $or: [
           { billingId },
-          { billingId: { $in: ["", null] }, financialYear: billingFinancialYear },
-          { billingId: { $exists: false }, financialYear: billingFinancialYear },
+          ...((billing.billType || "annual_return") === "annual_return" ? [
+            { billingId: { $in: ["", null] }, financialYear: billingFinancialYear },
+            { billingId: { $exists: false }, financialYear: billingFinancialYear },
+          ] : []),
         ],
       })
         .select("amountPaid")

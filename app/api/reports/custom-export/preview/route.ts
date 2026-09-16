@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
       fields: result.fields,
       previewColumns: result.previewColumns,
       summary: result.summary,
+      sampleRows: result.rows.slice(0, 5),
     });
   } catch (error) {
     console.error("POST /api/reports/custom-export/preview:", error);
