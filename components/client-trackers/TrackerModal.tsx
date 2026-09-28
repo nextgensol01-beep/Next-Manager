@@ -17,12 +17,13 @@ type TrackerModalProps = {
   scrollable?: boolean;
   size?: "sm" | "md" | "lg" | "xl" | "2xl";
   fixedHeight?: boolean;
+  className?: string;
 };
 
 /** A calm, focused sheet used throughout the client-tracker workspace. */
-export default function TrackerModal({ open, onClose, title, subtitle, icon: Icon = ClipboardList, children, footer, size = "xl", fixedHeight = false, scrollable = true }: TrackerModalProps) {
+export default function TrackerModal({ open, onClose, title, subtitle, icon: Icon = ClipboardList, children, footer, size = "xl", fixedHeight = false, scrollable = true, className }: TrackerModalProps) {
   return <Modal open={open} onClose={onClose} title={title} size={size} hideHeader fluidMotion
-    className={`tracker-modal mt-auto ${fixedHeight ? "h-[94dvh] sm:h-[90vh]" : "h-auto"} max-h-[94dvh] rounded-b-none rounded-t-[28px] border-white/70 shadow-[0_34px_110px_rgba(0,0,0,0.28)] backdrop-blur-2xl sm:mt-0 sm:max-h-[90vh] sm:rounded-[28px] dark:border-white/[0.12] dark:shadow-[0_38px_120px_rgba(0,0,0,0.74)]`}
+    className={`tracker-modal ${className || ""} mt-auto ${fixedHeight ? "h-[94dvh] sm:h-[90vh]" : "h-auto"} max-h-[94dvh] rounded-b-none rounded-t-[28px] border-white/70 shadow-[0_34px_110px_rgba(0,0,0,0.28)] backdrop-blur-2xl sm:mt-0 sm:max-h-[90vh] sm:rounded-[28px] dark:border-white/[0.12] dark:shadow-[0_38px_120px_rgba(0,0,0,0.74)]`}
     bgColor="rgba(var(--color-card-rgb),0.92)">
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-transparent">
       <div className="tracker-modal-header flex shrink-0 items-start justify-between gap-3 border-b border-white/[0.35] bg-white/20 px-4 py-4 backdrop-blur-2xl sm:gap-4 sm:px-6 sm:py-5 dark:border-white/[0.10] dark:bg-white/[0.04]">

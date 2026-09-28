@@ -2,6 +2,15 @@
 
 import Link from "next/link";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AnimatePresence,
+  LayoutGroup,
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useSpring,
+  useTransform,
+} from "framer-motion";
 import { useSession } from "next-auth/react";
 import toast from "react-hot-toast";
 import {
@@ -1040,7 +1049,7 @@ export default function ClientTrackerDetailPage({
     </div>
   );
   const emailConfigFooter = (
-    <div className="tracker-modal-footer flex justify-end gap-3">
+    <div className="tracker-modal-footer tracker-email-footer flex justify-end gap-3">
       <button
         type="button"
         onClick={requestCloseEmailConfig}
@@ -2653,8 +2662,9 @@ export default function ClientTrackerDetailPage({
           fixedHeight
           scrollable={false}
           footer={emailConfigFooter}
+          className="tracker-email-modal"
         >
-          <div className="h-full min-h-0 overflow-y-auto p-5">
+          <div className="tracker-email-workspace h-full min-h-0 overflow-y-auto p-5">
             {emailConfigError && (
               <div
                 role="alert"
@@ -2665,7 +2675,7 @@ export default function ClientTrackerDetailPage({
             )}
             {emailSetupScreen === "library" && (
               <div className="space-y-5">
-                <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 dark:border-blue-900/50 dark:bg-blue-950/20">
+                <div className="tracker-email-library-hero rounded-2xl border border-blue-100 bg-blue-50 p-4 dark:border-blue-900/50 dark:bg-blue-950/20">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
                       <p className="text-base font-semibold text-default">
@@ -2677,17 +2687,24 @@ export default function ClientTrackerDetailPage({
                           : "Create your first client-email workflow."}
                       </p>
                     </div>
-                    <label className="flex items-center gap-2 rounded-xl border border-blue-100 bg-card px-3 py-2 text-sm dark:border-blue-900/50 dark:bg-surface">
-                      <input
-                        type="checkbox"
-                        checked={emailEnabledDraft}
-                        onChange={(event) => {
+                    <div className="tracker-email-toggle flex items-center gap-2 rounded-xl border border-blue-100 bg-card px-3 py-2 text-sm dark:border-blue-900/50 dark:bg-surface">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={emailEnabledDraft}
+                        aria-label={`Email updates ${emailEnabledDraft ? "enabled" : "disabled"}`}
+                        onClick={() => {
                           setEmailConfigError(null);
-                          setEmailEnabledDraft(event.target.checked);
+                          setEmailEnabledDraft((enabled) => !enabled);
                         }}
-                      />
+                        className={`relative inline-flex h-[31px] w-[51px] shrink-0 items-center rounded-2xl transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#202023] ${emailEnabledDraft ? "bg-[#34C759] dark:bg-[#30D158]" : "bg-[#E5E5EA] dark:bg-[#3A3A3C]"}`}
+                      >
+                        <span
+                          className={`absolute left-0.5 h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_6px_rgba(0,0,0,0.30),0_1px_3px_rgba(0,0,0,0.15)] transition-transform duration-200 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] ${emailEnabledDraft ? "translate-x-5" : "translate-x-0"}`}
+                        />
+                      </button>
                       <span className="font-medium text-default">Enable email updates</span>
-                    </label>
+                    </div>
                   </div>
                   <p className="mt-3 text-xs text-muted">
                     Only admins can prepare, draft, or send emails. Every delivery
@@ -2712,7 +2729,7 @@ export default function ClientTrackerDetailPage({
                           setBuilderStartPage(0);
                           setEmailSetupScreen("builder");
                         }}
-                        className="rounded-2xl border border-base bg-card p-4 text-left transition hover:border-blue-400 hover:shadow-sm"
+                        className="tracker-email-workflow-card rounded-2xl border border-base bg-card p-4 text-left transition hover:border-blue-400 hover:shadow-sm"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -2740,7 +2757,7 @@ export default function ClientTrackerDetailPage({
                       setNewWorkflowDetails({ name: "", description: "" });
                       setEmailSetupScreen("new-details");
                     }}
-                    className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-dashed border-blue-300 bg-blue-50/50 p-4 text-center text-blue-700 transition hover:bg-blue-50 disabled:opacity-50 dark:border-blue-900/70 dark:bg-blue-950/10"
+                    className="tracker-email-create-card flex min-h-40 flex-col items-center justify-center rounded-2xl border border-dashed border-blue-300 bg-blue-50/50 p-4 text-center text-blue-700 transition hover:bg-blue-50 disabled:opacity-50 dark:border-blue-900/70 dark:bg-blue-950/10"
                   >
                     <Plus className="mb-2 h-6 w-6" />
                     <span className="font-semibold">Create email workflow</span>
@@ -3801,6 +3818,443 @@ function TrackerEmailRecipientCard({
   );
 }
 
+type WorkflowSetupPage = { title: string; description: string };
+
+type FluidLayerHandle = {
+  disturb: (x: number, y: number, velocityX: number, velocityY: number) => void;
+};
+
+type FluidDyeCloud = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  aspect: number;
+  phase: number;
+  hue: [number, number, number];
+  spin: number;
+};
+
+/** A deliberately tiny canvas: independent dye clouds, not a cursor-driven gradient. */
+const InteractiveFluidLayer = React.forwardRef<FluidLayerHandle, {
+  active: boolean;
+  reduceMotion: boolean | null;
+}>(function InteractiveFluidLayer({ active, reduceMotion }, ref) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const activeRef = useRef(active);
+  const settlingRef = useRef(false);
+  const resumeRef = useRef<() => void>(() => undefined);
+  const simulationRef = useRef<{
+    width: number;
+    height: number;
+    clouds: FluidDyeCloud[];
+    lastFrame: number;
+    lastInput: number;
+  } | null>(null);
+  const [settling, setSettling] = useState(false);
+
+  useEffect(() => {
+    activeRef.current = active;
+    if (active) {
+      settlingRef.current = true;
+      setSettling(true);
+      resumeRef.current();
+    }
+  }, [active]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    let frame = 0;
+    let running = false;
+    let destroyed = false;
+    const now = () => performance.now();
+
+    const createClouds = (width: number, height: number): FluidDyeCloud[] => {
+      const colors: [number, number, number][] = [
+        [137, 92, 246],
+        [62, 130, 246],
+        [44, 199, 232],
+        [220, 99, 212],
+        [104, 114, 255],
+        [173, 93, 238],
+      ];
+      const positions = [
+        [0.16, 0.68], [0.34, 0.31], [0.57, 0.72],
+        [0.78, 0.34], [0.90, 0.66], [0.49, 0.46],
+      ];
+      return colors.map((hue, index) => ({
+        x: width * positions[index][0],
+        y: height * positions[index][1],
+        vx: 0,
+        vy: 0,
+        radius: Math.max(height * (0.64 + (index % 3) * 0.1), 24),
+        aspect: 0.82 + (index % 3) * 0.16,
+        phase: index * 1.71,
+        hue,
+        spin: index % 2 ? 1 : -1,
+      }));
+    };
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.max(1, Math.round(rect.width * dpr));
+      canvas.height = Math.max(1, Math.round(rect.height * dpr));
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      simulationRef.current = {
+        width: rect.width,
+        height: rect.height,
+        clouds: createClouds(rect.width, rect.height),
+        lastFrame: now(),
+        lastInput: 0,
+      };
+      draw(0, true);
+    };
+
+    const draw = (timestamp: number, isStatic = false) => {
+      const simulation = simulationRef.current;
+      if (!simulation) return;
+      const { width, height, clouds } = simulation;
+      context.clearRect(0, 0, width, height);
+      context.globalCompositeOperation = "screen";
+
+      clouds.forEach((cloud) => {
+        const speed = Math.min(1.8, Math.hypot(cloud.vx, cloud.vy));
+        const stretch = 1 + speed * 0.4;
+        const angle = Math.atan2(cloud.vy, cloud.vx || 0.0001) + cloud.spin * 0.12;
+        const radius = cloud.radius * stretch;
+        const alpha = isStatic ? 0.12 : 0.15 + Math.min(0.09, speed * 0.06);
+        const gradient = context.createRadialGradient(cloud.x, cloud.y, radius * 0.08, cloud.x, cloud.y, radius);
+        gradient.addColorStop(0, `rgba(${cloud.hue[0]}, ${cloud.hue[1]}, ${cloud.hue[2]}, ${alpha})`);
+        gradient.addColorStop(0.46, `rgba(${cloud.hue[0]}, ${cloud.hue[1]}, ${cloud.hue[2]}, ${alpha * 0.52})`);
+        gradient.addColorStop(1, `rgba(${cloud.hue[0]}, ${cloud.hue[1]}, ${cloud.hue[2]}, 0)`);
+        context.save();
+        context.translate(cloud.x, cloud.y);
+        context.rotate(angle);
+        context.scale(1, cloud.aspect);
+        context.translate(-cloud.x, -cloud.y);
+        context.fillStyle = gradient;
+        context.beginPath();
+        context.arc(cloud.x, cloud.y, radius, 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+      });
+      context.globalCompositeOperation = "source-over";
+    };
+
+    const advance = (timestamp: number) => {
+      const simulation = simulationRef.current;
+      if (!simulation || destroyed) return;
+      const elapsed = Math.min(34, Math.max(8, timestamp - simulation.lastFrame));
+      simulation.lastFrame = timestamp;
+      const step = elapsed / 16.67;
+      const ambient = activeRef.current ? 1 : 0;
+      let energy = 0;
+
+      simulation.clouds.forEach((cloud, index) => {
+        const ambientX = Math.sin(timestamp * 0.00075 + cloud.phase) * 0.010 * ambient;
+        const ambientY = Math.cos(timestamp * 0.00062 + cloud.phase * 1.34) * 0.008 * ambient;
+        const centerX = simulation.width * (0.48 + Math.sin(cloud.phase) * 0.16);
+        const centerY = simulation.height * (0.5 + Math.cos(cloud.phase * 1.4) * 0.12);
+        const curl = Math.sin(timestamp * 0.0011 + index * 1.9) * 0.003 * cloud.spin;
+        const recovery = activeRef.current ? 1 : 0.12;
+        cloud.vx += (ambientX + (centerX - cloud.x) * 0.00018 * recovery - cloud.vy * curl) * step;
+        cloud.vy += (ambientY + (centerY - cloud.y) * 0.00024 * recovery + cloud.vx * curl) * step;
+        const drag = Math.pow(activeRef.current ? 0.975 : 0.93, step);
+        cloud.vx *= drag;
+        cloud.vy *= drag;
+        cloud.x += cloud.vx * step;
+        cloud.y += cloud.vy * step;
+        energy += Math.abs(cloud.vx) + Math.abs(cloud.vy);
+      });
+
+      draw(timestamp);
+      const shouldContinue = activeRef.current || timestamp - simulation.lastInput < 980 || energy > 0.065;
+      if (shouldContinue) {
+        frame = requestAnimationFrame(advance);
+      } else {
+        running = false;
+        if (settlingRef.current) {
+          settlingRef.current = false;
+          setSettling(false);
+        }
+      }
+    };
+
+    const resume = () => {
+      if (!running && !destroyed && !reduceMotion) {
+        running = true;
+        frame = requestAnimationFrame(advance);
+      }
+    };
+    resumeRef.current = resume;
+
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+    resize();
+    if (active && !reduceMotion) resume();
+
+    return () => {
+      destroyed = true;
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      resumeRef.current = () => undefined;
+    };
+  }, [reduceMotion]);
+
+  React.useImperativeHandle(ref, () => ({
+    disturb(x, y, velocityX, velocityY) {
+      const simulation = simulationRef.current;
+      if (!simulation || reduceMotion) return;
+      const speed = Math.min(1.4, Math.hypot(velocityX, velocityY));
+      if (speed < 0.015) return;
+      const cursorX = simulation.width * (0.2 + x * 0.6);
+      const cursorY = simulation.height * (0.15 + y * 0.7);
+      const influence = Math.max(28, Math.min(52, simulation.height * 1.2));
+      simulation.clouds.forEach((cloud) => {
+        const distance = Math.hypot(cloud.x - cursorX, cloud.y - cursorY);
+        const falloff = Math.exp(-(distance * distance) / (2 * influence * influence));
+        const forwardX = velocityX * (0.72 + falloff * 0.9);
+        const forwardY = velocityY * (0.72 + falloff * 0.9);
+        const perpendicularX = -velocityY * 0.34 * cloud.spin * falloff;
+        const perpendicularY = velocityX * 0.34 * cloud.spin * falloff;
+        cloud.vx = Math.max(-2.2, Math.min(2.2, cloud.vx + (forwardX + perpendicularX) * 0.52));
+        cloud.vy = Math.max(-2.2, Math.min(2.2, cloud.vy + (forwardY + perpendicularY) * 0.52));
+      });
+      simulation.lastInput = performance.now();
+      settlingRef.current = true;
+      setSettling(true);
+      resumeRef.current();
+    },
+  }), [reduceMotion]);
+
+  return (
+    <span className={`fluid-step-fluid-wrap ${active ? "is-active" : ""} ${settling ? "is-settling" : ""}`} aria-hidden="true">
+      <canvas ref={canvasRef} className="fluid-step-fluid-canvas" />
+    </span>
+  );
+});
+
+function FluidStepNavigation({
+  pages,
+  currentPage,
+  onSelect,
+}: {
+  pages: WorkflowSetupPage[];
+  currentPage: number;
+  onSelect: (page: number) => void;
+}) {
+  const [hoveredPage, setHoveredPage] = useState<number | null>(null);
+  const reduceMotion = useReducedMotion();
+  const pointerX = useMotionValue(0);
+  const pointerY = useMotionValue(0);
+  const pointerScale = useMotionValue(1);
+  const fluidRef = useRef<FluidLayerHandle | null>(null);
+  const fluidPointerRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  const outerX = useSpring(pointerX, { stiffness: 165, damping: 20, mass: 0.9 });
+  const outerY = useSpring(pointerY, { stiffness: 165, damping: 20, mass: 0.9 });
+  const outerScale = useSpring(pointerScale, { stiffness: 165, damping: 20, mass: 0.9 });
+  const titleX = useSpring(useTransform(pointerX, (value) => value * 0.42), { stiffness: 175, damping: 21, mass: 0.86 });
+  const titleY = useSpring(useTransform(pointerY, (value) => value * 0.42), { stiffness: 175, damping: 21, mass: 0.86 });
+  const highlightX = useSpring(useTransform(pointerX, (value) => value * 2.25), { stiffness: 125, damping: 19, mass: 1 });
+  const highlightY = useSpring(useTransform(pointerY, (value) => value * 2.5), { stiffness: 125, damping: 19, mass: 1 });
+  const current = pages[currentPage];
+  const textTransition = reduceMotion
+    ? { duration: 0.01 }
+    : { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const };
+  const spring = reduceMotion
+    ? { duration: 0.01 }
+    : { type: "spring" as const, stiffness: 245, damping: 24, mass: 0.9 };
+  const resetPointer = () => {
+    pointerX.set(0);
+    pointerY.set(0);
+    pointerScale.set(1);
+  };
+  const updatePointer = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
+    if (index !== currentPage || reduceMotion) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = Math.max(-1, Math.min(1, (event.clientX - bounds.left) / bounds.width * 2 - 1));
+    const y = Math.max(-1, Math.min(1, (event.clientY - bounds.top) / bounds.height * 2 - 1));
+    const normalizedX = (x + 1) / 2;
+    const normalizedY = (y + 1) / 2;
+    const previous = fluidPointerRef.current;
+    const at = event.timeStamp;
+    if (previous) {
+      const elapsed = Math.max(8, Math.min(48, at - previous.at));
+      fluidRef.current?.disturb(
+        normalizedX,
+        normalizedY,
+        ((normalizedX - previous.x) * bounds.width) / elapsed,
+        ((normalizedY - previous.y) * bounds.height) / elapsed,
+      );
+    }
+    fluidPointerRef.current = { x: normalizedX, y: normalizedY, at };
+    pointerX.set(x * 3.6);
+    pointerY.set(y * 2.5);
+    pointerScale.set(1.014);
+  };
+
+  return (
+    <LayoutGroup id="email-workflow-stepper">
+      <nav className="fluid-step-navigation" aria-label="Email workflow setup">
+        <div className="fluid-step-scroll">
+          <div className="fluid-step-track">
+          {pages.map((page, index) => {
+            const selected = index === currentPage;
+            const hovered = hoveredPage === index;
+            const expanded = selected || hovered;
+            return (
+              <React.Fragment key={page.title}>
+                {index > 0 && (
+                  <motion.span
+                    layout
+                    aria-hidden="true"
+                    className={`fluid-step-connector ${index <= currentPage ? "is-complete" : ""}`}
+                    transition={spring}
+                  />
+                )}
+                <motion.button
+                  layout
+                  type="button"
+                  aria-current={selected ? "step" : undefined}
+                  aria-label={`Step ${index + 1}: ${page.title}`}
+                  onClick={() => {
+                    setHoveredPage(index);
+                    if (index !== currentPage) resetPointer();
+                    onSelect(index);
+                  }}
+                  onMouseEnter={() => {
+                    setHoveredPage(index);
+                    if (index === currentPage && !reduceMotion)
+                      pointerScale.set(1.012);
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredPage(null);
+                    fluidPointerRef.current = null;
+                    if (index === currentPage) resetPointer();
+                  }}
+                  onFocus={() => setHoveredPage(index)}
+                  onBlur={() => {
+                    setHoveredPage(null);
+                    if (index === currentPage) resetPointer();
+                  }}
+                  onPointerMove={(event) => updatePointer(event, index)}
+                  transition={spring}
+                  whileTap={reduceMotion ? undefined : { scale: 0.985 }}
+                  className={`fluid-step ${expanded ? "is-expanded" : ""} ${selected ? "is-selected" : ""} ${selected && hovered ? "is-hovered" : ""}`}
+                >
+                  {selected && (
+                    <motion.span
+                      layoutId="fluid-selected-material"
+                      transition={spring}
+                      className="fluid-step-material"
+                      style={{ x: outerX, y: outerY, scale: outerScale }}
+                    >
+                      {!reduceMotion && (
+                        <span key={currentPage} className="fluid-step-liquid" />
+                      )}
+                      <InteractiveFluidLayer
+                        ref={fluidRef}
+                        active={selected && hovered}
+                        reduceMotion={reduceMotion}
+                      />
+                      <span aria-hidden="true" className="fluid-step-frost" />
+                      <motion.span
+                        aria-hidden="true"
+                        className="fluid-step-pointer-highlight"
+                        style={{ x: highlightX, y: highlightY }}
+                      />
+                    </motion.span>
+                  )}
+                  <motion.span
+                    className="fluid-step-content"
+                    style={selected ? { x: titleX, y: titleY } : undefined}
+                    animate={hovered && !selected && !reduceMotion ? { scale: [0.975, 1.012, 1], y: [0, -0.5, 0] } : { scale: 1 }}
+                    transition={selected ? spring : { duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <AnimatePresence initial={false} mode="popLayout">
+                      {expanded ? (
+                        <motion.span
+                          key="title"
+                          initial={
+                            reduceMotion
+                              ? { opacity: 0 }
+                              : { opacity: 0, scale: 0.95, filter: "blur(3px)" }
+                          }
+                          animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                          exit={
+                            reduceMotion
+                              ? { opacity: 0 }
+                              : { opacity: 0, scale: 0.88, filter: "blur(3px)" }
+                          }
+                          transition={textTransition}
+                          className="fluid-step-title"
+                        >
+                          {page.title}
+                        </motion.span>
+                      ) : (
+                        <motion.span
+                          key="number"
+                          initial={
+                            reduceMotion
+                              ? { opacity: 0 }
+                              : { opacity: 0, scale: 0.88, filter: "blur(3px)" }
+                          }
+                          animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                          exit={
+                            reduceMotion
+                              ? { opacity: 0 }
+                              : { opacity: 0, scale: 0.88, filter: "blur(3px)" }
+                          }
+                          transition={textTransition}
+                          className="fluid-step-number"
+                        >
+                          {index + 1}
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                  </motion.span>
+                </motion.button>
+              </React.Fragment>
+            );
+          })}
+          </div>
+        </div>
+        <div className="fluid-step-description" aria-live="polite">
+        <AnimatePresence initial={false} mode="wait">
+          <motion.p
+            key={currentPage}
+            initial={
+              reduceMotion
+                ? { opacity: 0 }
+                : { opacity: 0, y: 7, filter: "blur(3px)" }
+            }
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={
+              reduceMotion
+                ? { opacity: 0 }
+                : { opacity: 0, y: -5, filter: "blur(3px)" }
+            }
+            transition={reduceMotion ? { duration: 0.01 } : { duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {current.description}
+          </motion.p>
+        </AnimatePresence>
+        </div>
+      </nav>
+    </LayoutGroup>
+  );
+}
+
 function TrackerEmailWorkflowEditor({
   workflow,
   fields,
@@ -3977,8 +4431,8 @@ function TrackerEmailWorkflowEditor({
   const [setupPage, setSetupPage] = useState(startPage);
   useEffect(() => setSetupPage(startPage), [workflow.id, startPage]);
   return (
-    <section className="space-y-4">
-      <div className="rounded-2xl border border-base bg-card p-4">
+    <section className="tracker-email-editor space-y-4">
+      <div className="tracker-email-workflow-summary rounded-2xl border border-base bg-card p-4">
         <button
           type="button"
           onClick={onBack}
@@ -4002,33 +4456,11 @@ function TrackerEmailWorkflowEditor({
           </span>
         </div>
       </div>
-      <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-default">{setupPages[setupPage].title}</p>
-            <p className="mt-0.5 text-xs text-muted">
-              {setupPages[setupPage].description}
-            </p>
-          </div>
-          <span className="rounded-full bg-card px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-surface dark:text-blue-200">
-            {setupPage + 1} of {setupPages.length}
-          </span>
-        </div>
-        <div className="mt-3 flex items-center gap-1.5">
-          {setupPages.map((page, index) => (
-            <button
-              key={page.title}
-              type="button"
-              onClick={() => setSetupPage(index)}
-              title={page.title}
-              aria-label={`Step ${index + 1}: ${page.title}`}
-              className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition ${setupPage === index ? "bg-blue-600 text-white" : index < setupPage ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200" : "bg-card text-muted dark:bg-surface"}`}
-            >
-              {index + 1}
-            </button>
-          ))}
-        </div>
-      </div>
+      <FluidStepNavigation
+        pages={setupPages}
+        currentPage={setupPage}
+        onSelect={setSetupPage}
+      />
       {setupPage === 0 && <>
       <div className="flex gap-2">
         <input
