@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import useSWR from "swr";
@@ -10,6 +11,7 @@ import { annualReturnWorkflowProgressSteps } from "@/lib/annualReturnStatus";
 import { findCpcbRegistrationDate, isDateInFinancialYear } from "@/lib/currentFyRegistration";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import Modal from "@/components/ui/Modal";
+import ConfirmModal from "@/components/ui/ConfirmModal";
 import toast from "react-hot-toast";
 import { invalidate, useCache } from "@/lib/useCache";
 import ClientFormModal from "@/components/clients/ClientFormModal";
@@ -20,8 +22,13 @@ import {
   fetchClientWorkspace,
 } from "@/lib/clientWorkspaceCache";
 import type { ClientCustomFieldDefinition, ClientCustomFieldGroupDefinition } from "@/lib/clientCustomFields";
+import type { TrackerField, TrackerValues } from "@/lib/clientTrackers";
 import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearState } from "@/app/providers";
+import BillingModal from "@/app/dashboard/billing/BillingModal";
+import ApplyAdvanceModal from "@/app/dashboard/billing/ApplyAdvanceModal";
+import InvoiceModal from "@/app/dashboard/billing/InvoiceModal";
+import type { Billing as BillingWorkspace } from "@/app/dashboard/billing/types";
 import ClientProfileActivityTimeline from "./ClientProfileActivityTimeline";
 import ClientProfileBillingPayments, { FinancialOverviewPanel } from "./ClientProfileBillingPayments";
 import ClientProfileFinancialSummary from "./ClientProfileFinancialSummary";
@@ -166,6 +173,14 @@ type InvoiceType = (typeof INVOICE_TYPE_OPTIONS)[number]["id"];
 type ReceivedVia = InvoiceReceivedVia;
 type InvoiceStatus = InvoiceMonthStatus;
 
+type ProfileConfirmation = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  variant?: "danger" | "warning";
+  action: () => Promise<void>;
+};
+
 type ClientWorkspacePayload = {
   client: Client;
   financialYears: FYRecord[];
@@ -199,6 +214,11 @@ const CUSTOM_FIELD_ICON_COMPONENTS = {
   lock: LockKeyhole,
   shield: Shield,
 } as const;
+
+function trackerBadgeClass(field: TrackerField, value: unknown) {
+  if (field.type === "status") return ({ "Not Started": "bg-slate-100 text-slate-700", "In Progress": "bg-amber-100 text-amber-800", Done: "bg-emerald-100 text-emerald-800", Blocked: "bg-rose-100 text-rose-800", "Not Applicable": "bg-blue-100 text-blue-800" })[String(value)] || "bg-card text-muted";
+  return ({ slate: "bg-slate-100 text-slate-700", blue: "bg-blue-100 text-blue-800", violet: "bg-violet-100 text-violet-800", amber: "bg-amber-100 text-amber-800", emerald: "bg-emerald-100 text-emerald-800", rose: "bg-rose-100 text-rose-800" })[field.optionColors?.[String(value)] || "slate"];
+}
 
 export default function ClientProfilePage() {
   const { data: session, status: sessionStatus } = useSession();
@@ -240,6 +260,13 @@ export default function ClientProfilePage() {
   const [linkedQuotations, setLinkedQuotations] = useState<QuotationSummary[]>([]);
   const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
   const [clientWorkItems, setClientWorkItems] = useState<ClientWorkItem[]>([]);
+  const [clientTrackers, setClientTrackers] = useState<Array<{
+    _id: string;
+    name: string;
+    financialYear?: string;
+    fields: TrackerField[];
+    entry?: { values: TrackerValues; updatedAt: string; updatedBy?: string } | null;
+  }>>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [activitiesTotal, setActivitiesTotal] = useState(0);
   const [activityHasMore, setActivityHasMore] = useState(false);
@@ -335,6 +362,8 @@ export default function ClientProfilePage() {
   });
   const [billingModal, setBillingModal] = useState(false);
   const [editingBillingId, setEditingBillingId] = useState<string | null>(null);
+  const [applyAdvanceBilling, setApplyAdvanceBilling] = useState<Billing | null>(null);
+  const [billingInvoiceTarget, setBillingInvoiceTarget] = useState<Billing | null>(null);
   const [billingForm, setBillingForm] = useState({
     financialYear: selectedFy,
     govtCharges: "0",
@@ -347,6 +376,7 @@ export default function ClientProfilePage() {
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [paymentForm, setPaymentForm] = useState({
     financialYear: selectedFy,
+    billingId: "",
     paymentType: "billing" as "billing" | "advance",
     amountPaid: "",
     paymentDate: todayInputValue(),
@@ -382,6 +412,7 @@ export default function ClientProfilePage() {
     dueAt: "",
   });
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [profileConfirmation, setProfileConfirmation] = useState<ProfileConfirmation | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showAllCustomProfileInfo, setShowAllCustomProfileInfo] = useState(false);
   const { data: customFieldDefinitions } = useCache<ClientCustomFieldDefinition[]>("/api/client-custom-fields", { initialData: [] });
@@ -547,9 +578,10 @@ export default function ClientProfilePage() {
 
   const refreshSupportData = useCallback(async () => {
     const encodedClientId = encodeURIComponent(String(clientId));
-    const [notesResponse, workItemsResponse] = await Promise.all([
+    const [notesResponse, workItemsResponse, trackersResponse] = await Promise.all([
       fetch(`/api/client-notes?clientId=${encodedClientId}`, { cache: "no-store" }),
       fetch(`/api/client-work-items?clientId=${encodedClientId}`, { cache: "no-store" }),
+      fetch(`/api/client-trackers?clientId=${encodedClientId}`, { cache: "no-store" }),
     ]);
     if (notesResponse.ok) {
       const payload = await notesResponse.json();
@@ -558,6 +590,10 @@ export default function ClientProfilePage() {
     if (workItemsResponse.ok) {
       const payload = await workItemsResponse.json();
       setClientWorkItems(Array.isArray(payload) ? payload : []);
+    }
+    if (trackersResponse.ok) {
+      const payload = await trackersResponse.json();
+      setClientTrackers(Array.isArray(payload) ? payload : []);
     }
   }, [clientId]);
 
@@ -699,16 +735,22 @@ export default function ClientProfilePage() {
     }
   };
 
-  const deleteClientNote = async (note: ClientNote) => {
-    if (!window.confirm("Delete this internal note?")) return;
-    const response = await fetch(`/api/client-notes/${note._id}`, { method: "DELETE" });
-    if (!response.ok) {
-      toast.error(await readErrorMessage(response, "Unable to delete the note."));
-      return;
-    }
-    setClientNotes((current) => current.filter((entry) => entry._id !== note._id));
-    scheduleActivityRefresh();
-    toast.success("Note deleted");
+  const deleteClientNote = (note: ClientNote) => {
+    setProfileConfirmation({
+      title: "Delete internal note?",
+      description: "This note will be permanently removed from the client profile.",
+      confirmLabel: "Delete note",
+      action: async () => {
+        const response = await fetch(`/api/client-notes/${note._id}`, { method: "DELETE" });
+        if (!response.ok) {
+          toast.error(await readErrorMessage(response, "Unable to delete the note."));
+          return;
+        }
+        setClientNotes((current) => current.filter((entry) => entry._id !== note._id));
+        scheduleActivityRefresh();
+        toast.success("Note deleted");
+      },
+    });
   };
 
   const openWorkItemModal = (kind: ClientWorkItem["kind"]) => {
@@ -762,15 +804,21 @@ export default function ClientProfilePage() {
     scheduleActivityRefresh();
   };
 
-  const deleteClientWorkItem = async (item: ClientWorkItem) => {
-    if (!window.confirm("Delete this item?")) return;
-    const response = await fetch(`/api/client-work-items/${item._id}`, { method: "DELETE" });
-    if (!response.ok) {
-      toast.error(await readErrorMessage(response, "Unable to delete this item."));
-      return;
-    }
-    setClientWorkItems((current) => current.filter((entry) => entry._id !== item._id));
-    scheduleActivityRefresh();
+  const deleteClientWorkItem = (item: ClientWorkItem) => {
+    setProfileConfirmation({
+      title: "Delete work item?",
+      description: "This task or reminder will be permanently removed.",
+      confirmLabel: "Delete item",
+      action: async () => {
+        const response = await fetch(`/api/client-work-items/${item._id}`, { method: "DELETE" });
+        if (!response.ok) {
+          toast.error(await readErrorMessage(response, "Unable to delete this item."));
+          return;
+        }
+        setClientWorkItems((current) => current.filter((entry) => entry._id !== item._id));
+        scheduleActivityRefresh();
+      },
+    });
   };
 
   const billings = allBillings.filter((record) => record.financialYear === selectedFy);
@@ -779,7 +827,16 @@ export default function ClientProfilePage() {
   const totalPaidForFy = billings.reduce((sum, record) => sum + Number(record.totalPaid || 0), 0);
   const totalPendingForFy = billings.reduce((sum, record) => sum + Number(record.pendingAmount || 0), 0);
   const outstandingBilling = billings.find((record) => Number(record.pendingAmount || 0) > 0) || null;
-  const payments = allPayments.filter((p) => p.financialYear === selectedFy);
+  // Advance payments are client-level balances, so retain them across FYs just
+  // like the Billing workspace does.
+  const payments = allPayments.filter((p) => p.paymentType === "advance" || p.financialYear === selectedFy);
+  const advanceBalance = Math.max(0, allPayments.reduce((sum, payment) => {
+    if (payment.paymentType === "advance") return sum + Number(payment.amountPaid || 0);
+    if (payment.source === "advance_application" || payment.paymentMode === "Advance Applied" || /applied from advance/i.test(payment.notes || "")) {
+      return sum - Number(payment.amountPaid || 0);
+    }
+    return sum;
+  }, 0));
   const invoices = allInvoices.filter((invoice) => invoice.financialYear === selectedFy);
   const uploadRecords = allUploadRecords.filter((record) => record.financialYear === selectedFy);
   const fyLinkedQuotations = linkedQuotations.filter((quotation) => quotation.financialYear === selectedFy);
@@ -1576,21 +1633,6 @@ export default function ClientProfilePage() {
   };
 
   const openBillingModalForRecord = (record?: Billing | null) => {
-    if (!record && client && (client.category === "Importer" || client.category === "Brand Owner")) {
-      if (acceptedQuotations.length === 0) {
-        toast.error("Accept a quotation before generating a bill for this client type.");
-        navigateToClientSection({ primary: "financial", secondary: "quotations" });
-        return;
-      }
-      if (acceptedQuotations.length === 1) {
-        void openBillingFromQuotation(acceptedQuotations[0]);
-        return;
-      }
-      toast("Use an accepted quotation to generate this bill.");
-      navigateToClientSection({ primary: "financial", secondary: "quotations" });
-      return;
-    }
-
     if (record) {
       setEditingBillingId(record._id);
       setBillingForm({
@@ -1733,24 +1775,30 @@ export default function ClientProfilePage() {
     }
   };
 
-  const deleteBilling = async (record: Billing) => {
-    if (!confirm(`Move billing for FY ${record.financialYear} to recycle bin?`)) return;
-    const { commit, rollback } = deleteBillingItem(record._id);
-    try {
-      const response = await fetch(`/api/billing/${record._id}`, { method: "DELETE" });
-      if (!response.ok) {
-        rollback();
-        toast.error("Failed to remove billing.");
-        return;
-      }
-      commit();
-      refreshWorkspaceSilently();
-      scheduleActivityRefresh();
-      toast.success("Billing moved to recycle bin");
-    } catch {
-      rollback();
-      toast.error("Something went wrong deleting billing.");
-    }
+  const deleteBilling = (record: Billing) => {
+    setProfileConfirmation({
+      title: "Move billing to recycle bin?",
+      description: `The billing record for FY ${record.financialYear} can be restored from the recycle bin later.`,
+      confirmLabel: "Move to bin",
+      action: async () => {
+        const { commit, rollback } = deleteBillingItem(record._id);
+        try {
+          const response = await fetch(`/api/billing/${record._id}`, { method: "DELETE" });
+          if (!response.ok) {
+            rollback();
+            toast.error("Failed to remove billing.");
+            return;
+          }
+          commit();
+          refreshWorkspaceSilently();
+          scheduleActivityRefresh();
+          toast.success("Billing moved to recycle bin");
+        } catch {
+          rollback();
+          toast.error("Something went wrong deleting billing.");
+        }
+      },
+    });
   };
 
   const closePaymentModal = () => {
@@ -1758,7 +1806,8 @@ export default function ClientProfilePage() {
     setEditingPaymentId(null);
     setPaymentForm({
       financialYear: selectedFy,
-      paymentType: billing ? "billing" : "advance",
+      billingId: billings[0]?._id || "",
+      paymentType: billings.length ? "billing" : "advance",
       amountPaid: "",
       paymentDate: todayInputValue(),
       paymentMode: PAYMENT_MODES[0] || "NEFT",
@@ -1772,6 +1821,7 @@ export default function ClientProfilePage() {
       setEditingPaymentId(record._id);
       setPaymentForm({
         financialYear: record.financialYear || selectedFy,
+        billingId: record.billingId || (record.paymentType === "advance" ? "" : (billing?._id || "")),
         paymentType: record.paymentType === "advance" ? "advance" : "billing",
         amountPaid: String(record.amountPaid || ""),
         paymentDate: record.paymentDate ? new Date(record.paymentDate).toISOString().slice(0, 10) : todayInputValue(),
@@ -1783,7 +1833,8 @@ export default function ClientProfilePage() {
       setEditingPaymentId(null);
       setPaymentForm({
         financialYear: selectedFy,
-        paymentType: billing ? "billing" : "advance",
+        billingId: billings[0]?._id || "",
+        paymentType: billings.length ? "billing" : "advance",
         amountPaid: "",
         paymentDate: todayInputValue(),
         paymentMode: PAYMENT_MODES[0] || "NEFT",
@@ -1800,6 +1851,7 @@ export default function ClientProfilePage() {
     const payload = {
       clientId,
       financialYear: paymentForm.financialYear,
+      billingId: paymentForm.paymentType === "billing" ? paymentForm.billingId : "",
       paymentType: paymentForm.paymentType,
       amountPaid: Number(paymentForm.amountPaid),
       paymentDate: paymentForm.paymentDate,
@@ -1857,24 +1909,30 @@ export default function ClientProfilePage() {
     }
   };
 
-  const deletePayment = async (paymentId: string) => {
-    if (!confirm("Move this payment to recycle bin?")) return;
-    const { commit, rollback } = deletePaymentItem(paymentId);
-    try {
-      const response = await fetch(`/api/payments/${paymentId}`, { method: "DELETE" });
-      if (!response.ok) {
-        rollback();
-        toast.error("Failed to remove payment.");
-        return;
-      }
-      commit();
-      refreshWorkspaceSilently();
-      scheduleActivityRefresh();
-      toast.success("Payment moved to recycle bin");
-    } catch {
-      rollback();
-      toast.error("Something went wrong deleting payment.");
-    }
+  const deletePayment = (paymentId: string) => {
+    setProfileConfirmation({
+      title: "Move payment to recycle bin?",
+      description: "The payment can be restored from the recycle bin later.",
+      confirmLabel: "Move to bin",
+      action: async () => {
+        const { commit, rollback } = deletePaymentItem(paymentId);
+        try {
+          const response = await fetch(`/api/payments/${paymentId}`, { method: "DELETE" });
+          if (!response.ok) {
+            rollback();
+            toast.error("Failed to remove payment.");
+            return;
+          }
+          commit();
+          refreshWorkspaceSilently();
+          scheduleActivityRefresh();
+          toast.success("Payment moved to recycle bin");
+        } catch {
+          rollback();
+          toast.error("Something went wrong deleting payment.");
+        }
+      },
+    });
   };
 
   const closeFyModal = () => {
@@ -1888,12 +1946,8 @@ export default function ClientProfilePage() {
 
   const openFYModal = (record?: FYRecord | null) => {
     const targetRecord = record || fyRecords.find((entry) => entry.financialYear === selectedFy) || null;
-    setFyForm({
-      financialYear: targetRecord?.financialYear || selectedFy,
-      generated: buildFyEntries(targetRecord?.generated),
-      targets: buildFyEntries(targetRecord?.targets),
-    });
-    setFyModal(true);
+    const targetFy = targetRecord?.financialYear || selectedFy;
+    router.push(`/dashboard/financial-year?open=targets&clientId=${encodeURIComponent(clientId)}&fy=${encodeURIComponent(targetFy)}`);
   };
 
   const updateFyEntry = (section: "generated" | "targets", categoryId: string, type: "RECYCLING" | "EOL", value: string) => {
@@ -1952,8 +2006,14 @@ export default function ClientProfilePage() {
       const hasScreenshot = documents.some((document) => (
         document.documentKind === "target-screenshot" && document.financialYear === payload.financialYear
       ));
-      if (targetTotal > 0 && !hasScreenshot && window.confirm(`Target data was saved for FY ${payload.financialYear}. Add the target screenshot now?`)) {
-        openDocumentUpload("target-screenshot", payload.financialYear);
+      if (targetTotal > 0 && !hasScreenshot) {
+        setProfileConfirmation({
+          title: "Add target screenshot?",
+          description: `Target data for FY ${payload.financialYear} has been saved. Upload the source screenshot now to keep the record auditable.`,
+          confirmLabel: "Upload screenshot",
+          variant: "warning",
+          action: async () => openDocumentUpload("target-screenshot", payload.financialYear),
+        });
       }
       navigateToClientSection({ primary: "compliance", secondary: "targetsCredits" });
     } finally {
@@ -1967,11 +2027,14 @@ export default function ClientProfilePage() {
   ) => {
     setInlineSaving(true);
     try {
+      const existing = annualReturns.find((record) => record.financialYear === selectedFy);
       const payload = {
         clientId,
         financialYear: selectedFy,
         status,
-        remarks: patch.remarks || "",
+        // A stage update must not erase an existing filing note unless the
+        // caller explicitly supplies a replacement.
+        remarks: patch.remarks ?? existing?.remarks ?? "",
         filingDate: patch.filingDate || null,
         acknowledgeNumber: patch.acknowledgeNumber || "",
       };
@@ -2257,6 +2320,7 @@ export default function ClientProfilePage() {
     formPersons: PersonEntry[],
     removedIds: string[]
   ) => {
+    if (saving) return;
     setSaving(true);
     try {
       const validPersons: PersonEntry[] = [];
@@ -2294,7 +2358,7 @@ export default function ClientProfilePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...data, persons: validPersons, removedPersonIds: removedIds }),
       });
-      if (!r.ok) { toast.error("Failed to save"); return; }
+      if (!r.ok) { toast.error(await readErrorMessage(r, "Failed to save")); return; }
       const refreshed = await r.json() as Client;
       setClient(refreshed);
       await mutateWorkspace(
@@ -2306,6 +2370,8 @@ export default function ClientProfilePage() {
       scheduleActivityRefresh();
       setEditModal(false);
       toast.success("Client updated!");
+    } catch {
+      toast.error("Unable to save. Check your connection and try again.");
     } finally {
       setSaving(false);
     }
@@ -3020,7 +3086,8 @@ export default function ClientProfilePage() {
       isPWP={isPWP}
       openReminderModal={openReminderModal}
       openBillingModalForRecord={openBillingModalForRecord}
-      openBillingWorkspace={(record) => router.push(`/dashboard/billing?clientId=${encodeURIComponent(record.clientId)}&fy=${encodeURIComponent(record.financialYear)}`)}
+      openApplyAdvanceModal={setApplyAdvanceBilling}
+      openBillingInvoiceModal={setBillingInvoiceTarget}
       deleteBilling={deleteBilling}
       openFYModal={openFYModal}
       openPaymentModalForRecord={openPaymentModalForRecord}
@@ -3290,15 +3357,32 @@ export default function ClientProfilePage() {
     );
   };
 
+  const clientTrackerPanel = (
+        <section className="client-profile-card">
+          <div className="client-profile-card-header">
+            <div><p className="client-profile-kicker">Trackers</p><h2>Client tracker marks</h2></div>
+            <Link href="/dashboard/client-trackers" className="client-profile-secondary-button">Open trackers</Link>
+          </div>
+          {clientTrackers.filter((tracker) => !tracker.financialYear || tracker.financialYear === selectedFy).length === 0 ? (
+            <div className="client-profile-empty-inline"><ClipboardCheck className="h-4 w-4" /><p>This client is not part of an active tracker for this financial year.</p></div>
+          ) : <div className="space-y-2">{clientTrackers.filter((tracker) => !tracker.financialYear || tracker.financialYear === selectedFy).map((tracker) => (
+            <Link key={tracker._id} href={`/dashboard/client-trackers/${tracker._id}`} className="block rounded-xl border border-base bg-surface/70 p-3 transition hover:border-blue-400">
+              <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-default">{tracker.name}</strong>{tracker.financialYear && <span className="text-xs text-faint">FY {tracker.financialYear}</span>}</div>
+              <div className="mt-2 flex flex-wrap gap-2">{tracker.fields.map((field) => { const value = tracker.entry?.values?.[field.key]; return <span key={field.key} className={`rounded-full px-2 py-1 text-xs ${trackerBadgeClass(field, value)}`}>{field.label}: <strong>{value === true ? "Yes" : value === false ? "No" : String(value ?? "—")}</strong></span>; })}</div>
+              {tracker.entry?.updatedAt && <p className="mt-2 text-xs text-faint">Last updated {new Date(tracker.entry.updatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}{tracker.entry.updatedBy ? ` by ${tracker.entry.updatedBy}` : ""}</p>}
+            </Link>
+          ))}</div>}
+        </section>
+  );
+
   const notesSections: Record<NotesTasksSectionId, React.ReactNode> = {
-    notes: (
-      <NotesSection
-        notes={clientNotes.filter((note) => !note.financialYear || note.financialYear === selectedFy)}
-        onAdd={openNoteModal}
-        onDelete={(note) => void deleteClientNote(note)}
-      />
-    ),
+    notes: <NotesSection
+      notes={clientNotes.filter((note) => !note.financialYear || note.financialYear === selectedFy)}
+      onAdd={openNoteModal}
+      onDelete={(note) => void deleteClientNote(note)}
+    />,
     tasks: renderWorkItemsPanel("Tasks", "Team tasks", ["task"], "No tasks have been added for this FY."),
+    trackers: clientTrackerPanel,
     reminders: renderWorkItemsPanel("Reminders", "Scheduled reminders", ["reminder"], "No reminders have been scheduled for this FY."),
     followUps: renderWorkItemsPanel("Follow-ups", "Client follow-ups", ["follow_up"], "No follow-ups have been added for this FY."),
     callsMeetings: renderWorkItemsPanel("Calls / Meetings", "Calls and meetings", ["call", "meeting"], "No calls or meetings have been logged for this FY."),
@@ -3416,6 +3500,7 @@ export default function ClientProfilePage() {
                 portalLastUpdated={portalLastUpdated}
                 passwordMask={passwordMask}
               />
+              {clientTrackers.some((tracker) => !tracker.financialYear || tracker.financialYear === selectedFy) && clientTrackerPanel}
               {!fyData && !billing && (
                 <EmptyProfileState
                   selectedFy={selectedFy}
@@ -3901,7 +3986,7 @@ export default function ClientProfilePage() {
         setReminderForm={setReminderForm}
         reminderPreviewHtml={reminderPreviewHtml}
         reminderSending={reminderSending}
-        billingModal={billingModal}
+        billingModal={false}
         closeBillingModal={closeBillingModal}
         editingBillingId={editingBillingId}
         saveBilling={saveBilling}
@@ -3915,11 +4000,64 @@ export default function ClientProfilePage() {
         savePayment={savePayment}
         paymentForm={paymentForm}
         setPaymentForm={setPaymentForm}
+        billingOptions={billings}
         breakdownRec={breakdownRec}
         setBreakdownRec={setBreakdownRec}
         makeBreakdownProps={makeBreakdownProps}
         saving={saving}
         inlineSaving={inlineSaving}
+      />
+
+      <BillingModal
+        open={billingModal}
+        editingBilling={(editingBillingId ? allBillings.find((record) => record._id === editingBillingId) || null : null) as BillingWorkspace | null}
+        clients={[client]}
+        fy={selectedFy}
+        onClose={closeBillingModal}
+        onSaved={() => {
+          closeBillingModal();
+          refreshWorkspaceSilently();
+          scheduleActivityRefresh();
+          navigateToClientSection({ primary: "financial", secondary: "billing" });
+        }}
+      />
+
+      <ApplyAdvanceModal
+        billing={applyAdvanceBilling as BillingWorkspace | null}
+        advanceBalance={advanceBalance}
+        clientName={() => client.companyName}
+        onOptimisticApply={() => () => {}}
+        onClose={() => setApplyAdvanceBilling(null)}
+        onApplied={() => {
+          setApplyAdvanceBilling(null);
+          refreshWorkspaceSilently();
+          scheduleActivityRefresh();
+        }}
+      />
+
+      <InvoiceModal
+        billing={billingInvoiceTarget as BillingWorkspace | null}
+        clientName={() => client.companyName}
+        onClose={() => setBillingInvoiceTarget(null)}
+        onSaved={() => {
+          setBillingInvoiceTarget(null);
+          refreshWorkspaceSilently();
+          scheduleActivityRefresh();
+        }}
+      />
+
+      <ConfirmModal
+        open={Boolean(profileConfirmation)}
+        title={profileConfirmation?.title || "Confirm action"}
+        description={profileConfirmation?.description}
+        confirmLabel={profileConfirmation?.confirmLabel || "Confirm"}
+        variant={profileConfirmation?.variant}
+        onClose={() => setProfileConfirmation(null)}
+        onConfirm={async () => {
+          const confirmation = profileConfirmation;
+          setProfileConfirmation(null);
+          await confirmation?.action();
+        }}
       />
 
       {/* ── Unified Add/Edit Client Modal ── */}

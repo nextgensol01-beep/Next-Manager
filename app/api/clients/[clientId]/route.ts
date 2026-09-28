@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
+import { clientCredentialAccess } from "@/lib/server/client-credentials";
 import {
   deleteClientRecord,
   getClientWithContacts,
@@ -22,7 +23,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ clie
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json(client);
+  const access = await clientCredentialAccess(session);
+  return NextResponse.json(access.read(client));
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ clientId: string }> }) {
@@ -33,7 +35,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ clie
     await connectDB();
     const { clientId } = await params;
     const body = await req.json();
-    const client = await updateClientRecord(clientId, body);
+    const access = await clientCredentialAccess(session);
+    const client = await updateClientRecord(clientId, access.write(body), access.admin ? new Set() : access.protectedKeys);
 
     if (!client) {
       return NextResponse.json({ error: "Client not found" }, { status: 404 });
@@ -50,13 +53,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ clie
       entityId: String(client._id || clientId),
       entityType: "client",
       relatedEntityIds: [String(client._id || clientId)],
-    }, session);
+    }, session).catch((error) => {
+      // The client transaction already committed. An audit failure must not
+      // tell the user their save failed and encourage a duplicate retry.
+      console.error("Unable to record client update activity:", error);
+    });
 
-    return NextResponse.json(client);
+    return NextResponse.json(access.read(client));
   } catch (error: unknown) {
     console.error("PUT /api/clients/[clientId] error:", error);
     const message = error instanceof Error ? error.message : "Internal server error";
-    const status = message.includes("cannot be changed") || message.includes("required") ? 400 : 500;
+    const status = message.includes("Admin access required") ? 403 : /cannot be changed|required|missing|needs at least one|linked only once/.test(message) ? 400 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

@@ -2,6 +2,9 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { useSession } from "next-auth/react";
+import toast from "react-hot-toast";
+import { parsePastedContacts, type ParsedContactRow } from "@/lib/parsePastedContacts";
 import Modal from "@/components/ui/Modal";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { CategoryBadge } from "@/components/ui/CategoryBadge";
@@ -159,8 +162,30 @@ function getDirtyTab(
   form: ClientFormData,
   initialForm: ClientFormData,
   persons: PersonEntry[],
-  initialPersons: PersonEntry[]
+  initialPersons: PersonEntry[],
+  customFieldDefinitions: ClientCustomFieldDefinition[],
+  customFieldGroups: ClientCustomFieldGroupDefinition[],
 ): "basic" | "portal" | "both" | null {
+  // A grouped field inherits its placement from its active group, exactly as it
+  // does when the form is rendered and validated below. Unknown/legacy keys
+  // remain Basic Info so they still surface as unsaved changes.
+  const customFieldTab = (key: string) => {
+    const field = customFieldDefinitions.find((definition) => definition.key === key);
+    if (!field) return "basic";
+    return customFieldGroups.find((group) => group.active && group._id === field.groupId)?.formTab || field.formTab || "basic";
+  };
+  let basicCustomFieldsDirty = false;
+  let portalCustomFieldsDirty = false;
+  const customFieldKeys = new Set([
+    ...Object.keys(form.customFields),
+    ...Object.keys(initialForm.customFields),
+  ]);
+  for (const key of customFieldKeys) {
+    if (form.customFields[key] === initialForm.customFields[key]) continue;
+    if (customFieldTab(key) === "portal") portalCustomFieldsDirty = true;
+    else basicCustomFieldsDirty = true;
+  }
+
   const basicDirty =
     form.companyName !== initialForm.companyName ||
     form.legalName !== initialForm.legalName ||
@@ -169,13 +194,14 @@ function getDirtyTab(
     form.address !== initialForm.address ||
     form.gstNumber !== initialForm.gstNumber ||
     form.registrationNumber !== initialForm.registrationNumber ||
-    JSON.stringify(form.customFields) !== JSON.stringify(initialForm.customFields) ||
+    basicCustomFieldsDirty ||
     JSON.stringify(persons) !== JSON.stringify(initialPersons);
 
   const portalDirty =
     form.cpcbLoginId !== initialForm.cpcbLoginId ||
     form.cpcbPassword !== initialForm.cpcbPassword ||
-    form.otpMobileNumber !== initialForm.otpMobileNumber;
+    form.otpMobileNumber !== initialForm.otpMobileNumber ||
+    portalCustomFieldsDirty;
 
   if (basicDirty && portalDirty) return "both";
   if (basicDirty) return "basic";
@@ -269,86 +295,8 @@ function InsetGroup({
 // ── Paste import helpers ───────────────────────────────────────────────────────
 
 /** One parsed row from a pasted spreadsheet / CSV block */
-export interface ParsedContactRow {
-  name: string;
-  designation: string;
-  phone: string;
-  email: string;
-}
-
-/**
- * Accepts a raw paste string (tab-separated or comma-separated, one row per line)
- * and returns an array of ParsedContactRow objects.
- *
- * Expected column order (flexible, extra columns ignored):
- *   Name | Designation | Phone | Email
- *
- * A row is skipped when it has no recognisable name after trimming.
- */
-export function parsePastedContacts(raw: string): ParsedContactRow[] {
-  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0) return [];
-
-  // Detect delimiter: if any line contains a tab use TSV, else CSV
-  const delimiter = lines.some((l) => l.includes("\t")) ? "\t" : ",";
-
-  // Strip a possible header row (first cell looks like "name" / "contact" etc.)
-  const firstCells = lines[0].split(delimiter).map((c) => c.trim().toLowerCase());
-  const hasHeader =
-    firstCells[0] === "name" ||
-    firstCells[0] === "contact name" ||
-    firstCells[0] === "contact" ||
-    firstCells[0] === "person";
-  const dataLines = hasHeader ? lines.slice(1) : lines;
-
-  return dataLines
-    .map((line): ParsedContactRow => {
-      // Handle quoted CSV fields (e.g. "Smith, John")
-      const cells: string[] = [];
-      if (delimiter === ",") {
-        let cur = "";
-        let inQuote = false;
-        for (let i = 0; i < line.length; i++) {
-          const ch = line[i];
-          if (ch === '"') {
-            inQuote = !inQuote;
-          } else if (ch === "," && !inQuote) {
-            cells.push(cur.trim());
-            cur = "";
-          } else {
-            cur += ch;
-          }
-        }
-        cells.push(cur.trim());
-      } else {
-        line.split("\t").forEach((c) => cells.push(c.trim()));
-      }
-
-      const [c0 = "", c1 = "", c2 = "", c3 = ""] = cells;
-
-      // Heuristic: if c0 looks like a phone/email, user only pasted two cols (name, phone)
-      const looksLikePhone = (s: string) => /^[+\d\s\-().]{7,}$/.test(s);
-      const looksLikeEmail = (s: string) => s.includes("@");
-
-      if (looksLikePhone(c1) || looksLikeEmail(c1)) {
-        // 2-col paste: Name | Phone-or-Email
-        return {
-          name: c0,
-          designation: "",
-          phone: looksLikePhone(c1) ? c1 : "",
-          email: looksLikeEmail(c1) ? c1 : "",
-        };
-      }
-
-      return {
-        name: c0,
-        designation: c1,
-        phone: c2,
-        email: c3,
-      };
-    })
-    .filter((row) => row.name.trim().length > 0);
-}
+export { parsePastedContacts } from "@/lib/parsePastedContacts";
+export type { ParsedContactRow } from "@/lib/parsePastedContacts";
 
 /** Convert a ParsedContactRow into a PersonEntry ready for the form */
 function rowToPersonEntry(row: ParsedContactRow, isPrimary: boolean): PersonEntry {
@@ -435,6 +383,7 @@ function PasteImportModal({
     // Fire one search per unique name
     const uniqueNames = Array.from(new Set(parsed.map((p) => p.name.trim()).filter(Boolean)));
     const resultsByName = new Map<string, MatchCandidate[]>();
+    let lookupFailed = false;
 
     Promise.all(
       uniqueNames.map(async (name) => {
@@ -442,7 +391,7 @@ function PasteImportModal({
           const res = await fetch(
             `/api/contacts?search=${encodeURIComponent(name)}&withCompanies=true`
           );
-          if (!res.ok) return;
+          if (!res.ok) throw new Error("Contact lookup failed");
           const data: MatchCandidate[] = await res.json();
           // Only keep exact name matches (case-insensitive)
           const exact = data.filter(
@@ -450,11 +399,16 @@ function PasteImportModal({
           );
           resultsByName.set(name, exact);
         } catch {
-          resultsByName.set(name, []);
+          lookupFailed = true;
         }
       })
     ).then(() => {
       if (lookupGenRef.current !== gen) return; // stale, discard
+      if (lookupFailed) {
+        setRows([]);
+        toast.error("Could not check existing contacts. Please paste again to retry.");
+        return;
+      }
       setRows((prev) =>
         prev.map((row) => {
           const candidates = resultsByName.get(row.parsed.name.trim()) ?? [];
@@ -933,8 +887,11 @@ export default function ClientFormModal({
   saving,
   initialTab = "basic",
 }: ClientFormModalProps) {
+  const { data: session } = useSession();
+  const canManageCredentials = (session?.user as { role?: string } | undefined)?.role === "admin";
+  const submittingRef = useRef(false);
   const isEdit = client !== null;
-  const availableCustomFields = customFieldDefinitions.filter((field) => field.key !== "legalName" && field.showInForm !== false);
+  const availableCustomFields = customFieldDefinitions.filter((field) => field.active && field.key !== "legalName" && field.showInForm !== false && (canManageCredentials || field.type !== "password"));
 
   // ── Form state ──────────────────────────────────────────────────────────
   const [form, setForm] = useState<ClientFormData>(emptyForm);
@@ -945,12 +902,14 @@ export default function ClientFormModal({
   const [showPassword, setShowPassword] = useState(false);
   const [visibleSecureFields, setVisibleSecureFields] = useState<Set<string>>(new Set());
   const [confirmingClose, setConfirmingClose] = useState(false);
+  const [pasteModalOpen, setPasteModalOpen] = useState(false);
   const [tabAnimating, setTabAnimating] = useState(false);
   const [tabDirection, setTabDirection] = useState<"left" | "right">("right");
   const [tabSwitched, setTabSwitched] = useState(false);
   const [portalVisited, setPortalVisited] = useState(initialTab === "portal");
   const visibleCustomFields = availableCustomFields.filter((field) =>
-    !field.applicableCategories?.length || field.applicableCategories.includes(form.category)
+    (!field.applicableCategories?.length || field.applicableCategories.includes(form.category)) &&
+    (canManageCredentials || (customFieldGroups.find((group) => group.active && group._id === field.groupId)?.formTab || field.formTab) !== "portal")
   );
   const applicableGroups = customFieldGroups.filter((group) =>
     group.active && (!group.applicableCategories?.length || group.applicableCategories.includes(form.category))
@@ -991,7 +950,14 @@ export default function ClientFormModal({
   const previewRequestRef = useRef(0);
 
   const dirty = isDirty(form, initialFormRef.current, persons, initialPersonsRef.current);
-  const dirtyTab = getDirtyTab(form, initialFormRef.current, persons, initialPersonsRef.current);
+  const dirtyTab = getDirtyTab(
+    form,
+    initialFormRef.current,
+    persons,
+    initialPersonsRef.current,
+    customFieldDefinitions,
+    customFieldGroups,
+  );
 
   // ── Unsaved label text ──────────────────────────────────────────────────
   const unsavedLabel =
@@ -1008,14 +974,17 @@ export default function ClientFormModal({
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        e.stopPropagation();
-        handleClose();
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        if (pasteModalOpen) setPasteModalOpen(false);
+        else if (confirmingClose) setConfirmingClose(false);
+        else handleClose();
       }
     };
     window.addEventListener("keydown", handler, true); // capture = true
     return () => window.removeEventListener("keydown", handler, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, dirty]);
+  }, [open, dirty, saving, pasteModalOpen, confirmingClose, onClose]);
 
   // ── Tab switching ───────────────────────────────────────────────────────
   const switchTab = (tab: "basic" | "portal") => {
@@ -1039,9 +1008,10 @@ export default function ClientFormModal({
   }, [activeTab]);
 
   const handleClose = useCallback(() => {
+    if (saving || submittingRef.current) return;
     if (dirty) setConfirmingClose(true);
     else onClose();
-  }, [dirty, onClose]);
+  }, [dirty, onClose, saving]);
 
   // ── Reset on open ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -1064,6 +1034,8 @@ export default function ClientFormModal({
     setActiveTab(initialTab);
     setPortalVisited(isEdit || initialTab === "portal");
     setShowPassword(false);
+    setVisibleSecureFields(new Set());
+    setPasteModalOpen(false);
     setConfirmingClose(false);
     // Show card view if client already has contacts, otherwise reset to empty state
     setContactsStarted(client ? (client.contacts || []).length > 0 : false);
@@ -1149,6 +1121,7 @@ export default function ClientFormModal({
 
   const removePerson = (index: number) => {
     const entry = persons[index];
+    if (persons.length === 1) setContactsStarted(false);
     if (entry.personId)
       setRemovedPersonIds((prev) =>
         prev.includes(entry.personId!) ? prev : [...prev, entry.personId!]
@@ -1156,19 +1129,27 @@ export default function ClientFormModal({
     setPersons((prev) => {
       const next = prev.filter((_, i) => i !== index);
       if (next.length === 0) return [];
-      if (!next.some((e) => e.isPrimaryContact)) next[0].isPrimaryContact = true;
+      if (!next.some((e) => e.isPrimaryContact)) next[0] = { ...next[0], isPrimaryContact: true };
       return next;
     });
   };
 
-  const updatePerson = (index: number, updated: PersonEntry) =>
+  const updatePerson = (index: number, updated: PersonEntry) => {
+    if (updated.personId && persons.some((person, i) => i !== index && person.personId === updated.personId)) {
+      toast.error("This contact is already linked to this client.");
+      return;
+    }
+    const previousId = persons[index]?.personId;
+    if (previousId && previousId !== updated.personId) {
+      setRemovedPersonIds((prev) => Array.from(new Set([...prev, previousId])));
+    }
     setPersons((prev) => prev.map((p, i) => (i === index ? syncEntrySelections(updated) : p)));
+  };
 
   const setPrimary = (index: number) =>
     setPersons((prev) => prev.map((p, i) => ({ ...p, isPrimaryContact: i === index })));
 
-  // ── Paste-import state & handler ────────────────────────────────────────
-  const [pasteModalOpen, setPasteModalOpen] = useState(false);
+  // ── Paste-import handler ────────────────────────────────────────────────
 
   const handlePasteImport = useCallback((incoming: PersonEntry[]) => {
     if (incoming.length === 0) return;
@@ -1179,7 +1160,14 @@ export default function ClientFormModal({
       const base = onlyEmpty ? [] : prev;
       const hasAnyPrimary = base.some((e) => e.isPrimaryContact);
       // Fix up isPrimaryContact based on actual base state
-      const entries = incoming.map((entry, i) => ({
+      const seenIds = new Set(base.map((entry) => entry.personId).filter(Boolean));
+      const uniqueIncoming = incoming.filter((entry) => {
+        if (!entry.personId) return true;
+        if (seenIds.has(entry.personId)) return false;
+        seenIds.add(entry.personId);
+        return true;
+      });
+      const entries = uniqueIncoming.map((entry, i) => ({
         ...entry,
         isPrimaryContact: !hasAnyPrimary && i === 0,
       }));
@@ -1203,8 +1191,14 @@ export default function ClientFormModal({
   // ── Submit with client-side validation ─────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving || submittingRef.current) return;
+
+    const fieldTab = (field: ClientCustomFieldDefinition) =>
+      applicableGroups.find((group) => group._id === field.groupId)?.formTab || field.formTab || "basic";
+    const advancing = !isEdit && !portalVisited;
 
     const customFieldErrors = visibleCustomFields.reduce<Record<string, boolean>>((acc, field) => {
+      if (advancing && fieldTab(field) === "portal") return acc;
       if (field.required && customFieldValueIsEmpty(field, form.customFields?.[field.key])) acc[field.key] = true;
       return acc;
     }, {});
@@ -1217,12 +1211,15 @@ export default function ClientFormModal({
     const firstCustomFieldErrorKey = Object.keys(customFieldErrors)[0];
 
     if (errors.companyName || errors.state || firstCustomFieldErrorKey) {
-      // Switch to basic tab if errors are there
-      if (activeTab !== "basic") switchTab("basic");
+      const errorField = visibleCustomFields.find((field) => field.key === firstCustomFieldErrorKey);
+      const errorTab = errors.companyName || errors.state ? "basic" : errorField ? fieldTab(errorField) : "basic";
+      if (activeTab !== errorTab) switchTab(errorTab);
       // Scroll to first error after tab switch settles
       setTimeout(() => {
         const firstError = errors.companyName
           ? companyNameRef.current
+          : errors.state
+          ? stateRef.current
           : firstCustomFieldErrorKey
           ? document.getElementById(`cfm-custom-field-${firstCustomFieldErrorKey}`)
           : stateRef.current;
@@ -1242,7 +1239,14 @@ export default function ClientFormModal({
       return;
     }
 
-    await onSave(form, persons, removedPersonIds);
+    submittingRef.current = true;
+    try {
+      await onSave(form, persons, removedPersonIds);
+    } catch {
+      toast.error("Unable to save. Check your connection and try again.");
+    } finally {
+      submittingRef.current = false;
+    }
   };
 
   // Clear individual field error on change
@@ -1297,7 +1301,7 @@ export default function ClientFormModal({
           ) : field.type === "date" ? (
             <input
               type="date"
-              value={String(form.customFields?.[field.key] || "")}
+              value={String(form.customFields?.[field.key] ?? "")}
               onChange={(e) => updateCustomFieldValue(field, e.target.value)}
               className="input-field"
               style={{ fontSize: "13px" }}
@@ -1305,7 +1309,7 @@ export default function ClientFormModal({
           ) : field.type === "number" ? (
             <input
               type="number"
-              value={String(form.customFields?.[field.key] || "")}
+              value={String(form.customFields?.[field.key] ?? "")}
               onChange={(e) => updateCustomFieldValue(field, e.target.value)}
               className="input-field"
               style={{ fontSize: "13px" }}
@@ -1389,7 +1393,7 @@ export default function ClientFormModal({
 
   return (
     <>
-      <Modal open={open} onClose={handleClose} title="" size="xl" hideHeader className="relative">
+      <Modal open={open} onClose={handleClose} title={isEdit ? "Edit Client" : "Add Client"} size="xl" hideHeader className="relative">
         <style>{`
           @keyframes cfm-slide-up {
             from { opacity: 0; transform: translateY(10px); }
@@ -1860,7 +1864,7 @@ export default function ClientFormModal({
 
             {/* ── PORTAL TAB ── */}
             <div style={{ display: activeTab === "portal" ? "block" : "none" }}>
-              <div
+              <fieldset disabled={!canManageCredentials || saving}
                 className={`space-y-5 ${
                   tabAnimating
                     ? "opacity-0"
@@ -1951,7 +1955,7 @@ export default function ClientFormModal({
                 </InsetGroup>
 
                 {renderCustomGroupSections("portal", "portalCredentials")}
-              </div>
+              </fieldset>
             </div>
           </div>
 

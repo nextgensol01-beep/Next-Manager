@@ -1,0 +1,6096 @@
+"use client";
+
+import Link from "next/link";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
+import toast from "react-hot-toast";
+import {
+  Archive,
+  ArrowLeft,
+  Bold,
+  CheckCircle2,
+  ChevronDown,
+  CircleAlert,
+  Download,
+  FileText,
+  Filter,
+  GripVertical,
+  Italic,
+  Info,
+  Link2,
+  List,
+  ListOrdered,
+  Mail,
+  MoreHorizontal,
+  Plus,
+  RemoveFormatting,
+  Search,
+  Send,
+  Settings2,
+  Trash2,
+  Underline,
+  Users,
+} from "lucide-react";
+import LoadingSpinner from "@/components/ui/LoadingSpinner";
+import Modal from "@/components/client-trackers/TrackerModal";
+import ConfirmModal from "@/components/ui/ConfirmModal";
+import { invalidate, useCache } from "@/lib/useCache";
+import { FINANCIAL_YEARS } from "@/lib/utils";
+import {
+  evaluateTrackerConditionGroup,
+  legacyWorkflowCondition,
+} from "@/lib/server/tracker-conditions";
+import {
+  CLIENT_TRACKER_CATEGORIES,
+  CLIENT_TRACKER_DETAIL_OPTIONS,
+  DEFAULT_STATUS_FIELD,
+  TRACKER_EMAIL_PRESETS,
+  TRACKER_OPTION_COLORS,
+  type ClientTrackerDetailKey,
+  type TrackerComputed,
+  type TrackerComputedKind,
+  type TrackerConditionGroup,
+  type TrackerDataLink,
+  type TrackerDataLinkDisplay,
+  type TrackerDataLinkSource,
+  type TrackerEmailPoint,
+  type TrackerEmailAttachment,
+  type TrackerEmailContentRule,
+  type TrackerRecipientStrategy,
+  type TrackerEmailWorkflow,
+  type TrackerField,
+  type TrackerFieldType,
+  type TrackerOptionColor,
+  type TrackerRuleOperator,
+  type TrackerSavedView,
+  type TrackerValue,
+  type TrackerValues,
+} from "@/lib/clientTrackers";
+
+type Client = {
+  clientId: string;
+  companyName: string;
+  category: string;
+  state: string;
+  legalName?: string;
+  gstNumber?: string;
+  registrationNumber?: string;
+  address?: string;
+};
+type ManagedDocumentOption = {
+  _id: string;
+  clientId: string;
+  documentName: string;
+  storageType?: string;
+  driveFileId?: string;
+  mimeType?: string;
+  fileSize?: number;
+};
+type Entry = {
+  _id: string;
+  clientId: string;
+  values: TrackerValues;
+  updatedAt: string;
+  client: Client | null;
+};
+type TrackerDetail = {
+  _id: string;
+  name: string;
+  description?: string;
+  financialYear?: string;
+  status: "active" | "archived";
+  fields: TrackerField[];
+  clientColumns?: ClientTrackerDetailKey[];
+  savedViews?: TrackerSavedView[];
+  entries: Entry[];
+  entryCount?: number;
+  totalEntryCount?: number;
+  offset?: number;
+  nextOffset?: number | null;
+  liveDataAsOf?: string;
+  hasMore?: boolean;
+  overviewCounts?: Array<{ key: string; value: TrackerValue; count: number }>;
+  emailEnabled?: boolean;
+  emailWorkflows?: TrackerEmailWorkflow[];
+};
+type EmailRecipient = {
+  email: string;
+  name: string;
+  designation: string;
+  isPrimary: boolean;
+};
+type EmailPreview = {
+  workflow: { id: string; name: string; signatureGap?: number };
+  messages: Array<{
+    entryId: string;
+    clientId: string;
+    companyName: string;
+    to: string;
+    suggestedTo?: string[];
+    recipients: EmailRecipient[];
+    subject: string;
+    body: string;
+    html: string;
+    points: string[];
+    statements?: string[];
+    combinationMessage?: string;
+    attachments: Array<{
+      documentId: string;
+      filename: string;
+      mimeType: string;
+      fileSize: number;
+    }>;
+  }>;
+  skipped: Array<{ clientId: string; companyName: string; reason: string }>;
+};
+type TrackerEmailActivity = {
+  summary?: Record<string, number>;
+  logs?: Array<{
+    _id: string;
+    status: "draft" | "sent" | "failed";
+    communicationStatus?: "sent" | "replied";
+    mailKind?: "initial" | "reminder";
+    sentAt: string;
+    clientId?: string;
+    clientName?: string;
+    subject?: string;
+    to?: string[];
+    cc?: string[];
+    renderedHtml?: string;
+    campaignId?: string;
+    gmailMessageId?: string;
+    attachments?: Array<{
+      documentId: string;
+      filename: string;
+      mimeType: string;
+      fileSize: number;
+    }>;
+    gmailThreadId?: string;
+    notes?: string;
+  }>;
+};
+type TrackerActivity = {
+  events?: Array<{
+    _id: string;
+    clientId: string;
+    label: string;
+    detail: string;
+    badge?: string;
+    actorEmail?: string;
+    occurredAt: string;
+  }>;
+};
+type RecipientDraft = {
+  to: string[];
+  cc: string[];
+  additionalTo: string;
+  additionalCc: string;
+};
+
+const STATUS_TONES: Record<string, string> = {
+  "Not Started":
+    "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+  "In Progress":
+    "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200",
+  Done: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200",
+  Blocked: "bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-200",
+  "Not Applicable":
+    "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200",
+};
+const COLOR_SWATCH: Record<TrackerOptionColor, string> = {
+  slate: "bg-slate-500",
+  blue: "bg-blue-500",
+  violet: "bg-violet-500",
+  amber: "bg-amber-500",
+  emerald: "bg-emerald-500",
+  rose: "bg-rose-500",
+};
+const ALL_FILTER = "__all_tracker_values__";
+const LIVE_DATA_SOURCES: Array<{
+  value: TrackerDataLinkSource;
+  label: string;
+}> = [
+  { value: "purchaseInvoices", label: "Purchase invoice collection" },
+  { value: "saleInvoices", label: "Sale invoice collection" },
+  { value: "annualReturn", label: "Annual return" },
+  { value: "purchaseUploads", label: "CPCB purchase uploads" },
+  { value: "saleUploads", label: "CPCB sale uploads" },
+];
+const LIVE_DATA_DISPLAYS: Record<
+  TrackerDataLinkSource,
+  Array<{ value: TrackerDataLinkDisplay; label: string }>
+> = {
+  purchaseInvoices: [
+    { value: "coverageStatus", label: "Coverage status" },
+    { value: "monthsCovered", label: "Months covered" },
+    { value: "requiredMonths", label: "Required months" },
+    { value: "missingMonths", label: "Missing months" },
+    { value: "yesNo", label: "Received / covered (legacy)" },
+    { value: "count", label: "Number of records" },
+    { value: "status", label: "Latest status" },
+    { value: "latestDate", label: "Latest period end" },
+  ],
+  saleInvoices: [
+    { value: "coverageStatus", label: "Coverage status" },
+    { value: "monthsCovered", label: "Months covered" },
+    { value: "requiredMonths", label: "Required months" },
+    { value: "missingMonths", label: "Missing months" },
+    { value: "yesNo", label: "Received / covered (legacy)" },
+    { value: "count", label: "Number of records" },
+    { value: "status", label: "Latest status" },
+    { value: "latestDate", label: "Latest period end" },
+  ],
+  annualReturn: [
+    { value: "yesNo", label: "Filed / verified" },
+    { value: "status", label: "Current status" },
+    { value: "latestDate", label: "Filing date" },
+  ],
+  purchaseUploads: [
+    { value: "uploadStatus", label: "Upload status" },
+    { value: "yesNo", label: "Has purchase upload" },
+    { value: "quantity", label: "Total quantity (MT)" },
+    { value: "invoiceCount", label: "Invoices uploaded" },
+    { value: "cat1", label: "CAT-I quantity (MT)" },
+    { value: "cat2", label: "CAT-II quantity (MT)" },
+    { value: "cat3", label: "CAT-III quantity (MT)" },
+    { value: "cat4", label: "CAT-IV quantity (MT)" },
+    { value: "count", label: "Upload records" },
+  ],
+  saleUploads: [
+    { value: "uploadStatus", label: "Upload status" },
+    { value: "yesNo", label: "Has sale upload" },
+    { value: "quantity", label: "Total quantity (MT)" },
+    { value: "invoiceCount", label: "Invoices uploaded" },
+    { value: "cat1", label: "CAT-I quantity (MT)" },
+    { value: "cat2", label: "CAT-II quantity (MT)" },
+    { value: "cat3", label: "CAT-III quantity (MT)" },
+    { value: "cat4", label: "CAT-IV quantity (MT)" },
+    { value: "count", label: "Upload records" },
+  ],
+  uploadedData: [
+    { value: "yesNo", label: "Has uploaded data" },
+    { value: "quantity", label: "Invoice quantity (MT)" },
+    { value: "invoiceCount", label: "Number of invoices" },
+    { value: "count", label: "Upload records" },
+  ],
+};
+function liveFieldType(display: TrackerDataLinkDisplay): TrackerFieldType {
+  if (display === "yesNo") return "toggle";
+  if (display === "latestDate") return "date";
+  if (
+    [
+      "count",
+      "quantity",
+      "invoiceCount",
+      "cat1",
+      "cat2",
+      "cat3",
+      "cat4",
+      "requiredMonths",
+    ].includes(display)
+  )
+    return "number";
+  return "text";
+}
+
+function valueText(value: TrackerValue | undefined) {
+  if (Array.isArray(value)) return value.join(", ");
+  return value === true ? "Yes" : value === false ? "No" : String(value ?? "");
+}
+function blankField(): TrackerField {
+  return { key: "", label: "", type: "toggle" };
+}
+function optionTone(color?: TrackerOptionColor) {
+  return {
+    slate: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+    blue: "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200",
+    violet:
+      "bg-violet-100 text-violet-800 dark:bg-violet-950/50 dark:text-violet-200",
+    amber:
+      "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200",
+    emerald:
+      "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200",
+    rose: "bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-200",
+  }[color || "slate"];
+}
+function clientDetailValue(client: Client | null, key: ClientTrackerDetailKey) {
+  return client?.[key] || "—";
+}
+function emailId() {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+function parseEmailList(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[,;\n]/)
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+}
+
+const EMAIL_CONDITION_OPERATORS: Array<{
+  value: TrackerRuleOperator;
+  label: string;
+}> = [
+  { value: "equals", label: "equals" },
+  { value: "not_equals", label: "does not equal" },
+  { value: "is_empty", label: "is empty" },
+  { value: "is_not_empty", label: "is not empty" },
+  { value: "contains", label: "contains" },
+  { value: "not_contains", label: "does not contain" },
+  { value: "greater_than", label: "greater than" },
+  { value: "greater_than_or_equal", label: "at least" },
+  { value: "less_than", label: "less than" },
+  { value: "less_than_or_equal", label: "at most" },
+];
+
+function emailOperatorsForField(field?: TrackerField) {
+  const equality = ["equals", "not_equals", "is_empty", "is_not_empty"];
+  const text = [...equality, "contains", "not_contains"];
+  const numeric = [
+    ...equality,
+    "greater_than",
+    "greater_than_or_equal",
+    "less_than",
+    "less_than_or_equal",
+  ];
+  const allowed =
+    field?.type === "number" || field?.type === "date"
+      ? numeric
+      : ["text", "longText", "tags", "multiSelect"].includes(
+            field?.type || "",
+          )
+        ? text
+        : equality;
+  return EMAIL_CONDITION_OPERATORS.filter((operator) =>
+    allowed.includes(operator.value),
+  );
+}
+
+function emailConfigSnapshot(
+  emailEnabled: boolean,
+  workflows: TrackerEmailWorkflow[],
+) {
+  return JSON.stringify({ emailEnabled, workflows });
+}
+
+function hasRichTextContent(value: string | undefined) {
+  return Boolean(
+    value
+      ?.replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .trim(),
+  );
+}
+
+function validateEmailWorkflowDrafts(
+  workflows: TrackerEmailWorkflow[],
+  fields: TrackerField[],
+) {
+  const fieldByKey = new Map(fields.map((field) => [field.key, field]));
+  const validateConditions = (
+    conditions: TrackerConditionGroup | undefined,
+    location: string,
+  ) => {
+    if (!conditions?.conditions.length)
+      return `${location} needs at least one condition.`;
+    for (const condition of conditions.conditions) {
+      const field = fieldByKey.get(condition.fieldKey);
+      if (!field) return `${location} references a removed tracker column.`;
+      if (
+        !emailOperatorsForField(field).some(
+          (operator) => operator.value === condition.operator,
+        )
+      )
+        return `${location} uses an incompatible operator for ${field.label}.`;
+      if (
+        !["is_empty", "is_not_empty"].includes(condition.operator) &&
+        String(condition.value ?? "").trim() === ""
+      )
+        return `${location} needs a value for ${field.label}.`;
+    }
+    return null;
+  };
+
+  for (const [index, workflow] of workflows.entries()) {
+    const name = workflow.name.trim() || `Workflow ${index + 1}`;
+    if (!workflow.name.trim()) return `Workflow ${index + 1} needs a name.`;
+    if (!workflow.subject.trim()) return `${name} needs an email subject.`;
+    if (!hasRichTextContent(workflow.body)) return `${name} needs an email body.`;
+    const workflowConditions = validateConditions(
+      workflow.conditionGroup || {
+        mode: "ALL",
+        conditions: [
+          {
+            fieldKey: workflow.mainFieldKey,
+            operator: "equals",
+            value: workflow.mainValue,
+          },
+        ],
+      },
+      `${name} eligibility`,
+    );
+    if (workflowConditions) return workflowConditions;
+    for (const point of workflow.points) {
+      if (!fieldByKey.has(point.fieldKey))
+        return `${name} has a message for a removed tracker column.`;
+      if (!point.value.trim())
+        return `${name} needs a matching value for each message.`;
+      if (!hasRichTextContent(point.statement))
+        return `${name} needs text for each matching message.`;
+    }
+    for (const rule of workflow.contentRules || []) {
+      const ruleConditions = validateConditions(
+        rule.conditionGroup,
+        `${name} conditional content`,
+      );
+      if (ruleConditions) return ruleConditions;
+      if (rule.action !== "skip" && !hasRichTextContent(rule.content))
+        return `${name} has conditional content without message text.`;
+    }
+    for (const attachment of workflow.attachments || []) {
+      const attachmentConditions = validateConditions(
+        attachment.conditionGroup,
+        `${name} attachment rule`,
+      );
+      if (attachment.conditionGroup && attachmentConditions)
+        return attachmentConditions;
+    }
+  }
+  return null;
+}
+function newWorkflow(fields: TrackerField[]): TrackerEmailWorkflow {
+  const main = fields[0];
+  return {
+    id: emailId(),
+    name: "New email workflow",
+    mainFieldKey: main?.key || "status",
+    mainValue: main?.type === "toggle" ? "No" : main?.options?.[0] || "",
+    subject: "Update for {{client.companyName}} · {{tracker.financialYear}}",
+    body: "Dear Team,\n\n{{points}}\n\nRegards,\nNextgen Solutions",
+    points: [],
+    contentMode: "points",
+    signatureGap: 2,
+    recipientStrategy: "selected",
+  };
+}
+
+/** Older workflows did not store a chosen style, so infer it from their rules. */
+function emailWorkflowContentMode(
+  workflow: TrackerEmailWorkflow,
+): NonNullable<TrackerEmailWorkflow["contentMode"]> {
+  if (workflow.contentMode) return workflow.contentMode;
+  if (workflow.contentRules?.some((rule) => rule.type === "combination"))
+    return "combinations";
+  if (
+    workflow.contentRules?.some((rule) => rule.type === "statement") ||
+    workflow.points.some((point) => point.format === "statement")
+  )
+    return "statements";
+  return "points";
+}
+
+/** Converts the former one-field message format into the richer rule format. */
+function migrateLegacyMatchingMessages(workflows: TrackerEmailWorkflow[]) {
+  return workflows.map((workflow) => {
+    if (!workflow.points.length) return workflow;
+    const contentRules = workflow.contentRules || [];
+    return {
+      ...workflow,
+      points: [],
+      contentRules: [
+        ...contentRules,
+        ...workflow.points.map((point, index) => ({
+          id: `legacy-point-${point.id}`,
+          type: (point.format === "statement"
+            ? "statement"
+            : "point") as TrackerEmailContentRule["type"],
+          action: "include" as const,
+          content: point.statement,
+          order: contentRules.length + index,
+          conditionGroup: {
+            mode: "ALL" as const,
+            conditions: [
+              {
+                fieldKey: point.fieldKey,
+                operator: "equals" as const,
+                value: point.value,
+              },
+            ],
+          },
+        })),
+      ],
+    };
+  });
+}
+
+const escapeEditorText = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+const safeEditorLink = (value: string | null) => {
+  const href = (value || "").trim();
+  return /^(https?:\/\/|mailto:)/i.test(href) ? href : "";
+};
+
+/**
+ * Converts pasted Word, Gmail, and browser HTML into the small semantic subset
+ * supported by email delivery. This keeps useful structure without ever putting
+ * untrusted attributes or executable markup into a contentEditable surface.
+ */
+function editorMarkup(value: string) {
+  if (typeof DOMParser === "undefined")
+    return escapeEditorText(value).replace(/\n/g, "<br>");
+  const documentFragment = new DOMParser().parseFromString(value, "text/html");
+  const visit = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE)
+      return escapeEditorText(node.textContent || "");
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    const element = node as HTMLElement;
+    const tag = element.tagName.toLowerCase();
+    if (["script", "style", "iframe", "object", "embed"].includes(tag))
+      return "";
+    const children = Array.from(element.childNodes).map(visit).join("");
+    const style = element.getAttribute("style")?.toLowerCase() || "";
+    const withInlineStyle = (markup: string) => {
+      let result = markup;
+      if (/font-weight\s*:\s*(bold|[5-9]00)/.test(style))
+        result = `<strong>${result}</strong>`;
+      if (/font-style\s*:\s*italic/.test(style)) result = `<em>${result}</em>`;
+      if (/text-decoration[^;]*underline/.test(style)) result = `<u>${result}</u>`;
+      return result;
+    };
+    switch (tag) {
+      case "br":
+        return "<br>";
+      case "strong":
+      case "b":
+        return `<strong>${children}</strong>`;
+      case "em":
+      case "i":
+        return `<em>${children}</em>`;
+      case "u":
+        return `<u>${children}</u>`;
+      case "p":
+      case "div":
+        return `<p>${withInlineStyle(children) || "<br>"}</p>`;
+      case "ul":
+      case "ol":
+      case "li":
+      case "blockquote":
+        return `<${tag}>${children}</${tag}>`;
+      case "a": {
+        const href = safeEditorLink(element.getAttribute("href"));
+        return href
+          ? `<a href="${escapeEditorText(href)}">${children}</a>`
+          : withInlineStyle(children);
+      }
+      default:
+        return withInlineStyle(children);
+    }
+  };
+  return Array.from(documentFragment.body.childNodes)
+    .map(visit)
+    .join("")
+    .replace(/(?:<br>\s*){3,}/g, "<br><br>");
+}
+
+function RichTextEditor({
+  value,
+  onChange,
+  placeholder,
+  compact = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  compact?: boolean;
+}) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const editor = editorRef.current;
+    const next = editorMarkup(value);
+    if (editor && editor.innerHTML !== next) editor.innerHTML = next;
+  }, [value]);
+  const format = (
+    command:
+      | "bold"
+      | "italic"
+      | "underline"
+      | "removeFormat"
+      | "insertUnorderedList"
+      | "insertOrderedList",
+  ) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus();
+    document.execCommand(command);
+    onChange(editor.innerHTML);
+  };
+  const insertLink = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const href = window.prompt("Paste a web address or email address");
+    if (!href) return;
+    const safeHref = safeEditorLink(href);
+    if (!safeHref) {
+      window.alert("Use a link starting with https://, http://, or mailto:.");
+      return;
+    }
+    editor.focus();
+    document.execCommand("createLink", false, safeHref);
+    onChange(editor.innerHTML);
+  };
+  const handlePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const clipboard = event.clipboardData;
+    const pastedHtml = clipboard.getData("text/html");
+    const pastedText = clipboard.getData("text/plain");
+    if (!pastedHtml && !pastedText) return;
+    event.preventDefault();
+    document.execCommand(
+      "insertHTML",
+      false,
+      pastedHtml
+        ? editorMarkup(pastedHtml)
+        : escapeEditorText(pastedText).replace(/\n/g, "<br>"),
+    );
+    const editor = editorRef.current;
+    if (editor) onChange(editor.innerHTML);
+  };
+  return (
+    <div
+      className={`tracker-rich-text-editor ${compact ? "tracker-rich-text-editor-compact" : ""}`}
+    >
+      <div
+        className="tracker-rich-text-toolbar"
+        role="toolbar"
+        aria-label="Text formatting"
+      >
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => format("bold")}
+          aria-label="Bold"
+          data-tooltip="Bold"
+        >
+          <Bold className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => format("italic")}
+          aria-label="Italic"
+          data-tooltip="Italic"
+        >
+          <Italic className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => format("underline")}
+          aria-label="Underline"
+          data-tooltip="Underline"
+        >
+          <Underline className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => format("insertUnorderedList")}
+          aria-label="Bullet list"
+          data-tooltip="Bullet list"
+        >
+          <List className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => format("insertOrderedList")}
+          aria-label="Numbered list"
+          data-tooltip="Numbered list"
+        >
+          <ListOrdered className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={insertLink}
+          aria-label="Add link"
+          data-tooltip="Add link"
+        >
+          <Link2 className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => format("removeFormat")}
+          aria-label="Clear formatting"
+          data-tooltip="Clear formatting"
+        >
+          <RemoveFormatting className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        role="textbox"
+        aria-multiline={!compact}
+        data-placeholder={placeholder}
+        onInput={(event) => onChange(event.currentTarget.innerHTML)}
+        onPaste={handlePaste}
+        className="tracker-rich-text"
+      />
+    </div>
+  );
+}
+
+export default function ClientTrackerDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { data: session } = useSession();
+  const isAdmin =
+    session?.user && (session.user as { role?: string }).role === "admin";
+  const resolved = React.use(params);
+  const entryLimit = 100;
+  const [entryOffset, setEntryOffset] = useState(0);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState(ALL_FILTER);
+  const [fieldFilter, setFieldFilter] = useState(ALL_FILTER);
+  const [valueFilter, setValueFilter] = useState(ALL_FILTER);
+  const [savedViewId, setSavedViewId] = useState("");
+  const [activityExpanded, setActivityExpanded] = useState(false);
+  const [savedViewEditorOpen, setSavedViewEditorOpen] = useState(false);
+  const [savedViewDraft, setSavedViewDraft] = useState<TrackerSavedView | null>(
+    null,
+  );
+  const [savingSavedView, setSavingSavedView] = useState(false);
+  const filterQuery = new URLSearchParams({
+    limit: String(entryLimit),
+    offset: String(entryOffset),
+  });
+  if (search.trim()) filterQuery.set("search", search.trim());
+  if (categoryFilter !== ALL_FILTER)
+    filterQuery.set("category", categoryFilter);
+  if (fieldFilter !== ALL_FILTER && valueFilter !== ALL_FILTER) {
+    filterQuery.set("field", fieldFilter);
+    filterQuery.set("value", valueFilter);
+  }
+  if (savedViewId) filterQuery.set("view", savedViewId);
+  if (entryOffset > 0) filterQuery.set("overview", "0");
+  const url = `/api/client-trackers/${resolved.id}?${filterQuery.toString()}`;
+  const { data, loading, error, refetch, mutate } =
+    useCache<TrackerDetail>(url);
+  const { data: emailActivity, refetch: refetchEmailActivity } =
+    useCache<TrackerEmailActivity>(`/api/client-trackers/${resolved.id}/email`);
+  const { data: trackerActivity, refetch: refetchTrackerActivity } =
+    useCache<TrackerActivity>(`/api/client-trackers/${resolved.id}/activity`);
+  const { data: rawClients } = useCache<Client[]>("/api/clients");
+  const { data: rawDocuments } = useCache<ManagedDocumentOption[]>(
+    "/api/documents",
+  );
+  const tracker = data;
+  const [lastOverviewCounts, setLastOverviewCounts] =
+    useState<TrackerDetail["overviewCounts"]>();
+  React.useEffect(() => {
+    if (data?.overviewCounts) setLastOverviewCounts(data.overviewCounts);
+  }, [data?.overviewCounts]);
+  const overviewCounts = tracker?.overviewCounts || lastOverviewCounts;
+  const allClients = Array.isArray(rawClients) ? rawClients : [];
+  const managedDocuments = (rawDocuments || []).filter(
+    (document) =>
+      document.storageType === "google-drive" &&
+      Boolean(document.driveFileId) &&
+      Boolean(document.mimeType),
+  );
+  const [savingCell, setSavingCell] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const [selectedEntries, setSelectedEntries] = useState<Set<string>>(
+    new Set(),
+  );
+  const [bulkField, setBulkField] = useState("status");
+  const [bulkValue, setBulkValue] = useState("Done");
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [configurationOpen, setConfigurationOpen] = useState(false);
+  const [fieldDraft, setFieldDraft] = useState<TrackerField[]>([]);
+  const [columnDraft, setColumnDraft] = useState<ClientTrackerDetailKey[]>([]);
+  const [savingConfiguration, setSavingConfiguration] = useState(false);
+  const [participantDraft, setParticipantDraft] = useState<string[]>([]);
+  const [basicDraft, setBasicDraft] = useState({
+    name: "",
+    description: "",
+    financialYear: "",
+  });
+  const [basicsOpen, setBasicsOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState<
+    "archive" | "delete" | "configuration" | "bulk" | null
+  >(null);
+  const [lastBulkChange, setLastBulkChange] = useState<{
+    key: string;
+    values: Array<{ id: string; value: TrackerValue }>;
+  } | null>(null);
+  const [emailConfigOpen, setEmailConfigOpen] = useState(false);
+  const [emailHistoryOpen, setEmailHistoryOpen] = useState(false);
+  const [emailComposeOpen, setEmailComposeOpen] = useState(false);
+  const [emailEnabledDraft, setEmailEnabledDraft] = useState(false);
+  const [workflowDraft, setWorkflowDraft] = useState<TrackerEmailWorkflow[]>(
+    [],
+  );
+  const [emailConfigInitialSnapshot, setEmailConfigInitialSnapshot] =
+    useState("");
+  const [emailConfigError, setEmailConfigError] = useState<string | null>(null);
+  const [emailConfigDiscardOpen, setEmailConfigDiscardOpen] = useState(false);
+  const [activeWorkflowId, setActiveWorkflowId] = useState("");
+  const [emailSetupScreen, setEmailSetupScreen] = useState<
+    "library" | "new-details" | "builder"
+  >("library");
+  const [newWorkflowDetails, setNewWorkflowDetails] = useState({
+    name: "",
+    description: "",
+  });
+  const [builderStartPage, setBuilderStartPage] = useState(0);
+  const [emailPreview, setEmailPreview] = useState<EmailPreview | null>(null);
+  const [emailKind, setEmailKind] = useState<"initial" | "reminder">("initial");
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [combinationPreviewOpen, setCombinationPreviewOpen] = useState(false);
+  const [sendConfirmation, setSendConfirmation] = useState(false);
+  const [recipientDrafts, setRecipientDrafts] = useState<
+    Record<string, RecipientDraft>
+  >({});
+  const [previewMessage, setPreviewMessage] = useState<
+    EmailPreview["messages"][number] | null
+  >(null);
+  const [gmailSignature, setGmailSignature] = useState<string | null>(null);
+  const [gmailSignatureLoading, setGmailSignatureLoading] = useState(false);
+  const [exportingTracker, setExportingTracker] = useState(false);
+  const [exportingEmailHistory, setExportingEmailHistory] = useState(false);
+  const [campaignId, setCampaignId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!previewMessage) {
+      setGmailSignature(null);
+      setGmailSignatureLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setGmailSignature(null);
+    setGmailSignatureLoading(true);
+    void fetch("/api/email/default-signature")
+      .then(async (response) => {
+        if (!response.ok) return { signature: "" };
+        return (await response.json()) as { signature?: string };
+      })
+      .then((result) => {
+        if (!cancelled) setGmailSignature(result.signature || "");
+      })
+      .catch(() => {
+        if (!cancelled) setGmailSignature("");
+      })
+      .finally(() => {
+        if (!cancelled) setGmailSignatureLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [previewMessage]);
+
+  const filterField = tracker?.fields.find(
+    (field) => field.key === fieldFilter,
+  );
+  const filterOptions =
+    filterField?.type === "toggle" ? ["Yes", "No"] : filterField?.options || [];
+  const activeSavedView = tracker?.savedViews?.find(
+    (view) => view.id === savedViewId,
+  );
+  const visibleEntries = useMemo(
+    () =>
+      (tracker?.entries || []).filter((entry) => {
+        const term = search.toLowerCase().trim();
+        const matchesSearch =
+          !term ||
+          `${entry.client?.companyName || ""} ${entry.clientId} ${entry.client?.category || ""}`
+            .toLowerCase()
+            .includes(term);
+        const matchesCategory =
+          categoryFilter === ALL_FILTER ||
+          entry.client?.category === categoryFilter;
+        const rawValue = entry.values[fieldFilter];
+        const currentValue = valueText(rawValue);
+        const matchesValue =
+          fieldFilter === ALL_FILTER ||
+          valueFilter === ALL_FILTER ||
+          (["text", "longText"].includes(filterField?.type || "")
+            ? currentValue.toLowerCase().includes(valueFilter.toLowerCase())
+            : ["multiSelect", "tags"].includes(filterField?.type || "")
+              ? Array.isArray(rawValue) && rawValue.includes(valueFilter)
+              : currentValue === valueFilter);
+        const matchesView =
+          !activeSavedView ||
+          evaluateTrackerConditionGroup(
+            activeSavedView.conditionGroup,
+            entry.values,
+          );
+        return matchesSearch && matchesCategory && matchesValue && matchesView;
+      }),
+    [
+      tracker?.entries,
+      search,
+      categoryFilter,
+      fieldFilter,
+      valueFilter,
+      filterField?.type,
+      activeSavedView,
+    ],
+  );
+  const deleteActiveSavedView = async () => {
+    if (!tracker || !activeSavedView) return;
+    const response = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        savedViews: (tracker.savedViews || []).filter(
+          (view) => view.id !== activeSavedView.id,
+        ),
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      toast.error(result.error || "Unable to delete view.");
+      return;
+    }
+    setSavedViewId("");
+    await refetch();
+    void refetchTrackerActivity();
+    toast.success("Saved view deleted.");
+  };
+  const overviewFields = (tracker?.fields || []).filter(
+    (field) =>
+      field.type === "status" ||
+      field.type === "select" ||
+      field.type === "toggle",
+  );
+  const bulkFields = (tracker?.fields || []).filter(
+    (field) =>
+      !field.dataLink &&
+      !field.computed &&
+      (field.type === "status" ||
+        field.type === "select" ||
+        field.type === "toggle"),
+  );
+  const categories = CLIENT_TRACKER_CATEGORIES;
+  const selectedBulkField =
+    tracker?.fields.find((field) => field.key === bulkField) ||
+    tracker?.fields[0];
+  const bulkOptions =
+    selectedBulkField?.type === "toggle"
+      ? ["Yes", "No"]
+      : selectedBulkField?.options || [];
+  const activeWorkflow = workflowDraft.find(
+    (workflow) => workflow.id === activeWorkflowId,
+  );
+  const communicationByClient = useMemo(() => {
+    const status = new Map<
+      string,
+      | "Not Contacted"
+      | "Draft Created"
+      | "Sent"
+      | "Reminder Sent"
+      | "Replied"
+      | "Failed"
+    >();
+    for (const log of emailActivity?.logs || []) {
+      if (!log.clientId || status.has(log.clientId)) continue;
+      status.set(
+        log.clientId,
+        log.communicationStatus === "replied"
+          ? "Replied"
+          : log.status === "draft"
+            ? "Draft Created"
+            : log.status === "failed"
+              ? "Failed"
+              : log.mailKind === "reminder"
+                ? "Reminder Sent"
+                : "Sent",
+      );
+    }
+    return status;
+  }, [emailActivity?.logs]);
+  const basicsFooter = (
+    <div className="tracker-modal-footer flex justify-end gap-3">
+      <button
+        type="button"
+        onClick={() => setBasicsOpen(false)}
+        disabled={savingConfiguration}
+        className="rounded-xl px-4 py-2.5 text-sm font-medium text-muted hover:bg-black/[0.04] disabled:opacity-60 dark:hover:bg-white/[0.06]"
+      >
+        Cancel
+      </button>
+      <button
+        disabled={savingConfiguration}
+        onClick={() => void saveBasics()}
+        className="tracker-modal-primary rounded-xl px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+      >
+        {savingConfiguration ? "Saving…" : "Save details"}
+      </button>
+    </div>
+  );
+  const emailConfigFooter = (
+    <div className="tracker-modal-footer flex justify-end gap-3">
+      <button
+        type="button"
+        onClick={requestCloseEmailConfig}
+        disabled={emailLoading}
+        className="rounded-xl px-4 py-2.5 text-sm font-medium text-muted hover:bg-black/[0.04] disabled:opacity-60 dark:hover:bg-white/[0.06]"
+      >
+        Cancel
+      </button>
+      <button
+        disabled={emailLoading}
+        onClick={() => void saveEmailConfig()}
+        className="tracker-modal-primary rounded-xl px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+      >
+        {emailLoading ? "Saving…" : "Save email updates"}
+      </button>
+    </div>
+  );
+  const configurationFooter = (
+    <div className="tracker-modal-footer flex justify-end gap-3">
+      <button
+        type="button"
+        onClick={() => setConfigurationOpen(false)}
+        disabled={savingConfiguration}
+        className="rounded-xl px-4 py-2.5 text-sm font-medium text-muted hover:bg-black/[0.04] disabled:opacity-60 dark:hover:bg-white/[0.06]"
+      >
+        Cancel
+      </button>
+      <button
+        disabled={savingConfiguration}
+        onClick={() => void saveConfiguration()}
+        className="tracker-modal-primary rounded-xl px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+      >
+        {savingConfiguration ? "Saving…" : "Save changes"}
+      </button>
+    </div>
+  );
+  const emailComposeFooter = (
+    <div className="tracker-modal-footer flex shrink-0 flex-wrap justify-end gap-2 border-t border-white/[0.45] bg-white/[0.82] px-4 py-3 shadow-[0_-12px_28px_rgba(0,0,0,0.08)] backdrop-blur-2xl sm:px-6 dark:border-white/[0.10] dark:bg-[#131315]/[0.92]">
+      <button
+        type="button"
+        onClick={() => setEmailComposeOpen(false)}
+        disabled={emailLoading}
+        className="rounded-full border border-white/70 bg-white px-5 py-2.5 text-sm font-semibold text-default shadow-sm transition hover:bg-[#f6f6f8] disabled:opacity-60 dark:border-white/[0.12] dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"
+      >
+        Cancel
+      </button>
+      {emailPreview && (
+        <>
+          <button
+            disabled={emailLoading || !emailPreview.messages.length}
+            onClick={() => void deliverEmails("draft")}
+            className="rounded-full border border-white/70 bg-white px-5 py-2.5 text-sm font-semibold text-default shadow-sm transition hover:bg-[#f6f6f8] disabled:opacity-60 dark:border-white/[0.12] dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"
+          >
+            Create Gmail drafts
+          </button>
+          <button
+            disabled={emailLoading || !emailPreview.messages.length}
+            onClick={() => setSendConfirmation(true)}
+            className="rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition active:scale-[0.98] disabled:opacity-60"
+          >
+            <Send className="mr-1 inline h-4 w-4" />
+            Send {emailPreview.messages.length} emails
+          </button>
+        </>
+      )}
+    </div>
+  );
+
+  React.useEffect(() => {
+    if (
+      fieldFilter !== ALL_FILTER &&
+      !tracker?.fields.some((field) => field.key === fieldFilter)
+    ) {
+      setFieldFilter(ALL_FILTER);
+      setValueFilter(ALL_FILTER);
+    }
+  }, [fieldFilter, tracker?.fields]);
+
+  React.useEffect(() => {
+    setEntryOffset(0);
+    setSelectedEntries(new Set());
+  }, [search, categoryFilter, fieldFilter, valueFilter, savedViewId]);
+
+  React.useEffect(() => {
+    setSelectedEntries(new Set());
+  }, [entryOffset]);
+
+  const saveValue = async (
+    entry: Entry,
+    field: TrackerField,
+    value: TrackerValue,
+  ) => {
+    const cellId = `${entry._id}-${field.key}`;
+    setSavingCell(cellId);
+    const optimisticEntry = {
+      ...entry,
+      values: { ...entry.values, [field.key]: value },
+      updatedAt: new Date().toISOString(),
+    };
+    mutate((current) =>
+      current
+        ? {
+            ...current,
+            entries: current.entries.map((item) =>
+              item._id === entry._id ? optimisticEntry : item,
+            ),
+          }
+        : (current as unknown as TrackerDetail),
+    );
+    try {
+      const response = await fetch(
+        `/api/client-trackers/${resolved.id}/entries/${entry._id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: field.key, value }),
+        },
+      );
+      const saved = await response.json();
+      if (!response.ok)
+        throw new Error(saved.error || "Unable to save change.");
+      mutate((current) =>
+        current
+          ? {
+              ...current,
+              entries: current.entries.map((item) =>
+                item._id === entry._id
+                  ? { ...item, ...saved, client: item.client }
+                  : item,
+              ),
+            }
+          : (current as unknown as TrackerDetail),
+      );
+      void refetch();
+      void refetchTrackerActivity();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to save change.",
+      );
+      refetch();
+    } finally {
+      setSavingCell(null);
+    }
+  };
+  const archive = async () => {
+    if (!tracker) return;
+    const restoring = tracker.status === "archived";
+    setArchiving(true);
+    try {
+      const response = await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: restoring ? "active" : "archived" }),
+      });
+      if (!response.ok) throw new Error();
+      invalidate("/api/client-trackers");
+      toast.success(restoring ? "Tracker restored." : "Tracker archived.");
+      window.location.assign("/dashboard/client-trackers");
+    } catch {
+      toast.error("Unable to archive tracker.");
+      setArchiving(false);
+    }
+  };
+  const deleteTracker = async () => {
+    if (!tracker) return;
+    setArchiving(true);
+    try {
+      const response = await fetch(url, { method: "DELETE" });
+      if (!response.ok) throw new Error();
+      invalidate("/api/client-trackers");
+      toast.success("Tracker permanently deleted.");
+      window.location.assign("/dashboard/client-trackers");
+    } catch {
+      toast.error("Unable to delete tracker.");
+      setArchiving(false);
+    }
+  };
+  const openConfiguration = () => {
+    if (!tracker) return;
+    if (tracker.status !== "active") {
+      toast.error("Restore this tracker before changing its configuration.");
+      return;
+    }
+    setFieldDraft(
+      tracker.fields.map((field) => ({
+        ...field,
+        optionInput: field.options?.join(", ") || "",
+      })),
+    );
+    setColumnDraft(tracker.clientColumns || ["state"]);
+    setParticipantDraft(tracker.entries.map((entry) => entry.clientId));
+    setBasicDraft({
+      name: tracker.name,
+      description: tracker.description || "",
+      financialYear: tracker.financialYear || "",
+    });
+    setConfigurationOpen(true);
+  };
+  const openBasics = () => {
+    if (!tracker) return;
+    if (tracker.status !== "active") {
+      toast.error("Restore this tracker before editing its details.");
+      return;
+    }
+    setBasicDraft({
+      name: tracker.name,
+      description: tracker.description || "",
+      financialYear: tracker.financialYear || "",
+    });
+    setBasicsOpen(true);
+  };
+  const openSavedViewEditor = (view?: TrackerSavedView) => {
+    if (!tracker || tracker.status !== "active") {
+      toast.error("Restore this tracker before changing saved views.");
+      return;
+    }
+    const firstField = tracker.fields[0]?.key;
+    if (!view && !firstField) {
+      toast.error("Add a tracker column before creating a saved view.");
+      return;
+    }
+    setSavedViewDraft(
+      view
+        ? {
+            ...view,
+            conditionGroup: {
+              ...view.conditionGroup,
+              conditions: view.conditionGroup.conditions.map((condition) => ({
+                ...condition,
+              })),
+            },
+          }
+        : {
+            id: emailId(),
+            name: "",
+            conditionGroup: {
+              mode: "ALL",
+              conditions: [
+                {
+                  fieldKey: firstField as string,
+                  operator: "equals",
+                  value: "",
+                },
+              ],
+            },
+          },
+    );
+    setSavedViewEditorOpen(true);
+  };
+  const saveSavedView = async () => {
+    if (!tracker || !savedViewDraft) return;
+    const draft = {
+      ...savedViewDraft,
+      name: savedViewDraft.name.trim(),
+    };
+    const needsValue = (operator: TrackerRuleOperator) =>
+      !["is_empty", "is_not_empty"].includes(operator);
+    if (!draft.name) {
+      toast.error("Give this saved view a name.");
+      return;
+    }
+    if (
+      !draft.conditionGroup.conditions.length ||
+      draft.conditionGroup.conditions.some(
+        (condition) =>
+          !tracker.fields.some((field) => field.key === condition.fieldKey) ||
+          (needsValue(condition.operator) &&
+            String(condition.value ?? "").trim() === ""),
+      )
+    ) {
+      toast.error("Complete every condition before saving this view.");
+      return;
+    }
+    setSavingSavedView(true);
+    try {
+      const existing = tracker.savedViews || [];
+      const savedViews = existing.some((view) => view.id === draft.id)
+        ? existing.map((view) => (view.id === draft.id ? draft : view))
+        : [...existing, draft];
+      const response = await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ savedViews }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to save view.");
+      setSavedViewId(draft.id);
+      setSearch("");
+      setCategoryFilter(ALL_FILTER);
+      setFieldFilter(ALL_FILTER);
+      setValueFilter(ALL_FILTER);
+      setEntryOffset(0);
+      setSavedViewEditorOpen(false);
+      await refetch();
+      void refetchTrackerActivity();
+      toast.success(
+        existing.some((view) => view.id === draft.id)
+          ? "Saved view updated."
+          : "Saved view created.",
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to save view.",
+      );
+    } finally {
+      setSavingSavedView(false);
+    }
+  };
+  const openEmailConfig = () => {
+    if (!tracker || tracker.status !== "active") return;
+    const workflows = migrateLegacyMatchingMessages(tracker.emailWorkflows || []);
+    setEmailEnabledDraft(Boolean(tracker.emailEnabled));
+    setWorkflowDraft(workflows);
+    setEmailConfigInitialSnapshot(
+      emailConfigSnapshot(Boolean(tracker.emailEnabled), workflows),
+    );
+    setEmailConfigError(null);
+    setActiveWorkflowId(workflows[0]?.id || "");
+    setEmailSetupScreen("library");
+    setNewWorkflowDetails({ name: "", description: "" });
+    setBuilderStartPage(0);
+    setEmailConfigOpen(true);
+  };
+  const hasUnsavedEmailConfigChanges =
+    emailConfigSnapshot(emailEnabledDraft, workflowDraft) !==
+    emailConfigInitialSnapshot;
+  function requestCloseEmailConfig() {
+    if (emailLoading) return;
+    if (hasUnsavedEmailConfigChanges) {
+      setEmailConfigDiscardOpen(true);
+      return;
+    }
+    setEmailConfigOpen(false);
+  }
+  const saveEmailConfig = async () => {
+    if (!tracker) return;
+    const validationError = validateEmailWorkflowDrafts(
+      workflowDraft,
+      tracker.fields,
+    );
+    if (validationError) {
+      setEmailConfigError(validationError);
+      return;
+    }
+    setEmailConfigError(null);
+    setEmailLoading(true);
+    try {
+      const response = await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          emailEnabled: emailEnabledDraft,
+          emailWorkflows: workflowDraft,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Unable to save email settings.");
+      await refetch();
+      void refetchTrackerActivity();
+      setEmailConfigInitialSnapshot(
+        emailConfigSnapshot(emailEnabledDraft, workflowDraft),
+      );
+      setEmailConfigOpen(false);
+      toast.success(
+        emailEnabledDraft
+          ? "Tracker email updates enabled."
+          : "Tracker email updates disabled.",
+      );
+    } catch (error) {
+      setEmailConfigError(
+        error instanceof Error ? error.message : "Unable to save email settings.",
+      );
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Unable to save email settings.",
+      );
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+  const updateWorkflow = (id: string, patch: Partial<TrackerEmailWorkflow>) => {
+    setEmailConfigError(null);
+    setWorkflowDraft((current) =>
+      current.map((workflow) =>
+        workflow.id === id ? { ...workflow, ...patch } : workflow,
+      ),
+    );
+  };
+  const downloadExcel = async (
+    endpoint: string,
+    fallbackName: string,
+    setLoading: (loading: boolean) => void,
+  ) => {
+    setLoading(true);
+    try {
+      const response = await fetch(endpoint);
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || "Unable to prepare the Excel file.");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const filename =
+        disposition.match(/filename="?([^";]+)"?/i)?.[1] || fallbackName;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to export Excel.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+  const exportCurrentTracker = () => {
+    const query = new URLSearchParams();
+    if (search.trim()) query.set("search", search.trim());
+    if (categoryFilter !== ALL_FILTER) query.set("category", categoryFilter);
+    if (fieldFilter !== ALL_FILTER && valueFilter !== ALL_FILTER) {
+      query.set("field", fieldFilter);
+      query.set("value", valueFilter);
+    }
+    if (savedViewId) query.set("view", savedViewId);
+    const suffix = query.size ? `?${query.toString()}` : "";
+    void downloadExcel(
+      `/api/client-trackers/${resolved.id}/export${suffix}`,
+      "client-tracker-current-state.xlsx",
+      setExportingTracker,
+    );
+  };
+  const exportEmailHistory = () =>
+    void downloadExcel(
+      `/api/client-trackers/${resolved.id}/email/export`,
+      "client-tracker-email-history.xlsx",
+      setExportingEmailHistory,
+    );
+  const openEmailComposer = () => {
+    if (!tracker?.emailEnabled || !tracker.emailWorkflows?.length) {
+      toast.error("Set up an email workflow first.");
+      return;
+    }
+    setActiveWorkflowId(tracker.emailWorkflows[0].id);
+    setEmailPreview(null);
+    setPreviewMessage(null);
+    setRecipientDrafts({});
+    setCampaignId(null);
+    setEmailKind("initial");
+    setEmailComposeOpen(true);
+  };
+  const previewEmails = async () => {
+    if (!activeWorkflowId) return;
+    setEmailLoading(true);
+    try {
+      if (emailKind === "reminder") {
+        const replyResponse = await fetch(
+          `/api/client-trackers/${resolved.id}/email/replies`,
+          { method: "POST" },
+        );
+        if (!replyResponse.ok) {
+          const replyResult = await replyResponse.json();
+          toast(
+            replyResult.error ||
+              "Could not refresh Gmail replies. Saved reply status will still be checked.",
+            { duration: 7000 },
+          );
+        }
+        void refetchEmailActivity();
+      }
+      const response = await fetch(
+        `/api/client-trackers/${resolved.id}/email`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            workflowId: activeWorkflowId,
+            kind: emailKind,
+            entryIds: selectedEntries.size ? [...selectedEntries] : undefined,
+          }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Unable to prepare email preview.");
+      setEmailPreview(result);
+      setRecipientDrafts(
+        Object.fromEntries(
+          (result.messages || []).map(
+            (message: EmailPreview["messages"][number]) => [
+              message.entryId,
+              {
+                to: message.suggestedTo?.length
+                  ? message.suggestedTo
+                  : [message.to],
+                cc: [],
+                additionalTo: "",
+                additionalCc: "",
+              },
+            ],
+          ),
+        ),
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Unable to prepare email preview.",
+      );
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+  const deliverEmails = async (mode: "draft" | "send") => {
+    if (!emailPreview) return;
+    const isEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    const invalidRecipient = emailPreview.messages.find((message) => {
+      const draft = recipientDrafts[message.entryId] || {
+        to: message.suggestedTo?.length ? message.suggestedTo : [message.to],
+        cc: [],
+        additionalTo: "",
+        additionalCc: "",
+      };
+      const to = [...draft.to, ...parseEmailList(draft.additionalTo)];
+      const cc = [...draft.cc, ...parseEmailList(draft.additionalCc)];
+      return !to.length || [...to, ...cc].some((email) => !isEmail(email));
+    });
+    if (invalidRecipient) {
+      toast.error(
+        `Enter valid To and CC addresses for ${invalidRecipient.companyName}.`,
+      );
+      return;
+    }
+    setEmailLoading(true);
+    try {
+      const messages = emailPreview.messages.map((message) => {
+        const recipients = recipientDrafts[message.entryId] || {
+          to: message.suggestedTo?.length ? message.suggestedTo : [message.to],
+          cc: [],
+          additionalTo: "",
+          additionalCc: "",
+        };
+        const to = Array.from(
+          new Set(
+            [...recipients.to, ...parseEmailList(recipients.additionalTo)].map(
+              (email) => email.trim().toLowerCase(),
+            ),
+          ),
+        );
+        const cc = Array.from(
+          new Set(
+            [...recipients.cc, ...parseEmailList(recipients.additionalCc)].map(
+              (email) => email.trim().toLowerCase(),
+            ),
+          ),
+        ).filter((email) => !to.includes(email));
+        return {
+          entryId: message.entryId,
+          clientId: message.clientId,
+          companyName: message.companyName,
+          to,
+          cc,
+          subject: message.subject,
+          html: message.html,
+          attachments: message.attachments.map(({ documentId }) => ({
+            documentId,
+          })),
+        };
+      });
+      const activeCampaignId = campaignId || emailId();
+      setCampaignId(activeCampaignId);
+      const response = await fetch(
+        `/api/client-trackers/${resolved.id}/email/deliver`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            campaignId: activeCampaignId,
+            workflowId: activeWorkflowId,
+            kind: emailKind,
+            mode,
+            messages,
+            resume: Boolean(campaignId),
+            ...(mode === "send" ? { confirmed: true } : {}),
+          }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Unable to deliver tracker emails.");
+      const deliveryMessage =
+        mode === "draft"
+          ? `${result.completed} Gmail drafts created.`
+          : `${result.completed} emails sent.`;
+      if (result.status === "paused_daily_limit") {
+        toast(
+          `${deliveryMessage} ${result.pending} remain unsent until the 24-hour allowance is available. You can safely close this window; prepare the campaign again later and only unsent clients will be eligible.`,
+          { duration: 12000 },
+        );
+        void refetchEmailActivity();
+        void refetchTrackerActivity();
+        return;
+      }
+      result.failed
+        ? toast.error(
+            `${deliveryMessage} ${result.failed} failed; they are recorded in email history.`,
+          )
+        : toast.success(deliveryMessage);
+      setEmailComposeOpen(false);
+      setSelectedEntries(new Set());
+      setCampaignId(null);
+      void refetchEmailActivity();
+      void refetchTrackerActivity();
+    } catch (error) {
+      toast.error(
+        `${error instanceof Error ? error.message : "Email delivery was interrupted."} Use the same action again to resume unsent recipients.`,
+      );
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+  const saveBasics = async () => {
+    if (!basicDraft.name.trim()) {
+      toast.error("Tracker name is required.");
+      return;
+    }
+    setSavingConfiguration(true);
+    try {
+      const response = await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(basicDraft),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Unable to save tracker details.");
+      await refetch();
+      setBasicsOpen(false);
+      toast.success("Tracker details updated.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Unable to save tracker details.",
+      );
+    } finally {
+      setSavingConfiguration(false);
+    }
+  };
+  const updateDraft = (index: number, patch: Partial<TrackerField>) =>
+    setFieldDraft((current) =>
+      current.map((field, fieldIndex) =>
+        fieldIndex === index ? { ...field, ...patch } : field,
+      ),
+    );
+  const moveDraft = (from: number, to: number) =>
+    setFieldDraft((current) => {
+      if (
+        from === to ||
+        from < 0 ||
+        to < 0 ||
+        from >= current.length ||
+        to >= current.length
+      )
+        return current;
+      const next = [...current];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  const saveConfiguration = async (confirmed = false) => {
+    if (!fieldDraft.length) {
+      toast.error("Keep at least one tracker column.");
+      return;
+    }
+    if (
+      fieldDraft.some((field) =>
+        ["purchaseUploads", "saleUploads"].includes(
+          field.dataLink?.source || "",
+        ),
+      ) &&
+      !basicDraft.financialYear
+    ) {
+      toast.error("Choose a financial year for CPCB upload data.");
+      return;
+    }
+    const removedFields =
+      tracker?.fields.filter(
+        (field) => !fieldDraft.some((draft) => draft.key === field.key),
+      ) || [];
+    const removedClients =
+      tracker?.entries.filter(
+        (entry) => !participantDraft.includes(entry.clientId),
+      ) || [];
+    if (!confirmed && (removedFields.length || removedClients.length)) {
+      setConfirmation("configuration");
+      return;
+    }
+    setSavingConfiguration(true);
+    try {
+      const response = await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...basicDraft,
+          fields: fieldDraft,
+          includeStatus: fieldDraft.some((field) => field.type === "status"),
+          clientColumns: columnDraft,
+          clientIds: participantDraft,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Unable to update tracker.");
+      setConfigurationOpen(false);
+      await refetch();
+      toast.success("Tracker columns updated.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to update tracker.",
+      );
+    } finally {
+      setSavingConfiguration(false);
+    }
+  };
+  const toggleEntry = (entryId: string) =>
+    setSelectedEntries((current) => {
+      const next = new Set(current);
+      if (next.has(entryId)) next.delete(entryId);
+      else next.add(entryId);
+      return next;
+    });
+  const selectVisible = () =>
+    setSelectedEntries((current) => {
+      const allVisibleSelected =
+        visibleEntries.length > 0 &&
+        visibleEntries.every((entry) => current.has(entry._id));
+      const next = new Set(current);
+      visibleEntries.forEach((entry) =>
+        allVisibleSelected ? next.delete(entry._id) : next.add(entry._id),
+      );
+      return next;
+    });
+  const bulkUpdate = async (
+    confirmed = false,
+    replacement?: { ids: string[]; value: TrackerValue },
+  ) => {
+    if (!selectedBulkField || (!replacement && selectedEntries.size === 0))
+      return;
+    if (!confirmed) {
+      setConfirmation("bulk");
+      return;
+    }
+    setBulkSaving(true);
+    const entryIds = replacement?.ids || [...selectedEntries];
+    const value: TrackerValue =
+      replacement?.value ??
+      (selectedBulkField.type === "toggle" ? bulkValue === "Yes" : bulkValue);
+    try {
+      const response = await fetch(
+        `/api/client-trackers/${resolved.id}/entries/bulk`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entryIds, key: selectedBulkField.key, value }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Unable to apply update.");
+      mutate((current) =>
+        current
+          ? {
+              ...current,
+              entries: current.entries.map((entry) =>
+                entryIds.includes(entry._id)
+                  ? {
+                      ...entry,
+                      values: {
+                        ...entry.values,
+                        [selectedBulkField.key]: value,
+                      },
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : entry,
+              ),
+            }
+          : (current as unknown as TrackerDetail),
+      );
+      if (!replacement) {
+        const previous = Array.isArray(result.previous)
+          ? (result.previous as Array<{ id: string; value: TrackerValue }>)
+          : [];
+        setLastBulkChange({ key: selectedBulkField.key, values: previous });
+        toast(
+          (notice) => (
+            <span>
+              Updated {result.updated} client{result.updated === 1 ? "" : "s"}.{" "}
+              <button
+                className="ml-2 font-semibold underline"
+                onClick={() => {
+                  toast.dismiss(notice.id);
+                  void undoBulk();
+                }}
+              >
+                Undo
+              </button>
+            </span>
+          ),
+          { duration: 10000 },
+        );
+      } else
+        toast.success(
+          `Restored ${result.updated} client${result.updated === 1 ? "" : "s"}.`,
+        );
+      setSelectedEntries(new Set());
+      void refetch();
+      void refetchTrackerActivity();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to apply update.",
+      );
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+  const undoBulk = async () => {
+    if (
+      !lastBulkChange ||
+      !selectedBulkField ||
+      lastBulkChange.key !== selectedBulkField.key
+    )
+      return;
+    const groups = new Map<string, { value: TrackerValue; ids: string[] }>();
+    lastBulkChange.values.forEach(({ id, value }) => {
+      const groupKey = JSON.stringify(value);
+      const group = groups.get(groupKey) || { value, ids: [] };
+      group.ids.push(id);
+      groups.set(groupKey, group);
+    });
+    try {
+      for (const group of groups.values()) await bulkUpdate(true, group);
+      setLastBulkChange(null);
+    } catch {
+      toast.error("Unable to undo this bulk update.");
+    }
+  };
+
+  if (loading) return <LoadingSpinner />;
+  if (!tracker)
+    return (
+      <div className="rounded-2xl border border-base bg-card p-8 text-center">
+        <CircleAlert className="mx-auto mb-2 h-7 w-7 text-rose-500" />
+        <p className="font-semibold text-default">
+          {error ? "Unable to load tracker" : "Tracker not found"}
+        </p>
+        <Link
+          href="/dashboard/client-trackers"
+          className="mt-3 inline-block text-sm text-blue-600"
+        >
+          Back to trackers
+        </Link>
+      </div>
+    );
+
+  return (
+    <>
+      <Modal
+        open={savedViewEditorOpen}
+        onClose={() => !savingSavedView && setSavedViewEditorOpen(false)}
+        title={
+          savedViewDraft &&
+          (tracker?.savedViews || []).some(
+            (view) => view.id === savedViewDraft.id,
+          )
+            ? "Edit saved view"
+            : "Create saved view"
+        }
+        subtitle="Choose the tracker conditions that define this group of clients."
+        size="lg"
+        footer={
+          <div className="tracker-modal-footer flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setSavedViewEditorOpen(false)}
+              disabled={savingSavedView}
+              className="rounded-xl px-4 py-2.5 text-sm font-medium text-muted hover:bg-black/[0.04] disabled:opacity-60 dark:hover:bg-white/[0.06]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveSavedView()}
+              disabled={savingSavedView || !savedViewDraft}
+              className="tracker-modal-primary rounded-xl px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {savingSavedView ? "Saving…" : "Save view"}
+            </button>
+          </div>
+        }
+      >
+        {savedViewDraft && (
+          <SavedViewEditor
+            fields={tracker.fields}
+            draft={savedViewDraft}
+            onChange={setSavedViewDraft}
+          />
+        )}
+      </Modal>
+      <Modal
+        open={basicsOpen}
+        onClose={() => !savingConfiguration && setBasicsOpen(false)}
+        title="Edit tracker details"
+        subtitle="Name, description, and financial year"
+        size="lg"
+        footer={basicsFooter}
+      >
+        <div className="space-y-4 p-5">
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-default">
+              Tracker name
+            </span>
+            <input
+              autoFocus
+              value={basicDraft.name}
+              onChange={(event) =>
+                setBasicDraft((current) => ({
+                  ...current,
+                  name: event.target.value,
+                }))
+              }
+              className="w-full rounded-xl border border-base bg-surface px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-default">
+              Description
+            </span>
+            <textarea
+              value={basicDraft.description}
+              onChange={(event) =>
+                setBasicDraft((current) => ({
+                  ...current,
+                  description: event.target.value,
+                }))
+              }
+              rows={3}
+              className="w-full resize-none rounded-xl border border-base bg-surface px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-default">
+              Financial year{" "}
+              <span className="font-normal text-faint">optional</span>
+            </span>
+            <input
+              value={basicDraft.financialYear}
+              onChange={(event) =>
+                setBasicDraft((current) => ({
+                  ...current,
+                  financialYear: event.target.value,
+                }))
+              }
+              className="w-full rounded-xl border border-base bg-surface px-3 py-2 text-sm"
+            />
+          </label>
+        </div>
+      </Modal>
+      <div className="client-trackers-page space-y-5">
+        <header className="tracker-page-header">
+          <div className="min-w-0">
+            <Link href="/dashboard/client-trackers" className="tracker-back-link">
+              <ArrowLeft className="h-3.5 w-3.5" /> All trackers
+            </Link>
+            <h1>{tracker.name}</h1>
+            <p>{tracker.description || "Client task worklist"}</p>
+          </div>
+          {isAdmin && (
+            <div className="tracker-header-actions">
+              {tracker.status === "active" && tracker.emailEnabled && (
+                <button onClick={openEmailComposer} className="tracker-header-primary">
+                  <Send className="h-4 w-4" /> Email clients
+                </button>
+              )}
+              <details className="tracker-header-menu">
+                <summary aria-label="More tracker actions">
+                  <MoreHorizontal className="h-5 w-5" />
+                </summary>
+                <div className="tracker-header-menu-content">
+                  {tracker.status === "active" && (
+                    <>
+                      <button onClick={openBasics}>Edit details</button>
+                      <button onClick={openConfiguration}>
+                        <Settings2 className="h-4 w-4" /> Configure
+                      </button>
+                      <button onClick={openEmailConfig}>
+                        <Mail className="h-4 w-4" /> Email updates
+                      </button>
+                    </>
+                  )}
+                  <button onClick={() => setEmailHistoryOpen(true)}>
+                    <FileText className="h-4 w-4" /> Email history
+                  </button>
+                  <span className="tracker-menu-divider" />
+                  <button
+                    onClick={() => setConfirmation("archive")}
+                    disabled={archiving}
+                  >
+                    <Archive className="h-4 w-4" />
+                    {archiving
+                      ? "Working…"
+                      : tracker.status === "archived"
+                        ? "Restore tracker"
+                        : "Archive tracker"}
+                  </button>
+                  <button
+                    onClick={() => setConfirmation("delete")}
+                    disabled={archiving}
+                    className="is-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" /> Delete tracker
+                  </button>
+                </div>
+              </details>
+            </div>
+          )}
+        </header>
+        <section className="tracker-premium-summary">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted">
+            <span className="inline-flex items-center gap-1.5">
+              <Users className="h-4 w-4" />{" "}
+              {tracker.totalEntryCount ??
+                tracker.entryCount ??
+                tracker.entries.length}{" "}
+              clients
+            </span>
+            {tracker.financialYear && (
+              <span>
+                Financial year:{" "}
+                <strong className="text-default">
+                  {tracker.financialYear}
+                </strong>
+              </span>
+            )}
+            <span>{tracker.fields.length} tracker columns</span>
+            {tracker.liveDataAsOf && (
+              <span>
+                Live data checked{" "}
+                {new Date(tracker.liveDataAsOf).toLocaleTimeString("en-IN", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+            )}
+            {tracker.emailEnabled && (
+              <span className="inline-flex items-center gap-1.5">
+                <Mail className="h-4 w-4" />{" "}
+                {emailActivity?.summary?.draft || 0} drafts ·{" "}
+                {emailActivity?.summary?.sent || 0} sent
+                {(emailActivity?.summary?.sent || 0) > 0 &&
+                  ` · ${(emailActivity?.logs || []).filter((log) => log.mailKind === "reminder").length} reminders`}
+              </span>
+            )}
+            {tracker.status === "archived" && (
+              <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                Archived · read only
+              </span>
+            )}
+          </div>
+        </section>
+        {(trackerActivity?.events || []).length > 0 && (
+          <section className="tracker-activity-panel">
+            <button
+              type="button"
+              className="tracker-activity-trigger"
+              onClick={() => setActivityExpanded((expanded) => !expanded)}
+              aria-expanded={activityExpanded}
+              aria-controls="tracker-recent-activity"
+            >
+              <span>
+                <strong>Recent activity</strong>
+                <small>Latest tracker updates</small>
+              </span>
+              <span className="tracker-activity-trigger-meta">
+                {(trackerActivity?.events || []).length} recent
+                <ChevronDown className="h-4 w-4" />
+              </span>
+            </button>
+            <div
+              id="tracker-recent-activity"
+              className={`tracker-activity-content ${activityExpanded ? "is-open" : ""}`}
+            >
+              <div className="tracker-activity-inner">
+                <p className="tracker-activity-description">
+                  Manual and bulk marks retain the previous and new value.
+                </p>
+                <div className="tracker-activity-list">
+                  {trackerActivity?.events?.slice(0, 5).map((event) => (
+                    <div key={event._id} className="tracker-activity-event">
+                      <div>
+                        <strong>{event.label}</strong>
+                        <span>{event.detail}</span>
+                      </div>
+                      <time>
+                        {event.actorEmail || "System"} ·{" "}
+                        {new Date(event.occurredAt).toLocaleString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </time>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        <section className="tracker-status-strip">
+          {overviewFields.map((field) => {
+            const values =
+              field.type === "toggle" ? ["Yes", "No"] : field.options || [];
+            return (
+              <article key={field.key} className="tracker-status-card">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                  {field.label}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {values.map((value) => {
+                    const count =
+                      overviewCounts?.find(
+                        (item) =>
+                          item.key === field.key &&
+                          valueText(item.value) === value,
+                      )?.count ??
+                      tracker.entries.filter(
+                        (entry) => valueText(entry.values[field.key]) === value,
+                      ).length;
+                    return (
+                      <button
+                        key={value}
+                        onClick={() => {
+                          setFieldFilter(field.key);
+                          setValueFilter(value);
+                        }}
+                        className={`tracker-status-value ${field.type === "status" ? STATUS_TONES[value] || "bg-surface text-default" : field.type === "select" ? optionTone(field.optionColors?.[value]) : "bg-surface text-default"}`}
+                      >
+                        <span className="block text-lg font-bold">{count}</span>
+                        <span className="text-xs">{value}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </article>
+            );
+          })}
+        </section>
+
+        <section className="overflow-hidden rounded-2xl border border-base bg-card">
+          <div className="flex flex-col gap-3 border-b border-base p-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="font-semibold text-default">Client marks</h2>
+              <p className="text-sm text-muted">
+                {tracker.entryCount !== undefined
+                  ? `Showing ${visibleEntries.length ? (tracker.offset || 0) + 1 : 0}–${(tracker.offset || 0) + visibleEntries.length} of ${tracker.entryCount} matching clients`
+                  : `Showing ${visibleEntries.length} matching clients on this page`}
+                {tracker.totalEntryCount !== tracker.entryCount
+                  ? ` · ${tracker.totalEntryCount || 0} total`
+                  : ""}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <details className="tracker-views-menu">
+                <summary>
+                  <List className="h-3.5 w-3.5" />
+                  {activeSavedView?.name || "All clients"}
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </summary>
+                <div className="tracker-views-menu-content">
+                  <span>Saved views</span>
+                  <select
+                    value={savedViewId}
+                    onChange={(event) => {
+                      setSavedViewId(event.target.value);
+                      if (event.target.value) {
+                        setSearch("");
+                        setCategoryFilter(ALL_FILTER);
+                        setFieldFilter(ALL_FILTER);
+                        setValueFilter(ALL_FILTER);
+                        setEntryOffset(0);
+                      }
+                    }}
+                  >
+                    <option value="">All clients</option>
+                    {(tracker.savedViews || []).map((view) => (
+                      <option key={view.id} value={view.id}>
+                        {view.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => openSavedViewEditor()}
+                      disabled={tracker.status !== "active"}
+                    >
+                      New view
+                    </button>
+                    {activeSavedView && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => openSavedViewEditor(activeSavedView)}
+                          disabled={tracker.status !== "active"}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void deleteActiveSavedView()}
+                          disabled={tracker.status !== "active"}
+                          className="is-destructive"
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </details>
+              {isAdmin && (
+                <button
+                  type="button"
+                  disabled={exportingTracker}
+                  onClick={exportCurrentTracker}
+                  className="tracker-table-control"
+                >
+                  <Download className="mr-1 inline h-3.5 w-3.5" />
+                  {exportingTracker ? "Preparing Excel…" : "Export current view"}
+                </button>
+              )}
+              {isAdmin && tracker.emailEnabled && (
+                <button
+                  type="button"
+                  disabled={
+                    tracker.status !== "active" || selectedEntries.size === 0
+                  }
+                  onClick={openEmailComposer}
+                  className="tracker-table-primary"
+                >
+                  <Send className="mr-1 inline h-3.5 w-3.5" />
+                  Email selected
+                  {selectedEntries.size ? ` (${selectedEntries.size})` : ""}
+                </button>
+              )}
+              <label className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Find client"
+                  className="w-44 rounded-lg border border-base bg-surface py-2 pl-8 pr-2 text-sm"
+                />
+              </label>
+              <select
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+                className="rounded-lg border border-base bg-surface px-2 py-2 text-sm"
+              >
+                <option value={ALL_FILTER}>All categories</option>
+                {categories.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={fieldFilter}
+                onChange={(event) => {
+                  setFieldFilter(event.target.value);
+                  setValueFilter(ALL_FILTER);
+                }}
+                className="rounded-lg border border-base bg-surface px-2 py-2 text-sm"
+              >
+                <option value={ALL_FILTER}>All markers</option>
+                {tracker.fields.map((field) => (
+                  <option key={field.key} value={field.key}>
+                    {field.label}
+                  </option>
+                ))}
+              </select>
+              {fieldFilter !== ALL_FILTER &&
+                (["text", "longText"].includes(filterField?.type || "") ? (
+                  <input
+                    value={valueFilter === ALL_FILTER ? "" : valueFilter}
+                    onChange={(event) =>
+                      setValueFilter(event.target.value || ALL_FILTER)
+                    }
+                    placeholder={`Find ${filterField?.label.toLowerCase() || "value"}`}
+                    className="w-40 rounded-lg border border-base bg-surface px-2 py-2 text-sm"
+                  />
+                ) : filterField?.type === "date" ? (
+                  <input
+                    type="date"
+                    value={valueFilter === ALL_FILTER ? "" : valueFilter}
+                    onChange={(event) =>
+                      setValueFilter(event.target.value || ALL_FILTER)
+                    }
+                    className="rounded-lg border border-base bg-surface px-2 py-2 text-sm"
+                  />
+                ) : [
+                    "number",
+                    "percentage",
+                    "quantity",
+                    "currency",
+                    "progress",
+                  ].includes(filterField?.type || "") ? (
+                  <input
+                    type="number"
+                    value={valueFilter === ALL_FILTER ? "" : valueFilter}
+                    onChange={(event) =>
+                      setValueFilter(event.target.value || ALL_FILTER)
+                    }
+                    placeholder={filterField?.label || "Value"}
+                    className="w-28 rounded-lg border border-base bg-surface px-2 py-2 text-sm"
+                  />
+                ) : (
+                  <select
+                    value={valueFilter}
+                    onChange={(event) => setValueFilter(event.target.value)}
+                    className="rounded-lg border border-base bg-surface px-2 py-2 text-sm"
+                  >
+                    <option value={ALL_FILTER}>All results</option>
+                    {filterOptions.map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                ))}
+            </div>
+          </div>
+          {tracker.status === "active" &&
+            selectedEntries.size > 0 &&
+            bulkFields.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-3 text-sm dark:border-blue-900/50 dark:bg-blue-950/30">
+                <strong className="text-blue-800 dark:text-blue-200">
+                  {selectedEntries.size} selected
+                </strong>
+                <span className="text-blue-700 dark:text-blue-300">Set</span>
+                <select
+                  value={bulkField}
+                  onChange={(event) => {
+                    const next = tracker.fields.find(
+                      (field) => field.key === event.target.value,
+                    );
+                    setBulkField(event.target.value);
+                    setBulkValue(
+                      next?.type === "toggle"
+                        ? "Yes"
+                        : next?.options?.[0] || "",
+                    );
+                  }}
+                  className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 dark:bg-slate-900"
+                >
+                  {bulkFields.map((field) => (
+                    <option key={field.key} value={field.key}>
+                      {field.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={bulkValue}
+                  onChange={(event) => setBulkValue(event.target.value)}
+                  className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 dark:bg-slate-900"
+                >
+                  {bulkOptions.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  disabled={bulkSaving}
+                  onClick={() => void bulkUpdate()}
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white disabled:opacity-60"
+                >
+                  {bulkSaving ? "Applying…" : "Apply"}
+                </button>
+                <button
+                  onClick={() => setSelectedEntries(new Set())}
+                  className="px-2 py-1.5 text-blue-700 dark:text-blue-300"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="bg-surface text-xs uppercase tracking-wide text-muted">
+                <tr>
+                  <th className="w-10 px-3 py-3">
+                    <input
+                      disabled={
+                        tracker.status !== "active" ||
+                        (bulkFields.length === 0 && !tracker.emailEnabled)
+                      }
+                      type="checkbox"
+                      checked={
+                        visibleEntries.length > 0 &&
+                        visibleEntries.every((entry) =>
+                          selectedEntries.has(entry._id),
+                        )
+                      }
+                      onChange={selectVisible}
+                      aria-label="Select displayed clients"
+                    />
+                  </th>
+                  <th className="sticky left-0 z-10 bg-surface px-4 py-3 font-semibold">
+                    Client
+                  </th>
+                  <th className="px-4 py-3 font-semibold">Category</th>
+                  {tracker.emailEnabled && (
+                    <th className="min-w-32 px-4 py-3 font-semibold">
+                      Communication
+                    </th>
+                  )}
+                  {(tracker.clientColumns || ["state"]).map((column) => (
+                    <th
+                      key={column}
+                      className="min-w-32 px-4 py-3 font-semibold"
+                    >
+                      {CLIENT_TRACKER_DETAIL_OPTIONS.find(
+                        (option) => option.key === column,
+                      )?.label || column}
+                    </th>
+                  ))}
+                  {tracker.fields.map((field) => (
+                    <th
+                      key={field.key}
+                      className="min-w-36 px-4 py-3 font-semibold"
+                    >
+                      {field.label}
+                      {(field.dataLink || field.computed) && (
+                        <span
+                          className={`ml-1 text-[9px] font-semibold tracking-wide ${field.computed ? "text-violet-600" : "text-blue-600"}`}
+                        >
+                          {field.computed ? "COMPUTED" : "LIVE"}
+                        </span>
+                      )}
+                    </th>
+                  ))}
+                  <th className="px-4 py-3 font-semibold">Updated</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-base">
+                {visibleEntries.map((entry) => (
+                  <tr key={entry._id} className="hover:bg-surface/60">
+                    <td className="px-3 py-3">
+                      <input
+                        disabled={
+                          tracker.status !== "active" ||
+                          (bulkFields.length === 0 && !tracker.emailEnabled)
+                        }
+                        type="checkbox"
+                        checked={selectedEntries.has(entry._id)}
+                        onChange={() => toggleEntry(entry._id)}
+                        aria-label={`Select ${entry.client?.companyName || entry.clientId}`}
+                      />
+                    </td>
+                    <td className="sticky left-0 z-[1] bg-card px-4 py-3">
+                      <Link
+                        href={`/dashboard/clients/${entry.clientId}`}
+                        className="font-medium text-default hover:text-blue-600"
+                      >
+                        {entry.client?.companyName || entry.clientId}
+                      </Link>
+                      <p className="text-xs text-faint">{entry.clientId}</p>
+                    </td>
+                    <td className="px-4 py-3 text-muted">
+                      {entry.client?.category || "—"}
+                    </td>
+                    {tracker.emailEnabled &&
+                      (() => {
+                        const status =
+                          communicationByClient.get(entry.clientId) ||
+                          "Not Contacted";
+                        const tone =
+                          status === "Replied"
+                            ? "bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-200"
+                            : status === "Sent" || status === "Reminder Sent"
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                              : status === "Draft Created"
+                                ? "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+                                : status === "Failed"
+                                  ? "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200"
+                                  : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
+                        return (
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${tone}`}
+                            >
+                              {status}
+                            </span>
+                          </td>
+                        );
+                      })()}
+                    {(tracker.clientColumns || ["state"]).map((column) => (
+                      <td
+                        key={column}
+                        className="max-w-52 truncate px-4 py-3 text-muted"
+                        title={clientDetailValue(entry.client, column)}
+                      >
+                        {clientDetailValue(entry.client, column)}
+                      </td>
+                    ))}
+                    {tracker.fields.map((field) => (
+                      <td key={field.key} className="px-4 py-3">
+                        {renderEditor(
+                          entry,
+                          field,
+                          savingCell === `${entry._id}-${field.key}` ||
+                            tracker.status !== "active",
+                          saveValue,
+                        )}
+                      </td>
+                    ))}
+                    <td className="whitespace-nowrap px-4 py-3 text-xs text-faint">
+                      {new Date(entry.updatedAt).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                      })}
+                    </td>
+                  </tr>
+                ))}
+                {visibleEntries.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={
+                        tracker.fields.length +
+                        (tracker.clientColumns || ["state"]).length +
+                        4 +
+                        (tracker.emailEnabled ? 1 : 0)
+                      }
+                      className="px-4 py-12 text-center text-muted"
+                    >
+                      <Filter className="mx-auto mb-2 h-5 w-5 text-faint" />
+                      No clients match these filters.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          {((tracker.offset || 0) > 0 || tracker.hasMore) && (
+            <div className="flex items-center justify-center gap-2 border-t border-base p-3 text-center">
+              <button
+                disabled={(tracker.offset || 0) === 0}
+                onClick={() =>
+                  setEntryOffset((current) => Math.max(0, current - entryLimit))
+                }
+                className="rounded-lg border border-base px-3 py-2 text-sm font-medium text-default disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span className="text-xs text-muted">
+                Page {Math.floor((tracker.offset || 0) / entryLimit) + 1}
+              </span>
+              <button
+                disabled={!tracker.hasMore}
+                onClick={() =>
+                  setEntryOffset(
+                    tracker.nextOffset ?? (tracker.offset || 0) + entryLimit,
+                  )
+                }
+                className="rounded-lg border border-base px-3 py-2 text-sm font-medium text-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </section>
+        <Modal
+          open={emailConfigOpen}
+          onClose={requestCloseEmailConfig}
+          title={
+            emailSetupScreen === "library"
+              ? "Email updates"
+              : emailSetupScreen === "new-details"
+                ? "Create email workflow"
+                : activeWorkflow?.name || "Email workflow"
+          }
+          subtitle={
+            emailSetupScreen === "library"
+              ? "Create separate, reusable client-email workflows"
+              : emailSetupScreen === "new-details"
+                ? "Give this workflow a clear name before setting it up"
+                : "Complete each section, then save and preview recipients before delivery"
+          }
+          icon={Mail}
+          size="2xl"
+          fixedHeight
+          scrollable={false}
+          footer={emailConfigFooter}
+        >
+          <div className="h-full min-h-0 overflow-y-auto p-5">
+            {emailConfigError && (
+              <div
+                role="alert"
+                className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-100"
+              >
+                {emailConfigError}
+              </div>
+            )}
+            {emailSetupScreen === "library" && (
+              <div className="space-y-5">
+                <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 dark:border-blue-900/50 dark:bg-blue-950/20">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <p className="text-base font-semibold text-default">
+                        Email workflow library
+                      </p>
+                      <p className="mt-1 max-w-2xl text-sm text-muted">
+                        {workflowDraft.length
+                          ? "Choose a workflow to edit, or create another one."
+                          : "Create your first client-email workflow."}
+                      </p>
+                    </div>
+                    <label className="flex items-center gap-2 rounded-xl border border-blue-100 bg-card px-3 py-2 text-sm dark:border-blue-900/50 dark:bg-surface">
+                      <input
+                        type="checkbox"
+                        checked={emailEnabledDraft}
+                        onChange={(event) => {
+                          setEmailConfigError(null);
+                          setEmailEnabledDraft(event.target.checked);
+                        }}
+                      />
+                      <span className="font-medium text-default">Enable email updates</span>
+                    </label>
+                  </div>
+                  <p className="mt-3 text-xs text-muted">
+                    Only admins can prepare, draft, or send emails. Every delivery
+                    is reviewed before it is sent.
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {workflowDraft.map((workflow) => {
+                    const mode = emailWorkflowContentMode(workflow);
+                    const modeLabel =
+                      mode === "combinations"
+                        ? "Combination email"
+                        : mode === "statements"
+                          ? "Statement email"
+                          : "Bullet-point email";
+                    return (
+                      <button
+                        key={workflow.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveWorkflowId(workflow.id);
+                          setBuilderStartPage(0);
+                          setEmailSetupScreen("builder");
+                        }}
+                        className="rounded-2xl border border-base bg-card p-4 text-left transition hover:border-blue-400 hover:shadow-sm"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-default">{workflow.name}</p>
+                            <p className="mt-1 text-sm text-muted">
+                              {workflow.description || "No description added yet."}
+                            </p>
+                          </div>
+                          <Mail className="h-5 w-5 shrink-0 text-blue-600" />
+                        </div>
+                        <div className="mt-4 flex items-center justify-between text-xs">
+                          <span className="rounded-full bg-blue-50 px-2.5 py-1 font-medium text-blue-700 dark:bg-blue-950/30 dark:text-blue-200">
+                            {modeLabel}
+                          </span>
+                          <span className="font-medium text-blue-600">Open workflow →</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    disabled={workflowDraft.length >= 8}
+                    onClick={() => {
+                      setEmailConfigError(null);
+                      setNewWorkflowDetails({ name: "", description: "" });
+                      setEmailSetupScreen("new-details");
+                    }}
+                    className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-dashed border-blue-300 bg-blue-50/50 p-4 text-center text-blue-700 transition hover:bg-blue-50 disabled:opacity-50 dark:border-blue-900/70 dark:bg-blue-950/10"
+                  >
+                    <Plus className="mb-2 h-6 w-6" />
+                    <span className="font-semibold">Create email workflow</span>
+                    <span className="mt-1 text-xs text-muted">Start with its name and purpose</span>
+                  </button>
+                </div>
+              </div>
+            )}
+            {emailSetupScreen === "new-details" && (
+              <div className="mx-auto max-w-xl space-y-6 py-3">
+                <button
+                  type="button"
+                  onClick={() => setEmailSetupScreen("library")}
+                  className="inline-flex items-center gap-1 text-sm font-medium text-blue-600"
+                >
+                  <ArrowLeft className="h-4 w-4" /> Back to workflows
+                </button>
+                <div>
+                  <h3 className="text-xl font-semibold text-default">What is this workflow for?</h3>
+                  <p className="mt-1 text-sm text-muted">Use a name your team will recognise at a glance.</p>
+                </div>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-medium text-default">Workflow name</span>
+                  <input
+                    autoFocus
+                    value={newWorkflowDetails.name}
+                    onChange={(event) => setNewWorkflowDetails((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="For example, GST document reminder"
+                    className="w-full rounded-xl border border-base bg-card px-3.5 py-3 text-sm"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-medium text-default">Short description <span className="font-normal text-muted">(optional)</span></span>
+                  <textarea
+                    rows={3}
+                    value={newWorkflowDetails.description}
+                    onChange={(event) => setNewWorkflowDetails((current) => ({ ...current, description: event.target.value }))}
+                    placeholder="For example, Ask clients for missing GST documents."
+                    className="w-full resize-none rounded-xl border border-base bg-card px-3.5 py-3 text-sm"
+                  />
+                </label>
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="button"
+                    disabled={!newWorkflowDetails.name.trim()}
+                    onClick={() => {
+                      const workflow = {
+                        ...newWorkflow(tracker.fields),
+                        name: newWorkflowDetails.name.trim(),
+                        ...(newWorkflowDetails.description.trim()
+                          ? { description: newWorkflowDetails.description.trim() }
+                          : {}),
+                      };
+                      setWorkflowDraft((current) => [...current, workflow]);
+                      setActiveWorkflowId(workflow.id);
+                      setBuilderStartPage(1);
+                      setEmailSetupScreen("builder");
+                    }}
+                    className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            )}
+            {emailSetupScreen === "builder" && activeWorkflow && (
+              <TrackerEmailWorkflowEditor
+                workflow={activeWorkflow}
+                fields={tracker.fields}
+                managedDocuments={managedDocuments}
+                startPage={builderStartPage}
+                onBack={() => setEmailSetupScreen("library")}
+                onPreviewCombinations={() => setCombinationPreviewOpen(true)}
+                onChange={(patch) => updateWorkflow(activeWorkflow.id, patch)}
+                onRemove={() => {
+                  if (workflowDraft.length < 2) return;
+                  const remaining = workflowDraft.filter(
+                    (workflow) => workflow.id !== activeWorkflow.id,
+                  );
+                  setEmailConfigError(null);
+                  setWorkflowDraft(remaining);
+                  setActiveWorkflowId(remaining[0].id);
+                  setEmailSetupScreen("library");
+                }}
+              />
+            )}
+          </div>
+        </Modal>
+        <ConfirmModal
+          open={emailConfigDiscardOpen}
+          onClose={() => setEmailConfigDiscardOpen(false)}
+          onConfirm={() => {
+            setEmailConfigDiscardOpen(false);
+            setEmailConfigOpen(false);
+            setEmailConfigError(null);
+          }}
+          title="Discard email workflow changes?"
+          description="Your unsaved email-update settings will be lost."
+          confirmLabel="Discard changes"
+          variant="warning"
+        />
+        <Modal
+          open={combinationPreviewOpen}
+          onClose={() => setCombinationPreviewOpen(false)}
+          title="Email combinations"
+          subtitle="Synthetic rule examples only; client recipients and eligibility are not shown"
+          icon={FileText}
+          size="2xl"
+          fixedHeight
+          scrollable={false}
+        >
+          <div className="h-full min-h-0 overflow-y-auto p-5">
+            {activeWorkflow && (
+              <TrackerEmailCombinationPreview
+                workflow={activeWorkflow}
+                fields={tracker.fields}
+              />
+            )}
+          </div>
+        </Modal>
+        <Modal
+          open={emailComposeOpen}
+          onClose={() => !emailLoading && setEmailComposeOpen(false)}
+          title="Email clients"
+          subtitle="Review the message and choose recipients before delivery"
+          icon={Send}
+          size="2xl"
+          fixedHeight
+          scrollable={false}
+          footer={emailComposeFooter}
+        >
+          <div className="min-h-0 h-full space-y-4 overflow-y-auto p-5">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label>
+                <span className="mb-1 block text-xs font-medium text-muted">
+                  Workflow
+                </span>
+                <select
+                  value={activeWorkflowId}
+                  onChange={(event) => {
+                    setActiveWorkflowId(event.target.value);
+                    setEmailPreview(null);
+                  }}
+                  className="w-full rounded-xl border border-base bg-surface px-3 py-2.5 text-sm"
+                >
+                  {tracker.emailWorkflows?.map((workflow) => (
+                    <option key={workflow.id} value={workflow.id}>
+                      {workflow.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span className="mb-1 block text-xs font-medium text-muted">
+                  Email type
+                </span>
+                <select
+                  value={emailKind}
+                  onChange={(event) => {
+                    setEmailKind(event.target.value as "initial" | "reminder");
+                    setEmailPreview(null);
+                  }}
+                  className="w-full rounded-xl border border-base bg-surface px-3 py-2.5 text-sm"
+                >
+                  <option value="initial">Initial email</option>
+                  <option value="reminder">Reminder</option>
+                </select>
+              </label>
+            </div>
+            <button
+              disabled={emailLoading}
+              onClick={() => void previewEmails()}
+              className="rounded-xl border border-base bg-card px-4 py-2.5 text-sm font-semibold text-blue-600 shadow-sm transition hover:border-blue-300 disabled:opacity-60"
+            >
+              <FileText className="mr-1 inline h-4 w-4" />
+              {emailLoading ? "Preparing…" : "Preview eligible clients"}
+            </button>
+            {emailPreview && (
+              <div className="space-y-3 border-t border-base pt-4">
+                <div className="flex flex-wrap gap-2 text-sm">
+                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+                    {emailPreview.messages.length} eligible
+                  </span>
+                  {emailPreview.skipped.length ? (
+                    <details className="rounded-full bg-surface px-3 py-1 text-muted">
+                      <summary className="cursor-pointer">
+                        {emailPreview.skipped.length} skipped
+                      </summary>
+                      <div className="absolute z-20 mt-2 max-h-64 w-[min(520px,85vw)] overflow-auto rounded-xl border border-base bg-card p-3 shadow-xl">
+                        <table className="w-full text-left text-xs">
+                          <thead className="text-muted">
+                            <tr>
+                              <th className="pb-2">Client</th>
+                              <th className="pb-2">Reason</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {emailPreview.skipped.map((item) => (
+                              <tr
+                                key={`${item.clientId}-${item.reason}`}
+                                className="border-t border-base"
+                              >
+                                <td className="py-2 pr-3 font-medium text-default">
+                                  {item.companyName}
+                                </td>
+                                <td className="py-2 text-muted">
+                                  {item.reason}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </details>
+                  ) : (
+                    <span className="rounded-full bg-surface px-3 py-1 text-muted">
+                      No clients skipped
+                    </span>
+                  )}
+                  {selectedEntries.size > 0 && (
+                    <span className="rounded-full bg-surface px-3 py-1 text-muted">
+                      Selected rows only
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-3 rounded-2xl border border-base bg-surface p-3">
+                  {emailPreview.messages.map((message) => {
+                    const draft = recipientDrafts[message.entryId] || {
+                      to: message.suggestedTo?.length
+                        ? message.suggestedTo
+                        : [message.to],
+                      cc: [],
+                      additionalTo: "",
+                      additionalCc: "",
+                    };
+                    return (
+                      <TrackerEmailRecipientCard
+                        key={message.entryId}
+                        message={message}
+                        draft={draft}
+                        kind={emailKind}
+                        onChange={(next) =>
+                          setRecipientDrafts((current) => ({
+                            ...current,
+                            [message.entryId]: next,
+                          }))
+                        }
+                        onPreview={() => setPreviewMessage(message)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
+        <Modal
+          open={Boolean(previewMessage)}
+          onClose={() => setPreviewMessage(null)}
+          title="Email preview"
+          subtitle={previewMessage?.subject || "Personalised client update"}
+          icon={FileText}
+          size="2xl"
+        >
+          <div className="bg-surface p-4 sm:p-5">
+            <div className="w-full overflow-hidden rounded-xl border border-base bg-card shadow-sm">
+              <iframe
+                title="Tracker email preview"
+                srcDoc={previewWithGmailSignature(
+                  previewMessage?.html || "",
+                  gmailSignature,
+                  emailPreview?.workflow.signatureGap ?? 2,
+                )}
+                sandbox=""
+                className="h-[72vh] min-h-[620px] w-full border-0 bg-white"
+              />
+            </div>
+            <p className="mt-3 text-xs text-muted">
+              {gmailSignatureLoading
+                ? "Loading the configured Gmail signature…"
+                : gmailSignature
+                  ? `The configured Gmail signature is shown after ${emailPreview?.workflow.signatureGap ?? 2} blank line${(emailPreview?.workflow.signatureGap ?? 2) === 1 ? "" : "s"}, matching the draft or sent email.`
+                  : "The email body fills the available width. A Gmail signature will appear here when one is configured."}
+            </p>
+          </div>
+        </Modal>
+        <Modal
+          open={emailHistoryOpen}
+          onClose={() => setEmailHistoryOpen(false)}
+          title="Email history"
+          subtitle="Exact draft and sent-email snapshots"
+          size="2xl"
+          fixedHeight
+          scrollable={false}
+        >
+          <div className="max-h-[70vh] space-y-2 overflow-y-auto p-5">
+            <div className="mb-2 flex flex-wrap gap-2">
+              <button
+                onClick={async () => {
+                  const response = await fetch(
+                    `/api/client-trackers/${resolved.id}/email/replies`,
+                    { method: "POST" },
+                  );
+                  const result = await response.json();
+                  response.ok
+                    ? toast.success(
+                        `Checked ${result.checked} emails; ${result.replied} replies found.`,
+                      )
+                    : toast.error(result.error || "Unable to check replies.");
+                  void refetchEmailActivity();
+                }}
+                className="rounded-lg border border-base px-3 py-2 text-sm text-blue-600"
+              >
+                Check Gmail replies
+              </button>
+              <button
+                type="button"
+                disabled={exportingEmailHistory}
+                onClick={exportEmailHistory}
+                className="rounded-lg border border-base px-3 py-2 text-sm font-medium text-default hover:border-blue-300 hover:text-blue-600 disabled:opacity-50"
+              >
+                <Download className="mr-1 inline h-3.5 w-3.5" />
+                {exportingEmailHistory ? "Preparing Excel…" : "Export Excel"}
+              </button>
+            </div>
+            {emailActivity?.logs?.length ? (
+              emailActivity.logs.map((log) => (
+                <details
+                  key={log._id}
+                  className="rounded-xl border border-base bg-surface p-3"
+                >
+                  <summary className="cursor-pointer list-none">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium text-default">
+                        {log.clientName || "Client"} ·{" "}
+                        {log.subject || "Untitled email"}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs ${log.communicationStatus === "replied" ? "bg-violet-100 text-violet-700" : log.status === "sent" ? "bg-emerald-100 text-emerald-700" : log.status === "failed" ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"}`}
+                      >
+                        {log.communicationStatus === "replied"
+                          ? "replied"
+                          : log.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted">
+                      {log.mailKind === "reminder" ? "Reminder" : "Initial"} ·{" "}
+                      {(log.to || []).join(", ")} ·{" "}
+                      {new Date(log.sentAt).toLocaleString("en-IN")}
+                    </p>
+                  </summary>
+                  <div className="mt-3 space-y-2 border-t border-base pt-3 text-sm">
+                    <p>
+                      <strong>To:</strong> {(log.to || []).join(", ") || "—"}
+                    </p>
+                    {(log.cc || []).length > 0 && (
+                      <p>
+                        <strong>CC:</strong> {log.cc?.join(", ")}
+                      </p>
+                    )}
+                    {(log.attachments || []).length > 0 && (
+                      <p>
+                        <strong>Attachments:</strong>{" "}
+                        {log.attachments
+                          ?.map((attachment) => attachment.filename)
+                          .join(", ")}
+                      </p>
+                    )}
+                    <p>
+                      <strong>Campaign:</strong>{" "}
+                      {log.campaignId || "Legacy delivery"}
+                    </p>
+                    {log.gmailMessageId && (
+                      <p>
+                        <strong>Gmail message:</strong> {log.gmailMessageId}
+                      </p>
+                    )}
+                    {log.renderedHtml ? (
+                      <iframe
+                        title={`Email snapshot ${log._id}`}
+                        srcDoc={log.renderedHtml}
+                        sandbox=""
+                        className="h-72 w-full rounded-lg border border-base bg-white"
+                      />
+                    ) : (
+                      <p className="text-xs text-faint">
+                        This legacy email was sent before snapshots were stored.
+                      </p>
+                    )}
+                  </div>
+                </details>
+              ))
+            ) : (
+              <p className="py-10 text-center text-sm text-muted">
+                No tracker email history yet.
+              </p>
+            )}
+          </div>
+        </Modal>
+        <ConfirmModal
+          open={sendConfirmation}
+          onClose={() => setSendConfirmation(false)}
+          onConfirm={async () => {
+            setSendConfirmation(false);
+            await deliverEmails("send");
+          }}
+          title="Send tracker emails?"
+          description={`This will immediately send ${emailPreview?.messages.length || 0} personalised ${emailKind === "reminder" ? "reminder " : ""}email(s). Review the preview and recipients carefully.`}
+          note="This action is logged for every client."
+          confirmLabel="Send emails"
+          variant="warning"
+        />
+        <Modal
+          open={configurationOpen}
+          onClose={() => !savingConfiguration && setConfigurationOpen(false)}
+          title="Configure tracker"
+          subtitle="Change task columns and client information"
+          size="2xl"
+          fixedHeight
+          scrollable={false}
+          footer={configurationFooter}
+        >
+          <div className="h-full min-h-0 space-y-4 overflow-y-auto p-5">
+            <section>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium text-default">
+                  Financial year{" "}
+                  <span className="font-normal text-faint">
+                    required for CPCB upload data
+                  </span>
+                </span>
+                <select
+                  value={basicDraft.financialYear}
+                  onChange={(event) =>
+                    setBasicDraft((current) => ({
+                      ...current,
+                      financialYear: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border border-base bg-surface px-3 py-2 text-sm"
+                >
+                  <option value="">Not tied to a FY</option>
+                  {FINANCIAL_YEARS.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </section>
+            <section>
+              <div className="mb-2 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-default">
+                    Clients in this tracker
+                  </p>
+                  <p className="text-xs text-muted">
+                    {participantDraft.length} selected. Removing a client
+                    removes only its mark from this tracker.
+                  </p>
+                </div>
+                <button
+                  onClick={() =>
+                    setParticipantDraft(
+                      allClients.map((client) => client.clientId),
+                    )
+                  }
+                  className="text-sm text-blue-600"
+                >
+                  Select all
+                </button>
+              </div>
+              <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-base p-2">
+                {allClients.map((client) => (
+                  <label
+                    key={client.clientId}
+                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-surface"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={participantDraft.includes(client.clientId)}
+                      onChange={() =>
+                        setParticipantDraft((current) =>
+                          current.includes(client.clientId)
+                            ? current.filter(
+                                (clientId) => clientId !== client.clientId,
+                              )
+                            : [...current, client.clientId],
+                        )
+                      }
+                    />
+                    {client.companyName}{" "}
+                    <span className="text-xs text-faint">
+                      · {client.clientId}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </section>
+            <section>
+              <p className="mb-2 text-sm font-medium text-default">
+                Client details in worklist
+              </p>
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
+                {CLIENT_TRACKER_DETAIL_OPTIONS.map((option) => (
+                  <label
+                    key={option.key}
+                    className="inline-flex items-center gap-2 text-sm text-default"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={columnDraft.includes(option.key)}
+                      onChange={() =>
+                        setColumnDraft((current) =>
+                          current.includes(option.key)
+                            ? current.filter((key) => key !== option.key)
+                            : [...current, option.key],
+                        )
+                      }
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+            </section>
+            <section>
+              <div className="mb-2 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-default">
+                    Tracker columns
+                  </p>
+                  <p className="text-xs text-muted">
+                    Drag a column by its handle to choose the order shown in the
+                    worklist.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  {!fieldDraft.some((field) => field.type === "status") && (
+                    <button
+                      onClick={() =>
+                        setFieldDraft((current) => [
+                          DEFAULT_STATUS_FIELD,
+                          ...current,
+                        ])
+                      }
+                      className="rounded-lg border border-base px-3 py-1.5 text-sm text-blue-600"
+                    >
+                      Add Status
+                    </button>
+                  )}
+                  <button
+                    onClick={() =>
+                      setFieldDraft((current) => [...current, blankField()])
+                    }
+                    className="rounded-lg border border-base px-3 py-1.5 text-sm text-blue-600"
+                  >
+                    <Plus className="mr-1 inline h-3.5 w-3.5" />
+                    Add
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {fieldDraft.map((field, index) => (
+                  <TrackerFieldDraftCard
+                    key={`${field.key}-${index}`}
+                    field={field}
+                    index={index}
+                    fieldCount={fieldDraft.length}
+                    availableFields={fieldDraft}
+                    updateDraft={updateDraft}
+                    remove={() =>
+                      setFieldDraft((current) =>
+                        current.filter((_, fieldIndex) => fieldIndex !== index),
+                      )
+                    }
+                    move={moveDraft}
+                  />
+                ))}
+              </div>
+            </section>
+          </div>
+        </Modal>
+        <ConfirmModal
+          open={confirmation !== null}
+          onClose={() => setConfirmation(null)}
+          onConfirm={async () => {
+            const action = confirmation;
+            setConfirmation(null);
+            if (action === "archive") await archive();
+            if (action === "delete") await deleteTracker();
+            if (action === "configuration") await saveConfiguration(true);
+            if (action === "bulk") await bulkUpdate(true);
+          }}
+          title={
+            confirmation === "delete"
+              ? "Delete tracker permanently?"
+              : confirmation === "configuration"
+                ? "Remove tracker data?"
+                : confirmation === "bulk"
+                  ? `Update ${selectedEntries.size} client marks?`
+                  : tracker.status === "archived"
+                    ? "Restore tracker?"
+                    : "Archive tracker?"
+          }
+          description={
+            confirmation === "delete"
+              ? `Delete “${tracker.name}” and all of its client marks permanently.`
+              : confirmation === "configuration"
+                ? "Removing columns clears their values for every client. Removing clients clears only their marks in this tracker."
+                : confirmation === "bulk"
+                  ? `Set ${selectedBulkField?.label || "this field"} to “${bulkValue}” for the selected clients. You can undo this after it is applied.`
+                  : tracker.status === "archived"
+                    ? `Restore “${tracker.name}” to the active tracker list.`
+                    : `Archive “${tracker.name}”. Its client marks will be kept and can be restored later.`
+          }
+          note={
+            confirmation === "delete"
+              ? "This cannot be undone."
+              : confirmation === "configuration"
+                ? "This action permanently removes the affected tracker data."
+                : undefined
+          }
+          confirmLabel={
+            confirmation === "delete"
+              ? "Delete permanently"
+              : confirmation === "configuration"
+                ? "Remove data"
+                : confirmation === "bulk"
+                  ? "Apply to selected"
+                  : tracker.status === "archived"
+                    ? "Restore tracker"
+                    : "Archive tracker"
+          }
+          variant={
+            confirmation === "delete" || confirmation === "configuration"
+              ? "danger"
+              : "warning"
+          }
+          confirmText={confirmation === "delete" ? "DELETE" : undefined}
+        />
+      </div>
+    </>
+  );
+}
+
+type EmailCombinationPreview = {
+  id: string;
+  conditions: string[];
+  points: TrackerEmailPoint[];
+  eligible: boolean;
+  subject: string;
+  body: string;
+};
+
+function previewPointMarkup(points: TrackerEmailPoint[]) {
+  return points
+    .map((point) =>
+      point.format === "statement" ? point.statement : `• ${point.statement}`,
+    )
+    .join("\n");
+}
+
+function previewTemplate(
+  template: string,
+  points: TrackerEmailPoint[],
+  statements: string[],
+  combinationMessage: string,
+  appendPoints: boolean,
+) {
+  const pointMarkup = previewPointMarkup(points);
+  const statementMarkup = statements.join("\n\n");
+  const includesPointsPlaceholder = template.includes("{{points}}");
+  const includesStatementsPlaceholder = template.includes("{{statements}}");
+  const includesCombinationPlaceholder = template.includes(
+    "{{combinationMessage}}",
+  );
+  const replaced = template
+    .replace(/{{points}}/g, pointMarkup)
+    .replace(/{{statements}}/g, statementMarkup)
+    .replace(/{{combinationMessage}}/g, combinationMessage);
+  if (!appendPoints) return replaced;
+  const additions = [
+    !includesCombinationPlaceholder && combinationMessage,
+    !includesStatementsPlaceholder && statementMarkup,
+    !includesPointsPlaceholder && pointMarkup,
+  ].filter(Boolean);
+  return additions.length ? `${replaced.trim()}\n\n${additions.join("\n\n")}` : replaced;
+}
+
+function buildEmailCombinationPreviews(
+  workflow: TrackerEmailWorkflow,
+  fields: TrackerField[],
+) {
+  const fieldLabels = new Map(fields.map((field) => [field.key, field.label]));
+  const eligibility =
+    workflow.conditionGroup ||
+    legacyWorkflowCondition(workflow.mainFieldKey, workflow.mainValue);
+  const contentRules = [...(workflow.contentRules || [])].sort(
+    (left, right) => (left.order || 0) - (right.order || 0),
+  );
+  const choicesByField = new Map<string, string[]>();
+  [
+    ...workflow.points.map((point) => ({
+      fieldKey: point.fieldKey,
+      value: point.value,
+    })),
+    ...eligibility.conditions.map((condition) => ({
+      fieldKey: condition.fieldKey,
+      value: String(condition.value ?? ""),
+    })),
+    ...contentRules.flatMap((rule) =>
+      rule.conditionGroup.conditions.map((condition) => ({
+        fieldKey: condition.fieldKey,
+        value: String(condition.value ?? ""),
+      })),
+    ),
+  ]
+    .filter((item) => item.value)
+    .forEach((item) => {
+      const values = choicesByField.get(item.fieldKey) || [];
+      if (!values.includes(item.value)) values.push(item.value);
+      choicesByField.set(item.fieldKey, values);
+    });
+  const groups = [...choicesByField.entries()];
+  const possibleCount = groups.reduce(
+    (count, [, values]) => count * (values.length + 1),
+    1,
+  );
+  const maxPreviews = 32;
+  let valueSets: Array<Record<string, string>> = [{}];
+  groups.forEach(([fieldKey, values]) => {
+    const next: Array<Record<string, string>> = [];
+    valueSets.forEach((current) =>
+      ["", ...values].forEach((value) => {
+        if (next.length < maxPreviews)
+          next.push({ ...current, [fieldKey]: value });
+      }),
+    );
+    valueSets = next;
+  });
+  const previews: EmailCombinationPreview[] = valueSets.map((values, index) => {
+    const points = workflow.points.filter(
+      (point) => values[point.fieldKey] === point.value,
+    );
+    const combination = contentRules.find(
+      (rule) =>
+        rule.type === "combination" &&
+        evaluateTrackerConditionGroup(rule.conditionGroup, values),
+    );
+    const scenariosRequired = contentRules.some(
+      (rule) => rule.type === "combination",
+    );
+    const contentPoints = contentRules
+      .filter(
+        (rule) =>
+          rule.type === "point" &&
+          evaluateTrackerConditionGroup(rule.conditionGroup, values),
+      )
+      .map((rule) => ({
+        id: rule.id,
+        fieldKey: "",
+        value: "",
+        statement: rule.content || "",
+        format: "point" as const,
+      }));
+    const statements = contentRules
+      .filter(
+        (rule) =>
+          rule.type === "statement" &&
+          evaluateTrackerConditionGroup(rule.conditionGroup, values),
+      )
+      .map((rule) => rule.content || "")
+      .filter(Boolean);
+    const allPoints = [...points, ...contentPoints];
+    const conditions = groups.flatMap(([fieldKey]) => [
+      `${fieldLabels.get(fieldKey) || fieldKey}: ${values[fieldKey] || "—"}`,
+    ]);
+    return {
+      id: `${index}-${conditions.join("-") || "none"}`,
+      conditions,
+      points: allPoints,
+      eligible:
+        evaluateTrackerConditionGroup(eligibility, values) &&
+        (!scenariosRequired ||
+          Boolean(combination && combination.action !== "skip")),
+      subject: previewTemplate(
+        workflow.subject,
+        allPoints,
+        statements,
+        combination?.content || "",
+        false,
+      ),
+      body: previewTemplate(
+        workflow.body,
+        allPoints,
+        statements,
+        combination?.content || "",
+        true,
+      ),
+    };
+  });
+  return {
+    previews,
+    possibleCount,
+    limited: possibleCount > maxPreviews,
+    mode: eligibility.mode,
+  };
+}
+
+function previewEmailDocument(body: string) {
+  const content = body.replace(/\n/g, "<br />");
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#ffffff;"><div style="max-width:760px;margin:0 auto;padding:18px 20px 24px;color:#222222;font-family:Arial,'Helvetica Neue',sans-serif;font-size:14px;line-height:1.65;">${content}<br /><br /><span style="color:#6b7280;">{{gmail.defaultSignature}}</span></div></body></html>`;
+}
+
+/** Gmail appends the configured signature after two line breaks. */
+function previewWithGmailSignature(
+  html: string,
+  signature: string | null,
+  signatureGap = 2,
+) {
+  if (!signature) return html;
+  const gap = "<br>".repeat(Math.max(0, Math.min(6, signatureGap)));
+  return html.replace(
+    /<\/body>\s*<\/html>\s*$/i,
+    `${gap}${signature}</body></html>`,
+  );
+}
+
+function TrackerEmailCombinationPreview({
+  workflow,
+  fields,
+}: {
+  workflow: TrackerEmailWorkflow;
+  fields: TrackerField[];
+}) {
+  const { previews, possibleCount, limited, mode } =
+    buildEmailCombinationPreviews(workflow, fields);
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border border-base bg-surface p-3">
+        <p className="text-sm font-semibold text-default">
+          Eligibility preview · {mode}
+        </p>
+        <p className="mt-2 text-xs text-faint">
+          Variables remain unchanged. These previews do not use client records,
+          create drafts, or send email.
+        </p>
+      </section>
+      {limited && (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+          This workflow has {possibleCount} possible combinations. Showing the
+          first 32.
+        </section>
+      )}
+      <div className="grid gap-4">
+        {previews.map((preview) => (
+          <article
+            key={preview.id}
+            className="overflow-hidden rounded-xl border border-base bg-card"
+          >
+            <div className="border-b border-base px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                {preview.conditions.map((condition) => (
+                  <span
+                    key={condition}
+                    className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/30 dark:text-blue-200"
+                  >
+                    {condition}
+                  </span>
+                ))}
+                <span
+                  className={`rounded-full px-2.5 py-1 text-xs font-semibold ${preview.eligible ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
+                >
+                  Workflow match: {preview.eligible ? "YES" : "NO"}
+                </span>
+              </div>
+              <p className="mt-2 text-sm font-semibold text-default">
+                {preview.subject || "No email subject"}
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                {preview.points.length} matching message
+                {preview.points.length === 1 ? "" : "s"}
+              </p>
+            </div>
+            <iframe
+              title={`Email combination ${preview.id}`}
+              srcDoc={previewEmailDocument(preview.body)}
+              sandbox=""
+              className="h-72 w-full border-0 bg-white"
+            />
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TrackerEmailRecipientCard({
+  message,
+  draft,
+  kind,
+  onChange,
+  onPreview,
+}: {
+  message: EmailPreview["messages"][number];
+  draft: RecipientDraft;
+  kind: "initial" | "reminder";
+  onChange: (draft: RecipientDraft) => void;
+  onPreview: () => void;
+}) {
+  const toggleRecipient = (email: string, field: "to" | "cc") => {
+    const selected = draft[field];
+    const other = field === "to" ? "cc" : "to";
+    onChange({
+      ...draft,
+      [field]: selected.includes(email)
+        ? selected.filter((value) => value !== email)
+        : [...selected, email],
+      [other]: draft[other].filter((value) => value !== email),
+    });
+  };
+  return (
+    <article className="overflow-hidden rounded-[24px] border border-white/80 bg-white/[0.88] shadow-[0_12px_30px_rgba(0,0,0,0.08)] dark:border-white/[0.10] dark:bg-white/[0.07] dark:shadow-[0_12px_32px_rgba(0,0,0,0.36)]">
+      <div className="border-b border-black/[0.06] px-4 py-3.5 dark:border-white/[0.08]">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <strong className="text-sm text-default">
+              {message.companyName}
+            </strong>
+            <p className="mt-0.5 text-xs text-muted">
+              Choose recipients for this personalised update.
+            </p>
+          </div>
+          <span className="rounded-full bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-600">
+            {kind === "reminder" ? "Reminder" : "Email"}
+          </span>
+        </div>
+      </div>
+      <div className="space-y-4 p-4">
+        <section>
+          <p className="text-[11px] font-bold uppercase tracking-wide text-muted">
+            Recipients
+          </p>
+          <div className="mt-2 flex flex-wrap gap-3">
+            {message.recipients.map((recipient) => (
+              <div
+                key={recipient.email}
+                className="flex h-14 min-w-[230px] max-w-full items-center gap-2 rounded-full border border-white/80 bg-white/[0.92] px-2.5 py-2 shadow-[0_8px_22px_rgba(0,0,0,0.08)] dark:border-white/[0.10] dark:bg-white/[0.07] dark:shadow-[0_10px_28px_rgba(0,0,0,0.36)]"
+              >
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f1f1f3] text-[11px] font-semibold text-muted dark:bg-white/[0.08]">
+                  {recipient.name
+                    .split(/\s+/)
+                    .slice(0, 2)
+                    .map((part) => part[0])
+                    .join("")
+                    .toUpperCase() || "C"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-semibold leading-4 text-default">
+                    {recipient.name}
+                  </p>
+                  <p className="mt-0.5 truncate text-[11px] leading-3 text-muted">
+                    {recipient.email}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => toggleRecipient(recipient.email, "to")}
+                    className={`rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition ${draft.to.includes(recipient.email) ? "bg-brand-600 text-white shadow-sm shadow-brand-600/20" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"}`}
+                  >
+                    To
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleRecipient(recipient.email, "cc")}
+                    className={`rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition ${draft.cc.includes(recipient.email) ? "bg-muted text-white shadow-sm dark:bg-white/[0.22]" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"}`}
+                  >
+                    CC
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="grid gap-3 sm:grid-cols-2">
+          <label>
+            <span className="text-[11px] font-bold uppercase tracking-wide text-muted">
+              Additional To
+            </span>
+            <input
+              value={draft.additionalTo}
+              onChange={(event) =>
+                onChange({ ...draft, additionalTo: event.target.value })
+              }
+              placeholder="client@example.com"
+              className="mt-1.5 h-11 w-full rounded-full border border-white/75 bg-white/[0.88] px-4 text-sm text-default shadow-[0_8px_24px_rgba(0,0,0,0.06)] outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-white/[0.10] dark:bg-white/[0.07]"
+            />
+            <span className="mt-1 block text-xs text-faint">
+              Separate multiple emails with commas.
+            </span>
+          </label>
+          <label>
+            <span className="text-[11px] font-bold uppercase tracking-wide text-muted">
+              Additional CC
+            </span>
+            <input
+              value={draft.additionalCc}
+              onChange={(event) =>
+                onChange({ ...draft, additionalCc: event.target.value })
+              }
+              placeholder="accounts@example.com, owner@example.com"
+              className="mt-1.5 h-11 w-full rounded-full border border-white/75 bg-white/[0.88] px-4 text-sm text-default shadow-[0_8px_24px_rgba(0,0,0,0.06)] outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-white/[0.10] dark:bg-white/[0.07]"
+            />
+            <span className="mt-1 block text-xs text-faint">
+              Separate multiple emails with commas.
+            </span>
+          </label>
+        </section>
+        <div className="rounded-[18px] border border-white/70 bg-white/[0.54] px-3 py-3 dark:border-white/[0.08] dark:bg-white/[0.04]">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-default">
+              {message.subject}
+            </p>
+            <button
+              type="button"
+              onClick={onPreview}
+              className="rounded-full border border-white/70 bg-white/[0.8] px-3 py-1.5 text-xs font-semibold text-brand-600 shadow-sm dark:border-white/[0.10] dark:bg-white/[0.08]"
+            >
+              View email preview
+            </button>
+          </div>
+          <p className="mt-1.5 whitespace-pre-line text-xs leading-5 text-muted">
+            {message.body}
+          </p>
+          {message.combinationMessage && (
+            <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+              Combination: {message.combinationMessage}
+            </p>
+          )}
+          {(message.statements || []).length > 0 && (
+            <p className="mt-2 text-xs text-muted">
+              {(message.statements || []).length} conditional statement
+              {(message.statements || []).length === 1 ? "" : "s"} included
+            </p>
+          )}
+          {message.attachments.length > 0 && (
+            <p className="mt-2 text-xs font-medium text-muted">
+              Attachments:{" "}
+              {message.attachments
+                .map((attachment) => attachment.filename)
+                .join(", ")}
+            </p>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function TrackerEmailWorkflowEditor({
+  workflow,
+  fields,
+  managedDocuments,
+  startPage,
+  onBack,
+  onPreviewCombinations,
+  onChange,
+  onRemove,
+}: {
+  workflow: TrackerEmailWorkflow;
+  fields: TrackerField[];
+  managedDocuments: ManagedDocumentOption[];
+  startPage: number;
+  onBack: () => void;
+  onPreviewCombinations: () => void;
+  onChange: (patch: Partial<TrackerEmailWorkflow>) => void;
+  onRemove: () => void;
+}) {
+  const fieldValues = (field?: TrackerField) =>
+    field?.type === "toggle" ? ["Yes", "No"] : field?.options || [];
+  const conditionGroup: TrackerConditionGroup = workflow.conditionGroup || {
+    mode: "ALL",
+    conditions: [
+      {
+        fieldKey: workflow.mainFieldKey,
+        operator: "equals",
+        value: workflow.mainValue,
+      },
+    ],
+  };
+  const updateConditions = (patch: Partial<TrackerConditionGroup>) =>
+    onChange({ conditionGroup: { ...conditionGroup, ...patch } });
+  const attachments = workflow.attachments || [];
+  const contentRules = workflow.contentRules || [];
+  const contentMode = emailWorkflowContentMode(workflow);
+  const contentRuleType: TrackerEmailContentRule["type"] =
+    contentMode === "combinations"
+      ? "combination"
+      : contentMode === "statements"
+        ? "statement"
+        : "point";
+  const visibleContentRules = contentRules.filter(
+    (rule) => rule.type === contentRuleType,
+  );
+  const scenarioRules = contentRules
+    .filter((rule) => rule.type === "combination")
+    .sort((left, right) => (left.order || 0) - (right.order || 0));
+  const updateContentRule = (
+    id: string,
+    patch: Partial<TrackerEmailContentRule>,
+  ) =>
+    onChange({
+      contentRules: contentRules.map((rule) =>
+        rule.id === id ? { ...rule, ...patch } : rule,
+      ),
+    });
+  const addContentRule = (type: TrackerEmailContentRule["type"]) =>
+    onChange({
+      contentRules: [
+        ...contentRules,
+        {
+          id: emailId(),
+          type,
+          action: "include",
+          content: "",
+          order: contentRules.length,
+          conditionGroup: {
+            mode: "ALL",
+            conditions: [
+              {
+                fieldKey: fields[0]?.key || workflow.mainFieldKey,
+                operator: "equals",
+                value: "",
+              },
+            ],
+          },
+        },
+      ],
+    });
+  const moveScenario = (id: string, direction: -1 | 1) => {
+    const index = scenarioRules.findIndex((rule) => rule.id === id);
+    const targetIndex = index + direction;
+    if (index < 0 || targetIndex < 0 || targetIndex >= scenarioRules.length)
+      return;
+    const nextScenarios = [...scenarioRules];
+    [nextScenarios[index], nextScenarios[targetIndex]] = [
+      nextScenarios[targetIndex],
+      nextScenarios[index],
+    ];
+    const orderById = new Map(
+      nextScenarios.map((rule, scenarioIndex) => [rule.id, scenarioIndex]),
+    );
+    onChange({
+      contentRules: contentRules.map((rule) =>
+        rule.type === "combination"
+          ? { ...rule, order: orderById.get(rule.id) }
+          : rule,
+      ),
+    });
+  };
+  const updateAttachment = (
+    id: string,
+    patch: Partial<TrackerEmailAttachment>,
+  ) =>
+    onChange({
+      attachments: attachments.map((attachment) =>
+        attachment.id === id ? { ...attachment, ...patch } : attachment,
+      ),
+    });
+  const addAttachment = () =>
+    onChange({
+      attachments: [
+        ...attachments,
+        {
+          id: emailId(),
+          source: "client_latest",
+          category: "certificates",
+          documentKind: "general",
+          financialYear: "tracker",
+        },
+      ],
+    });
+  const variables = [
+    "{{client.companyName}}",
+    "{{client.clientId}}",
+    "{{client.category}}",
+    "{{client.state}}",
+    "{{client.gstNumber}}",
+    "{{tracker.name}}",
+    "{{tracker.financialYear}}",
+    "{{workflow.name}}",
+    "{{combinationMessage}}",
+    "{{statements}}",
+    "{{points}}",
+    ...fields.map((field) => `{{column.${field.key}}}`),
+  ];
+  const VariableButtons = ({
+    onInsert,
+  }: {
+    onInsert: (variable: string) => void;
+  }) => (
+    <div className="flex flex-wrap gap-1">
+      <span className="mr-1 text-xs text-muted">Insert variable:</span>
+      {variables.map((variable) => (
+        <button
+          key={variable}
+          type="button"
+          onClick={() => onInsert(variable)}
+          className="rounded border border-base bg-card px-1.5 py-0.5 text-[11px] text-blue-600"
+        >
+          {variable}
+        </button>
+      ))}
+    </div>
+  );
+  const applyPreset = (presetId: string) => {
+    const preset = TRACKER_EMAIL_PRESETS.find((item) => item.id === presetId);
+    if (preset)
+      onChange({
+        subject: preset.subject,
+        body: preset.body,
+      });
+  };
+  const setupPages = [
+    { title: "About", description: "Name and describe this workflow." },
+    { title: "Send rule", description: "Choose which clients should receive it." },
+    { title: "Email style", description: "Choose how matching columns add to the email." },
+    { title: "Messages", description: "Set the message for each matching condition." },
+    { title: "Template", description: "Write the shared part of the email." },
+    { title: "Delivery", description: "Set recipients, reminders, and attachments." },
+    { title: "Review", description: "Check the workflow before saving." },
+  ];
+  const [setupPage, setSetupPage] = useState(startPage);
+  useEffect(() => setSetupPage(startPage), [workflow.id, startPage]);
+  return (
+    <section className="space-y-4">
+      <div className="rounded-2xl border border-base bg-card p-4">
+        <button
+          type="button"
+          onClick={onBack}
+          className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-blue-600"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to workflows
+        </button>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-lg font-semibold text-default">{workflow.name || "Email workflow"}</p>
+            <p className="mt-1 text-sm text-muted">
+              {contentMode === "combinations"
+                ? "Combination email · clients are sent only when a defined scenario matches."
+                : contentMode === "statements"
+                  ? "Statement email · each matching condition adds a full message."
+                  : "Bullet-point email · each matching condition adds a short item."}
+            </p>
+          </div>
+          <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 dark:bg-blue-950/30 dark:text-blue-200">
+            {contentMode === "combinations" ? "Combination" : contentMode === "statements" ? "Statements" : "Bullet points"}
+          </span>
+        </div>
+      </div>
+      <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-default">{setupPages[setupPage].title}</p>
+            <p className="mt-0.5 text-xs text-muted">
+              {setupPages[setupPage].description}
+            </p>
+          </div>
+          <span className="rounded-full bg-card px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-surface dark:text-blue-200">
+            {setupPage + 1} of {setupPages.length}
+          </span>
+        </div>
+        <div className="mt-3 flex items-center gap-1.5">
+          {setupPages.map((page, index) => (
+            <button
+              key={page.title}
+              type="button"
+              onClick={() => setSetupPage(index)}
+              title={page.title}
+              aria-label={`Step ${index + 1}: ${page.title}`}
+              className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition ${setupPage === index ? "bg-blue-600 text-white" : index < setupPage ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200" : "bg-card text-muted dark:bg-surface"}`}
+            >
+              {index + 1}
+            </button>
+          ))}
+        </div>
+      </div>
+      {setupPage === 0 && <>
+      <div className="flex gap-2">
+        <input
+          value={workflow.name}
+          onChange={(event) => onChange({ name: event.target.value })}
+          className="min-w-0 flex-1 rounded-lg border border-base bg-card px-3 py-2 text-sm"
+          placeholder="Workflow name"
+        />
+        <button
+          type="button"
+          onClick={onRemove}
+          className="px-2 text-sm text-rose-600"
+        >
+          Remove
+        </button>
+      </div>
+      <input
+        value={workflow.description || ""}
+        onChange={(event) => onChange({ description: event.target.value })}
+        placeholder="What is this workflow for? (optional)"
+        className="w-full rounded-lg border border-base bg-card px-3 py-2 text-sm"
+      />
+      </>}
+      {setupPage === 1 && <>
+      <div className="rounded-lg border border-base bg-card p-3">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-default">
+              Send this email when
+            </p>
+            <p className="text-xs text-muted">
+              All means every rule must match; Any means at least one rule must
+              match.
+            </p>
+          </div>
+          <select
+            value={conditionGroup.mode}
+            onChange={(event) =>
+              updateConditions({ mode: event.target.value as "ALL" | "ANY" })
+            }
+            className="rounded-lg border border-base bg-surface px-2 py-1.5 text-sm"
+          >
+            <option value="ALL">ALL rules</option>
+            <option value="ANY">ANY rule</option>
+          </select>
+        </div>
+        <div className="space-y-2">
+          {conditionGroup.conditions.map((condition, index) => {
+            const field = fields.find(
+              (item) => item.key === condition.fieldKey,
+            );
+            const needsValue = !["is_empty", "is_not_empty"].includes(
+              condition.operator,
+            );
+            const values = fieldValues(field);
+            return (
+              <div
+                key={index}
+                className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_160px_minmax(0,1fr)_auto]"
+              >
+                <select
+                  value={condition.fieldKey}
+                  onChange={(event) => {
+                    const next = [...conditionGroup.conditions];
+                    next[index] = {
+                      fieldKey: event.target.value,
+                      operator: "equals",
+                      value: "",
+                    };
+                    updateConditions({ conditions: next });
+                  }}
+                  className="rounded-lg border border-base bg-surface px-2 py-2 text-sm"
+                >
+                  {fields.map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={condition.operator}
+                  onChange={(event) => {
+                    const next = [...conditionGroup.conditions];
+                    next[index] = {
+                      ...condition,
+                      operator: event.target.value as TrackerRuleOperator,
+                    };
+                    updateConditions({ conditions: next });
+                  }}
+                  className="rounded-lg border border-base bg-surface px-2 py-2 text-sm"
+                >
+                  {emailOperatorsForField(field).map((operator) => (
+                    <option key={operator.value} value={operator.value}>
+                      {operator.label}
+                    </option>
+                  ))}
+                </select>
+                {needsValue ? (
+                  values.length ? (
+                    <select
+                      value={String(condition.value ?? "")}
+                      onChange={(event) => {
+                        const next = [...conditionGroup.conditions];
+                        next[index] = {
+                          ...condition,
+                          value: event.target.value,
+                        };
+                        updateConditions({ conditions: next });
+                      }}
+                      className="rounded-lg border border-base bg-surface px-2 py-2 text-sm"
+                    >
+                      <option value="">Choose value</option>
+                      {values.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={
+                        field?.type === "number"
+                          ? "number"
+                          : field?.type === "date"
+                            ? "date"
+                            : "text"
+                      }
+                      value={String(condition.value ?? "")}
+                      onChange={(event) => {
+                        const next = [...conditionGroup.conditions];
+                        next[index] = {
+                          ...condition,
+                          value: event.target.value,
+                        };
+                        updateConditions({ conditions: next });
+                      }}
+                      placeholder="Value"
+                      className="rounded-lg border border-base bg-surface px-2 py-2 text-sm"
+                    />
+                  )
+                ) : (
+                  <span className="rounded-lg bg-surface px-2 py-2 text-xs text-faint">
+                    No value needed
+                  </span>
+                )}
+                <button
+                  type="button"
+                  disabled={conditionGroup.conditions.length === 1}
+                  onClick={() =>
+                    updateConditions({
+                      conditions: conditionGroup.conditions.filter(
+                        (_, itemIndex) => itemIndex !== index,
+                      ),
+                    })
+                  }
+                  className="text-sm text-rose-600 disabled:opacity-30"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          disabled={conditionGroup.conditions.length >= 12}
+          onClick={() =>
+            updateConditions({
+              conditions: [
+                ...conditionGroup.conditions,
+                {
+                  fieldKey: fields[0]?.key || "status",
+                  operator: "equals",
+                  value: "",
+                },
+              ],
+            })
+          }
+          className="mt-3 text-sm text-blue-600 disabled:opacity-50"
+        >
+          + Add condition
+        </button>
+      </div>
+      </>}
+      {setupPage === 2 && (
+        <div className="mx-auto max-w-2xl space-y-5 rounded-2xl border border-base bg-card p-5">
+          <div>
+            <p className="text-lg font-semibold text-default">How should matching information appear?</p>
+            <p className="mt-1 text-sm text-muted">Choose one simple way to build this email.</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {[
+              ["points", "Points", "A short bullet for every match."],
+              ["statements", "Statements", "A sentence or paragraph for every match."],
+              ["combinations", "Combinations", "One message when several conditions match."],
+            ].map(([mode, title, description]) => {
+              const selected = contentMode === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() =>
+                    onChange({
+                      contentMode: mode as TrackerEmailWorkflow["contentMode"],
+                    })
+                  }
+                  className={`rounded-2xl border p-4 text-left transition ${selected ? "border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/30" : "border-base bg-surface hover:border-blue-300"}`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold text-default">{title}</span>
+                    <span title={description}>
+                      <Info className="h-3.5 w-3.5 text-muted" />
+                    </span>
+                  </div>
+                  {selected && <span className="mt-3 block text-xs font-semibold text-blue-600">Selected</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {setupPage === 4 && <>
+      <div className="rounded-lg border border-base bg-card p-3">
+        <p className="text-sm font-medium text-default">Common email template</p>
+        <p className="mt-0.5 text-xs text-muted">
+          This is the shared text every eligible client receives. Matching messages are added automatically.
+        </p>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {TRACKER_EMAIL_PRESETS.map((preset) => (
+          <button
+            type="button"
+            key={preset.id}
+            onClick={() => applyPreset(preset.id)}
+            className="rounded-full border border-base bg-card px-2 py-1 text-xs text-muted hover:text-blue-600"
+          >
+            {preset.name}
+          </button>
+        ))}
+      </div>
+      <input
+        value={workflow.subject}
+        onChange={(event) => onChange({ subject: event.target.value })}
+        placeholder="Email subject"
+        className="w-full rounded-lg border border-base bg-card px-3 py-2 text-sm"
+      />
+      <VariableButtons
+        onInsert={(variable) =>
+          onChange({
+            subject: `${workflow.subject}${workflow.subject ? " " : ""}${variable}`,
+          })
+        }
+      />
+      <RichTextEditor
+        value={workflow.body}
+        onChange={(body) => onChange({ body })}
+        placeholder={`Write the shared email body. Use ${contentMode === "combinations" ? "{{combinationMessage}}" : contentMode === "statements" ? "{{statements}}" : "{{points}}"} for matching messages.`}
+      />
+      <VariableButtons
+        onInsert={(variable) =>
+          onChange({
+            body: `${workflow.body}${workflow.body ? " " : ""}${variable}`,
+          })
+        }
+      />
+      </div>
+      </>}
+      {setupPage === 5 && <>
+      <label className="block rounded-xl border border-base bg-card p-4">
+        <span className="flex items-center gap-1 text-sm font-medium text-default">
+          Who should receive it?
+          <span title="You can still review To and CC for every client before delivery.">
+            <Info className="h-3.5 w-3.5 text-muted" />
+          </span>
+        </span>
+        <select
+          value={workflow.recipientStrategy || "selected"}
+          onChange={(event) =>
+            onChange({
+              recipientStrategy: event.target.value as TrackerRecipientStrategy,
+            })
+          }
+          className="mt-3 w-full rounded-lg border border-base bg-surface px-3 py-2.5 text-sm"
+        >
+          <option value="selected">Client-profile selected email</option>
+          <option value="primary">Primary linked contact</option>
+          <option value="all">All linked contacts</option>
+          <option value="per_client">Review each client before delivery</option>
+        </select>
+      </label>
+      <label className="block rounded-xl border border-base bg-card p-4">
+        <span className="flex items-center gap-1 text-sm font-medium text-default">
+          Space before Gmail signature
+          <span title="This controls the blank lines between your email body and the Gmail signature. It does not change the signature itself.">
+            <Info className="h-3.5 w-3.5 text-muted" />
+          </span>
+        </span>
+        <select
+          value={workflow.signatureGap ?? 2}
+          onChange={(event) => onChange({ signatureGap: Number(event.target.value) })}
+          className="mt-3 w-full rounded-lg border border-base bg-surface px-3 py-2.5 text-sm"
+        >
+          <option value={0}>No blank line</option>
+          <option value={1}>1 blank line</option>
+          <option value={2}>2 blank lines</option>
+          <option value={3}>3 blank lines</option>
+          <option value={4}>4 blank lines</option>
+          <option value={5}>5 blank lines</option>
+          <option value={6}>6 blank lines</option>
+        </select>
+      </label>
+      <details className="rounded-lg border border-base bg-card p-3">
+        <summary className="cursor-pointer text-sm font-medium text-default">
+          Manual reminder email
+        </summary>
+        <div className="mt-3 space-y-2">
+          <p className="text-xs text-muted">
+            Reminders are never sent automatically. When you manually preview a reminder campaign, replied clients are excluded.
+          </p>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() =>
+                onChange({
+                  reminderSubject: workflow.subject,
+                  reminderBody: workflow.body,
+                })
+              }
+              className="text-xs text-blue-600"
+            >
+              Copy initial email
+            </button>
+          </div>
+          <input
+            value={workflow.reminderSubject || ""}
+            onChange={(event) =>
+              onChange({ reminderSubject: event.target.value })
+            }
+            placeholder="Reminder subject (uses initial subject if empty)"
+            className="w-full rounded-lg border border-base bg-surface px-3 py-2 text-sm"
+          />
+          <RichTextEditor
+            value={workflow.reminderBody || ""}
+            onChange={(reminderBody) => onChange({ reminderBody })}
+            placeholder="Reminder email body (uses initial body if empty)"
+          />
+        </div>
+      </details>
+      <details
+        className="rounded-lg border border-base bg-card p-3"
+        open={workflow.followUp?.enabled === true}
+      >
+        <summary className="cursor-pointer text-sm font-medium text-default">
+          No-reply follow-up task
+        </summary>
+        <label className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+        <input
+          type="checkbox"
+          checked={workflow.followUp?.enabled === true}
+          onChange={(event) =>
+            onChange({
+              followUp: {
+                enabled: event.target.checked,
+                daysAfter: workflow.followUp?.daysAfter || 3,
+                ownerEmail: workflow.followUp?.ownerEmail,
+              },
+            })
+          }
+        />
+        <span>
+          <span className="block font-medium text-default">
+            Create a no-reply follow-up task
+          </span>
+          <span className="block text-xs text-muted">
+            Created after an initial email is sent and completed when a client
+            reply is synced. It creates a task only; it never sends an email automatically.
+          </span>
+        </span>
+        {workflow.followUp?.enabled && (
+          <>
+            <input
+              type="number"
+              min="1"
+              max="90"
+              value={workflow.followUp.daysAfter}
+              onChange={(event) =>
+                onChange({
+                  followUp: {
+                    ...workflow.followUp!,
+                    daysAfter: Number(event.target.value) || 1,
+                  },
+                })
+              }
+              className="w-16 rounded border border-base bg-surface px-2 py-1"
+            />
+            <span className="text-muted">days after sending</span>
+            <input
+              value={workflow.followUp.ownerEmail || ""}
+              onChange={(event) =>
+                onChange({
+                  followUp: {
+                    ...workflow.followUp!,
+                    ownerEmail: event.target.value,
+                  },
+                })
+              }
+              placeholder="Owner email (optional)"
+              className="min-w-48 flex-1 rounded border border-base bg-surface px-2 py-1"
+            />
+          </>
+        )}
+        </label>
+      </details>
+      </>}
+      {setupPage === 5 && <>
+      <details className="rounded-lg border border-base bg-card p-3">
+        <summary className="cursor-pointer text-sm font-medium text-default">
+          Attachments
+        </summary>
+        <div className="mt-2 flex items-start justify-between gap-3">
+          <p className="max-w-2xl text-xs text-muted">
+            Choose one exact shared document for every client, or the newest matching document for each client. Only managed Google Drive documents are attached. Up to four files, eight MB each, are allowed.
+          </p>
+          <button
+            type="button"
+            disabled={attachments.length >= 4}
+            onClick={addAttachment}
+            className="shrink-0 text-sm text-blue-600 disabled:opacity-50"
+          >
+            Add attachment
+          </button>
+        </div>
+        {attachments.length === 0 ? (
+          <p className="mt-3 text-xs text-faint">
+            No documents will be attached.
+          </p>
+        ) : (
+          <div className="mt-3 space-y-3">
+            {attachments.map((attachment) => {
+              const attachmentSource = attachment.source || "client_latest";
+              const attachmentCondition =
+                attachment.conditionGroup?.conditions[0];
+              const conditionField = fields.find(
+                (field) => field.key === attachmentCondition?.fieldKey,
+              );
+              const conditionValues = fieldValues(conditionField);
+              const needsValue = !["is_empty", "is_not_empty"].includes(
+                attachmentCondition?.operator || "equals",
+              );
+              return (
+                <div
+                  key={attachment.id}
+                  className="rounded-lg border border-base bg-surface p-3"
+                >
+                  <label className="block text-xs text-muted">
+                    Attachment type
+                    <select
+                      value={attachmentSource}
+                      onChange={(event) =>
+                        updateAttachment(attachment.id, {
+                          source: event.target.value as
+                            | "shared"
+                            | "client_latest",
+                          documentId: undefined,
+                        })
+                      }
+                      className="mt-1 w-full rounded border border-base bg-card px-2 py-2 text-sm text-default"
+                    >
+                      <option value="shared">One shared document for every client</option>
+                      <option value="client_latest">Newest matching document for each client</option>
+                    </select>
+                  </label>
+                  {attachmentSource === "shared" ? (
+                    <label className="mt-3 block text-xs text-muted">
+                      Shared managed Drive document
+                      <select
+                        value={attachment.documentId || ""}
+                        onChange={(event) =>
+                          updateAttachment(attachment.id, {
+                            documentId: event.target.value || undefined,
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-base bg-card px-2 py-2 text-sm text-default"
+                      >
+                        <option value="">Choose a document</option>
+                        {managedDocuments.map((document) => (
+                          <option key={document._id} value={document._id}>
+                            {document.documentName} · {document.clientId}
+                          </option>
+                        ))}
+                      </select>
+                      {!managedDocuments.length && (
+                        <span className="mt-1 block text-xs text-amber-700">
+                          No managed Google Drive documents are available yet.
+                        </span>
+                      )}
+                    </label>
+                  ) : (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                    <label className="text-xs text-muted">
+                      Document category
+                      <select
+                        value={attachment.category || ""}
+                        onChange={(event) =>
+                          updateAttachment(attachment.id, {
+                            category:
+                              (event.target
+                                .value as TrackerEmailAttachment["category"]) ||
+                              undefined,
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-base bg-card px-2 py-2 text-sm text-default"
+                      >
+                        <option value="">Any category</option>
+                        <option value="compliance">Compliance</option>
+                        <option value="financial">Financial</option>
+                        <option value="invoices">Invoices</option>
+                        <option value="certificates">Certificates</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-muted">
+                      Document type
+                      <select
+                        value={attachment.documentKind || ""}
+                        onChange={(event) =>
+                          updateAttachment(attachment.id, {
+                            documentKind:
+                              (event.target
+                                .value as TrackerEmailAttachment["documentKind"]) ||
+                              undefined,
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-base bg-card px-2 py-2 text-sm text-default"
+                      >
+                        <option value="">Any type</option>
+                        <option value="general">General document</option>
+                        <option value="epr-certificate">EPR certificate</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-muted">
+                      Financial year
+                      <select
+                        value={attachment.financialYear || "tracker"}
+                        onChange={(event) =>
+                          updateAttachment(attachment.id, {
+                            financialYear: event.target.value as
+                              | "tracker"
+                              | "any",
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-base bg-card px-2 py-2 text-sm text-default"
+                      >
+                        <option value="tracker">This tracker&apos;s FY</option>
+                        <option value="any">Any financial year</option>
+                      </select>
+                    </label>
+                  </div>
+                  )}
+                  <div className="mt-3 rounded border border-base bg-card p-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="flex items-center gap-2 text-xs font-medium text-default">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(attachment.conditionGroup)}
+                          onChange={(event) =>
+                            updateAttachment(attachment.id, {
+                              conditionGroup: event.target.checked
+                                ? {
+                                    mode: "ALL",
+                                    conditions: [
+                                      {
+                                        fieldKey:
+                                          fields[0]?.key ||
+                                          workflow.mainFieldKey,
+                                        operator: "equals",
+                                        value: "",
+                                      },
+                                    ],
+                                  }
+                                : undefined,
+                            })
+                          }
+                        />
+                        Attach only when a tracker condition matches
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onChange({
+                            attachments: attachments.filter(
+                              (item) => item.id !== attachment.id,
+                            ),
+                          })
+                        }
+                        className="text-xs text-rose-600"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    {attachmentCondition && (
+                      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                        <select
+                          value={attachmentCondition.fieldKey}
+                          onChange={(event) =>
+                            updateAttachment(attachment.id, {
+                              conditionGroup: {
+                                mode: "ALL",
+                                conditions: [
+                                  {
+                                    fieldKey: event.target.value,
+                                    operator: "equals",
+                                    value: "",
+                                  },
+                                ],
+                              },
+                            })
+                          }
+                          className="rounded border border-base bg-surface px-2 py-2 text-sm"
+                        >
+                          {fields.map((field) => (
+                            <option key={field.key} value={field.key}>
+                              {field.label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={attachmentCondition.operator}
+                          onChange={(event) =>
+                            updateAttachment(attachment.id, {
+                              conditionGroup: {
+                                mode: "ALL",
+                                conditions: [
+                                  {
+                                    ...attachmentCondition,
+                                    operator: event.target
+                                      .value as TrackerRuleOperator,
+                                  },
+                                ],
+                              },
+                            })
+                          }
+                          className="rounded border border-base bg-surface px-2 py-2 text-sm"
+                        >
+                          {emailOperatorsForField(conditionField).map((operator) => (
+                            <option key={operator.value} value={operator.value}>
+                              {operator.label}
+                            </option>
+                          ))}
+                        </select>
+                        {needsValue ? (
+                          conditionValues.length ? (
+                            <select
+                              value={String(attachmentCondition.value || "")}
+                              onChange={(event) =>
+                                updateAttachment(attachment.id, {
+                                  conditionGroup: {
+                                    mode: "ALL",
+                                    conditions: [
+                                      {
+                                        ...attachmentCondition,
+                                        value: event.target.value,
+                                      },
+                                    ],
+                                  },
+                                })
+                              }
+                              className="rounded border border-base bg-surface px-2 py-2 text-sm"
+                            >
+                              <option value="">Choose value</option>
+                              {conditionValues.map((value) => (
+                                <option key={value} value={value}>
+                                  {value}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              value={String(attachmentCondition.value || "")}
+                              onChange={(event) =>
+                                updateAttachment(attachment.id, {
+                                  conditionGroup: {
+                                    mode: "ALL",
+                                    conditions: [
+                                      {
+                                        ...attachmentCondition,
+                                        value: event.target.value,
+                                      },
+                                    ],
+                                  },
+                                })
+                              }
+                              placeholder="Value"
+                              className="rounded border border-base bg-surface px-2 py-2 text-sm"
+                            />
+                          )
+                        ) : (
+                          <span className="rounded bg-surface px-2 py-2 text-xs text-faint">
+                            No value needed
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </details>
+      </>}
+      {setupPage === 3 && <>
+      <details
+        className="rounded-lg border border-base bg-card p-3"
+        open={visibleContentRules.length > 0}
+      >
+        <summary className="cursor-pointer text-sm font-medium text-default">
+          Add column-based email content
+        </summary>
+        <p className="mt-2 text-xs text-muted">
+          {contentMode === "combinations"
+            ? "Add the scenarios that may receive this email. A client must match one of them; clients with no matching scenario are skipped."
+            : contentMode === "statements"
+              ? "Each matching condition adds its own sentence or paragraph to the email."
+              : "Each matching condition adds one short bullet point to the email."}{" "}
+          You can use live or manual values such as <code>{"{{column.purchaseUploadedQty}}"}</code> in the content.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => addContentRule(contentRuleType)}
+            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
+          >
+            + Add {contentMode === "combinations" ? "scenario" : contentMode === "statements" ? "statement" : "bullet point"}
+          </button>
+          {contentMode === "combinations" && (
+            <button
+              type="button"
+              onClick={onPreviewCombinations}
+              className="text-xs font-semibold text-blue-600"
+            >
+              <FileText className="mr-1 inline h-3.5 w-3.5" /> Preview rule combinations
+            </button>
+          )}
+        </div>
+        <div className="mt-3 space-y-3">
+          {visibleContentRules.map((rule) => (
+            <div
+              key={rule.id}
+              className="rounded-lg border border-base bg-surface p-3"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded border border-base bg-card px-2 py-1.5 text-sm font-medium text-default">
+                  {contentMode === "combinations" ? "Scenario message" : contentMode === "statements" ? "Statement" : "Bullet point"}
+                </span>
+                {rule.type === "combination" && (
+                  <>
+                    <select
+                      value={rule.action || "include"}
+                      onChange={(event) =>
+                        updateContentRule(rule.id, {
+                          action: event.target.value as "include" | "skip",
+                        })
+                      }
+                      className="rounded border border-base bg-card px-2 py-1.5 text-sm"
+                    >
+                      <option value="include">Send matched clients</option>
+                      <option value="skip">Exclude matched clients</option>
+                    </select>
+                    <span className="text-xs text-muted">
+                      Scenario {scenarioRules.findIndex((item) => item.id === rule.id) + 1} priority
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => moveScenario(rule.id, -1)}
+                      disabled={scenarioRules[0]?.id === rule.id}
+                      className="text-xs text-blue-600 disabled:opacity-40"
+                    >
+                      Move up
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveScenario(rule.id, 1)}
+                      disabled={scenarioRules.at(-1)?.id === rule.id}
+                      className="text-xs text-blue-600 disabled:opacity-40"
+                    >
+                      Move down
+                    </button>
+                  </>
+                )}
+                <select
+                  value={rule.conditionGroup.mode}
+                  onChange={(event) =>
+                    updateContentRule(rule.id, {
+                      conditionGroup: {
+                        ...rule.conditionGroup,
+                        mode: event.target.value as "ALL" | "ANY",
+                      },
+                    })
+                  }
+                  className="rounded border border-base bg-card px-2 py-1.5 text-sm"
+                >
+                  <option value="ALL">ALL conditions</option>
+                  <option value="ANY">ANY condition</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChange({
+                      contentRules: contentRules.filter(
+                        (item) => item.id !== rule.id,
+                      ),
+                    })
+                  }
+                  className="ml-auto text-xs text-rose-600"
+                >
+                  Remove
+                </button>
+              </div>
+              <div className="mt-2 space-y-2">
+                {rule.conditionGroup.conditions.map((condition, index) => {
+                  const field = fields.find(
+                    (item) => item.key === condition.fieldKey,
+                  );
+                  const options = fieldValues(field);
+                  const needsValue = !["is_empty", "is_not_empty"].includes(
+                    condition.operator,
+                  );
+                  const nextConditions = (patch: Partial<typeof condition>) =>
+                    rule.conditionGroup.conditions.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, ...patch } : item,
+                    );
+                  return (
+                    <div
+                      key={index}
+                      className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_145px_minmax(0,1fr)_auto]"
+                    >
+                      <select
+                        value={condition.fieldKey}
+                        onChange={(event) =>
+                          updateContentRule(rule.id, {
+                            conditionGroup: {
+                              ...rule.conditionGroup,
+                              conditions: nextConditions({
+                                fieldKey: event.target.value,
+                                operator: "equals",
+                                value: "",
+                              }),
+                            },
+                          })
+                        }
+                        className="rounded border border-base bg-card px-2 py-1.5 text-sm"
+                      >
+                        {fields.map((item) => (
+                          <option key={item.key} value={item.key}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={condition.operator}
+                        onChange={(event) =>
+                          updateContentRule(rule.id, {
+                            conditionGroup: {
+                              ...rule.conditionGroup,
+                              conditions: nextConditions({
+                                operator: event.target
+                                  .value as TrackerRuleOperator,
+                              }),
+                            },
+                          })
+                        }
+                        className="rounded border border-base bg-card px-2 py-1.5 text-sm"
+                      >
+                        {emailOperatorsForField(field).map((operator) => (
+                          <option key={operator.value} value={operator.value}>
+                            {operator.label}
+                          </option>
+                        ))}
+                      </select>
+                      {needsValue ? (
+                        options.length ? (
+                          <select
+                            value={String(condition.value ?? "")}
+                            onChange={(event) =>
+                              updateContentRule(rule.id, {
+                                conditionGroup: {
+                                  ...rule.conditionGroup,
+                                  conditions: nextConditions({
+                                    value: event.target.value,
+                                  }),
+                                },
+                              })
+                            }
+                            className="rounded border border-base bg-card px-2 py-1.5 text-sm"
+                          >
+                            <option value="">Choose value</option>
+                            {options.map((value) => (
+                              <option key={value} value={value}>
+                                {value}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            value={String(condition.value ?? "")}
+                            onChange={(event) =>
+                              updateContentRule(rule.id, {
+                                conditionGroup: {
+                                  ...rule.conditionGroup,
+                                  conditions: nextConditions({
+                                    value: event.target.value,
+                                  }),
+                                },
+                              })
+                            }
+                            placeholder="Value"
+                            className="rounded border border-base bg-card px-2 py-1.5 text-sm"
+                          />
+                        )
+                      ) : (
+                        <span className="rounded bg-card px-2 py-1.5 text-xs text-faint">
+                          No value needed
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        disabled={rule.conditionGroup.conditions.length === 1}
+                        onClick={() =>
+                          updateContentRule(rule.id, {
+                            conditionGroup: {
+                              ...rule.conditionGroup,
+                              conditions: rule.conditionGroup.conditions.filter(
+                                (_, itemIndex) => itemIndex !== index,
+                              ),
+                            },
+                          })
+                        }
+                        className="text-sm text-rose-600 disabled:opacity-30"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                disabled={rule.conditionGroup.conditions.length >= 12}
+                onClick={() =>
+                  updateContentRule(rule.id, {
+                    conditionGroup: {
+                      ...rule.conditionGroup,
+                      conditions: [
+                        ...rule.conditionGroup.conditions,
+                        {
+                          fieldKey: fields[0]?.key || workflow.mainFieldKey,
+                          operator: "equals",
+                          value: "",
+                        },
+                      ],
+                    },
+                  })
+                }
+                className="mt-2 text-xs text-blue-600"
+              >
+                + Add condition
+              </button>
+              {rule.action !== "skip" && (
+                <>
+                  <RichTextEditor
+                    value={rule.content || ""}
+                    onChange={(content) =>
+                      updateContentRule(rule.id, { content })
+                    }
+                    placeholder={
+                      rule.type === "point"
+                        ? "Bullet content"
+                        : "Message content"
+                    }
+                  />
+                  <VariableButtons
+                    onInsert={(variable) =>
+                      updateContentRule(rule.id, {
+                        content: `${rule.content || ""}${rule.content ? " " : ""}${variable}`,
+                      })
+                    }
+                  />
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      </details>
+      </>}
+      {setupPage === 6 && (
+        <div className="space-y-3 rounded-xl border border-base bg-card p-4">
+          <div>
+            <p className="text-sm font-semibold text-default">Workflow review</p>
+            <p className="mt-1 text-xs text-muted">
+              Save these settings, then use Email clients to preview every eligible
+              client and review recipients before delivery.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="rounded-lg bg-surface p-3 text-sm">
+              <span className="block text-xs text-muted">Audience</span>
+              <span className="mt-1 block font-medium text-default">
+                {conditionGroup.conditions.length} eligibility condition{conditionGroup.conditions.length === 1 ? "" : "s"} · {workflow.recipientStrategy === "all" ? "All linked contacts" : workflow.recipientStrategy === "primary" ? "Primary contact" : workflow.recipientStrategy === "per_client" ? "Review per client" : "Client-profile email"}
+              </span>
+            </div>
+            <div className="rounded-lg bg-surface p-3 text-sm">
+              <span className="block text-xs text-muted">Message style</span>
+              <span className="mt-1 block font-medium text-default">
+                {visibleContentRules.length} {contentMode === "combinations" ? "scenario" : contentMode === "statements" ? "statement" : "bullet-point"} rule{visibleContentRules.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="rounded-lg bg-surface p-3 text-sm">
+              <span className="block text-xs text-muted">Manual reminder</span>
+              <span className="mt-1 block font-medium text-default">
+                {workflow.reminderSubject || workflow.reminderBody ? "Prepared — never sends automatically" : "Not prepared"}
+              </span>
+            </div>
+            <div className="rounded-lg bg-surface p-3 text-sm">
+              <span className="block text-xs text-muted">Attachments & follow-up</span>
+              <span className="mt-1 block font-medium text-default">
+                {attachments.length} attachment{attachments.length === 1 ? "" : "s"} · {workflow.followUp?.enabled ? `Task after ${workflow.followUp.daysAfter} days if no reply` : "No follow-up task"}
+              </span>
+            </div>
+          </div>
+          {contentMode === "combinations" && (
+            <button
+              type="button"
+              onClick={onPreviewCombinations}
+              className="inline-flex items-center gap-1 text-sm font-medium text-blue-600"
+            >
+              <FileText className="h-4 w-4" /> Preview rule combinations
+            </button>
+          )}
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-3 border-t border-base pt-3">
+        <button
+          type="button"
+          disabled={setupPage === 0}
+          onClick={() => setSetupPage((page) => Math.max(0, page - 1))}
+          className="rounded-lg border border-base bg-card px-3 py-2 text-sm text-muted disabled:opacity-40"
+        >
+          Previous page
+        </button>
+        <span className="text-xs text-muted">
+          {setupPages[setupPage].title}
+        </span>
+        <button
+          type="button"
+          disabled={setupPage === setupPages.length - 1}
+          onClick={() =>
+            setSetupPage((page) => Math.min(setupPages.length - 1, page + 1))
+          }
+          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+        >
+          Next page
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function TrackerFieldDraftCard({
+  field,
+  index,
+  fieldCount,
+  availableFields,
+  updateDraft,
+  remove,
+  move,
+}: {
+  field: TrackerField;
+  index: number;
+  fieldCount: number;
+  availableFields: TrackerField[];
+  updateDraft: (index: number, patch: Partial<TrackerField>) => void;
+  remove: () => void;
+  move: (from: number, to: number) => void;
+}) {
+  return (
+    <div
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.preventDefault();
+        const from = Number(event.dataTransfer.getData("text/tracker-field"));
+        if (Number.isInteger(from)) move(from, index);
+      }}
+      className="rounded-xl border border-base bg-surface p-3"
+    >
+      <div className="grid gap-2 sm:grid-cols-[auto_1fr_170px_1fr_auto]">
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/tracker-field", String(index));
+            }}
+            className="cursor-grab rounded p-1 text-faint hover:bg-card active:cursor-grabbing"
+            aria-label={`Drag ${field.label || "column"} to change its position`}
+            title="Drag to reorder"
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+          <div className="hidden flex-col sm:flex">
+            <button
+              type="button"
+              disabled={index === 0}
+              onClick={() => move(index, index - 1)}
+              className="text-[10px] leading-3 text-muted disabled:opacity-30"
+              aria-label={`Move ${field.label || "column"} up`}
+            >
+              ▲
+            </button>
+            <button
+              type="button"
+              disabled={index === fieldCount - 1}
+              onClick={() => move(index, index + 1)}
+              className="text-[10px] leading-3 text-muted disabled:opacity-30"
+              aria-label={`Move ${field.label || "column"} down`}
+            >
+              ▼
+            </button>
+          </div>
+        </div>
+        <input
+          disabled={field.type === "status"}
+          value={field.label}
+          onChange={(event) =>
+            updateDraft(index, { label: event.target.value })
+          }
+          placeholder="Column name"
+          className="rounded-lg border border-base bg-card px-2.5 py-2 text-sm disabled:opacity-60"
+        />
+        <select
+          disabled={field.type === "status"}
+          value={field.type}
+          onChange={(event) =>
+            updateDraft(index, {
+              type: event.target.value as TrackerFieldType,
+              options: ["select", "multiSelect", "tags"].includes(
+                event.target.value,
+              )
+                ? ["Option 1", "Option 2"]
+                : undefined,
+              optionInput: ["select", "multiSelect", "tags"].includes(
+                event.target.value,
+              )
+                ? "Option 1, Option 2"
+                : undefined,
+            })
+          }
+          className="rounded-lg border border-base bg-card px-2.5 py-2 text-sm disabled:opacity-60"
+        >
+          <option value="toggle">Yes / No toggle</option>
+          <option value="select">Dropdown</option>
+          <option value="text">Short text</option>
+          <option value="longText">Long text</option>
+          <option value="multiSelect">Multi-select</option>
+          <option value="tags">Tags</option>
+          <option value="number">Number</option>
+          <option value="percentage">Percentage</option>
+          <option value="quantity">Quantity</option>
+          <option value="currency">Currency</option>
+          <option value="progress">Progress</option>
+          <option value="date">Date</option>
+          {field.type === "status" && <option value="status">Status</option>}
+        </select>
+        {["select", "multiSelect", "tags"].includes(field.type) ? (
+          <input
+            value={field.optionInput ?? (field.options || []).join(", ")}
+            onChange={(event) =>
+              updateDraft(index, {
+                optionInput: event.target.value,
+                options: event.target.value
+                  .split(",")
+                  .map((option) => option.trim())
+                  .filter(Boolean),
+              })
+            }
+            placeholder="Options, separated by commas"
+            className="rounded-lg border border-base bg-card px-2.5 py-2 text-sm"
+          />
+        ) : (
+          <span />
+        )}
+        {field.type !== "status" || fieldCount > 1 ? (
+          <button
+            type="button"
+            onClick={remove}
+            className="rounded-lg px-2 text-sm text-rose-600"
+          >
+            Remove
+          </button>
+        ) : (
+          <span />
+        )}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-base pt-2">
+        <span className="text-xs text-muted">Data source</span>
+        <select
+          value={
+            field.computed ? "computed" : field.dataLink ? "live" : "manual"
+          }
+          onChange={(event) => {
+            const source = event.target.value;
+            if (source === "manual") {
+              updateDraft(index, { dataLink: undefined, computed: undefined });
+              return;
+            }
+            if (source === "computed") {
+              const options = availableFields.filter(
+                (item) => item.key && item.key !== field.key && !item.computed,
+              );
+              updateDraft(index, {
+                dataLink: undefined,
+                computed: {
+                  kind: "percentage",
+                  primaryFieldKey: options[0]?.key || "",
+                  secondaryFieldKey: options[1]?.key || options[0]?.key || "",
+                },
+                type: "number",
+                options: undefined,
+                optionInput: undefined,
+              });
+              return;
+            }
+            updateDraft(index, { computed: undefined });
+          }}
+          className="rounded-lg border border-base bg-card px-2 py-1 text-xs"
+        >
+          <option value="manual">Manual value</option>
+          <option value="live">Live client data</option>
+          <option value="computed">Computed</option>
+        </select>
+        {!field.computed && (
+          <select
+            value={field.dataLink?.source || ""}
+            onChange={(event) => {
+              const source = event.target.value as TrackerDataLinkSource;
+              const display = source
+                ? LIVE_DATA_DISPLAYS[source][0].value
+                : undefined;
+              updateDraft(index, {
+                dataLink: source && display ? { source, display } : undefined,
+                computed: undefined,
+                ...(display
+                  ? {
+                      type: liveFieldType(display),
+                      options: undefined,
+                      optionInput: undefined,
+                    }
+                  : {}),
+              });
+            }}
+            className="rounded-lg border border-base bg-card px-2 py-1 text-xs"
+          >
+            <option value="">Manual value</option>
+            {LIVE_DATA_SOURCES.map((source) => (
+              <option key={source.value} value={source.value}>
+                {source.label}
+              </option>
+            ))}
+          </select>
+        )}
+        {field.dataLink && (
+          <select
+            value={field.dataLink.display}
+            onChange={(event) => {
+              const display = event.target.value as TrackerDataLinkDisplay;
+              updateDraft(index, {
+                dataLink: { ...field.dataLink!, display },
+                type: liveFieldType(display),
+                options: undefined,
+                optionInput: undefined,
+              });
+            }}
+            className="rounded-lg border border-base bg-card px-2 py-1 text-xs"
+          >
+            {LIVE_DATA_DISPLAYS[field.dataLink.source].map((display) => (
+              <option key={display.value} value={display.value}>
+                {display.label}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      {field.computed && (
+        <ComputedFieldSettings
+          field={field}
+          availableFields={availableFields}
+          onChange={(patch) => updateDraft(index, patch)}
+        />
+      )}
+      {field.type === "quantity" && !field.dataLink && !field.computed && (
+        <label className="mt-2 flex items-center gap-2 text-xs text-muted">
+          Unit
+          <input
+            value={field.unit || ""}
+            onChange={(event) =>
+              updateDraft(index, { unit: event.target.value })
+            }
+            placeholder="MT"
+            className="w-24 rounded-lg border border-base bg-card px-2 py-1 text-xs text-default"
+          />
+        </label>
+      )}
+      {["select", "multiSelect", "tags"].includes(field.type) && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {(field.options || []).map((option, optionIndex) => {
+            const selectedColor =
+              field.optionColors?.[option] ||
+              TRACKER_OPTION_COLORS[optionIndex % TRACKER_OPTION_COLORS.length];
+            return (
+              <div
+                key={option}
+                className="inline-flex items-center gap-2 rounded-lg bg-card px-2 py-1 text-xs text-muted"
+              >
+                <span>{option}</span>
+                <span className="flex gap-1" aria-label={`Color for ${option}`}>
+                  {TRACKER_OPTION_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      title={color}
+                      aria-label={`Set ${option} color to ${color}`}
+                      aria-pressed={selectedColor === color}
+                      onClick={() =>
+                        updateDraft(index, {
+                          optionColors: {
+                            ...field.optionColors,
+                            [option]: color,
+                          },
+                        })
+                      }
+                      className={`h-4 w-4 rounded-full ${COLOR_SWATCH[color]} ${selectedColor === color ? "ring-2 ring-offset-1 ring-blue-500" : "opacity-45 hover:opacity-100"}`}
+                    />
+                  ))}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TrackerEditor({
+  entry,
+  field,
+  saving,
+  onSave,
+}: {
+  entry: Entry;
+  field: TrackerField;
+  saving: boolean;
+  onSave: (entry: Entry, field: TrackerField, value: TrackerValue) => void;
+}) {
+  const value = entry.values[field.key];
+  const [draft, setDraft] = useState(valueText(value));
+  React.useEffect(() => setDraft(valueText(value)), [value]);
+  if (field.dataLink || field.computed)
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium ${field.computed ? "bg-violet-50 text-violet-800 dark:bg-violet-950/30 dark:text-violet-200" : "bg-blue-50 text-blue-800 dark:bg-blue-950/30 dark:text-blue-200"}`}
+      >
+        <span>
+          {field.computed?.kind === "percentage" && value !== ""
+            ? `${valueText(value)}%`
+            : valueText(value)}
+        </span>
+        <span className="text-[10px] font-semibold uppercase tracking-wide opacity-65">
+          {field.computed ? "Computed" : "Live"}
+        </span>
+      </span>
+    );
+  if (field.type === "toggle")
+    return (
+      <button
+        type="button"
+        role="switch"
+        aria-checked={Boolean(value)}
+        disabled={saving}
+        onClick={() => onSave(entry, field, !Boolean(value))}
+        className={`relative inline-flex h-[31px] w-[51px] shrink-0 items-center rounded-2xl transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${value ? "bg-[#34C759] dark:bg-[#30D158]" : "bg-[#E5E5EA] dark:bg-[#3A3A3C]"}`}
+        aria-label={`${field.label}: ${value ? "Yes" : "No"}`}
+      >
+        <span
+          className={`absolute left-0.5 h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_6px_rgba(0,0,0,0.30),0_1px_3px_rgba(0,0,0,0.15)] transition-transform duration-200 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] ${value ? "translate-x-5" : "translate-x-0"}`}
+        />
+      </button>
+    );
+  if (field.type === "status" || field.type === "select")
+    return (
+      <select
+        disabled={saving}
+        value={String(value ?? "")}
+        onChange={(event) => onSave(entry, field, event.target.value)}
+        className={`rounded-lg border border-transparent px-2 py-1.5 text-sm outline-none focus:border-blue-500 ${field.type === "status" ? STATUS_TONES[String(value)] || "bg-surface text-default" : optionTone(field.optionColors?.[String(value)])}`}
+      >
+        {(field.options || []).map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    );
+  if (field.type === "multiSelect" || field.type === "tags") {
+    const selected = Array.isArray(value) ? value : [];
+    return (
+      <select
+        multiple
+        disabled={saving}
+        value={selected}
+        onChange={(event) =>
+          onSave(
+            entry,
+            field,
+            Array.from(event.currentTarget.selectedOptions).map(
+              (option) => option.value,
+            ),
+          )
+        }
+        className="min-h-9 min-w-32 rounded-lg border border-base bg-surface px-2 py-1.5 text-sm outline-none focus:border-blue-500"
+        aria-label={field.label}
+      >
+        {(field.options || []).map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  if (field.type === "longText")
+    return (
+      <textarea
+        disabled={saving}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          if (draft !== valueText(value)) onSave(entry, field, draft);
+        }}
+        rows={2}
+        className="min-w-52 rounded-lg border border-base bg-surface px-2 py-1.5 text-sm outline-none focus:border-blue-500"
+      />
+    );
+  const numeric = [
+    "number",
+    "percentage",
+    "quantity",
+    "currency",
+    "progress",
+  ].includes(field.type);
+  const numericInput = (
+    <input
+      disabled={saving}
+      type={numeric ? "number" : field.type === "date" ? "date" : "text"}
+      min={
+        field.type === "percentage" || field.type === "progress" ? 0 : undefined
+      }
+      max={
+        field.type === "percentage" || field.type === "progress"
+          ? 100
+          : undefined
+      }
+      step={numeric ? "any" : undefined}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        if (draft !== valueText(value)) onSave(entry, field, draft);
+      }}
+      className="w-full min-w-28 rounded-lg border border-base bg-surface px-2 py-1.5 text-sm outline-none focus:border-blue-500"
+    />
+  );
+  if (field.type === "progress") {
+    const percentage = Math.max(0, Math.min(100, Number(value) || 0));
+    return (
+      <div className="min-w-36 space-y-1">
+        <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+          <div
+            className="h-full rounded-full bg-blue-500"
+            style={{ width: `${percentage}%` }}
+          />
+        </div>
+        {numericInput}
+      </div>
+    );
+  }
+  if (["percentage", "quantity", "currency"].includes(field.type)) {
+    return (
+      <div className="flex min-w-32 items-center gap-1">
+        <span className="text-xs text-muted">
+          {field.type === "currency" ? "₹" : ""}
+        </span>
+        {numericInput}
+        <span className="text-xs text-muted">
+          {field.type === "percentage"
+            ? "%"
+            : field.type === "quantity"
+              ? field.unit || ""
+              : ""}
+        </span>
+      </div>
+    );
+  }
+  return numericInput;
+}
+
+function renderEditor(
+  entry: Entry,
+  field: TrackerField,
+  saving: boolean,
+  onSave: (entry: Entry, field: TrackerField, value: TrackerValue) => void,
+) {
+  return (
+    <TrackerEditor
+      entry={entry}
+      field={field}
+      saving={saving}
+      onSave={onSave}
+    />
+  );
+}
+
+function SavedViewEditor({
+  fields,
+  draft,
+  onChange,
+}: {
+  fields: TrackerField[];
+  draft: TrackerSavedView;
+  onChange: (view: TrackerSavedView) => void;
+}) {
+  const operators: Array<{ value: TrackerRuleOperator; label: string }> = [
+    { value: "equals", label: "equals" },
+    { value: "not_equals", label: "does not equal" },
+    { value: "is_empty", label: "is empty" },
+    { value: "is_not_empty", label: "is not empty" },
+    { value: "contains", label: "contains" },
+    { value: "not_contains", label: "does not contain" },
+    { value: "greater_than", label: "greater than" },
+    { value: "greater_than_or_equal", label: "at least" },
+    { value: "less_than", label: "less than" },
+    { value: "less_than_or_equal", label: "at most" },
+  ];
+  const updateGroup = (patch: Partial<TrackerConditionGroup>) =>
+    onChange({
+      ...draft,
+      conditionGroup: { ...draft.conditionGroup, ...patch },
+    });
+  const choicesFor = (field?: TrackerField) =>
+    field?.type === "toggle" ? ["Yes", "No"] : field?.options || [];
+
+  return (
+    <div className="space-y-5 p-5">
+      <label className="block">
+        <span className="mb-1 block text-sm font-medium text-default">
+          View name
+        </span>
+        <input
+          autoFocus
+          value={draft.name}
+          onChange={(event) => onChange({ ...draft, name: event.target.value })}
+          placeholder="Example: Purchase pending, sale received"
+          className="w-full rounded-xl border border-base bg-surface px-3 py-2 text-sm"
+        />
+      </label>
+
+      <div className="rounded-xl border border-base bg-surface p-3">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-default">
+              Include clients when
+            </p>
+            <p className="text-xs text-muted">
+              ALL requires every condition. ANY requires at least one condition.
+            </p>
+          </div>
+          <select
+            value={draft.conditionGroup.mode}
+            onChange={(event) =>
+              updateGroup({ mode: event.target.value as "ALL" | "ANY" })
+            }
+            className="rounded-lg border border-base bg-card px-2 py-1.5 text-sm"
+          >
+            <option value="ALL">ALL conditions</option>
+            <option value="ANY">ANY condition</option>
+          </select>
+        </div>
+
+        <div className="space-y-2">
+          {draft.conditionGroup.conditions.map((condition, index) => {
+            const field = fields.find(
+              (item) => item.key === condition.fieldKey,
+            );
+            const choices = choicesFor(field);
+            const needsValue = !["is_empty", "is_not_empty"].includes(
+              condition.operator,
+            );
+            return (
+              <div
+                key={index}
+                className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_160px_minmax(0,1fr)_auto]"
+              >
+                <select
+                  value={condition.fieldKey}
+                  onChange={(event) => {
+                    const conditions = [...draft.conditionGroup.conditions];
+                    conditions[index] = {
+                      fieldKey: event.target.value,
+                      operator: "equals",
+                      value: "",
+                    };
+                    updateGroup({ conditions });
+                  }}
+                  className="rounded-lg border border-base bg-card px-2 py-2 text-sm"
+                >
+                  {fields.map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={condition.operator}
+                  onChange={(event) => {
+                    const conditions = [...draft.conditionGroup.conditions];
+                    conditions[index] = {
+                      ...condition,
+                      operator: event.target.value as TrackerRuleOperator,
+                    };
+                    updateGroup({ conditions });
+                  }}
+                  className="rounded-lg border border-base bg-card px-2 py-2 text-sm"
+                >
+                  {operators.map((operator) => (
+                    <option key={operator.value} value={operator.value}>
+                      {operator.label}
+                    </option>
+                  ))}
+                </select>
+                {needsValue ? (
+                  choices.length ? (
+                    <select
+                      value={String(condition.value ?? "")}
+                      onChange={(event) => {
+                        const conditions = [...draft.conditionGroup.conditions];
+                        conditions[index] = {
+                          ...condition,
+                          value: event.target.value,
+                        };
+                        updateGroup({ conditions });
+                      }}
+                      className="rounded-lg border border-base bg-card px-2 py-2 text-sm"
+                    >
+                      <option value="">Choose value</option>
+                      {choices.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={
+                        field?.type === "number"
+                          ? "number"
+                          : field?.type === "date"
+                            ? "date"
+                            : "text"
+                      }
+                      value={String(condition.value ?? "")}
+                      onChange={(event) => {
+                        const conditions = [...draft.conditionGroup.conditions];
+                        conditions[index] = {
+                          ...condition,
+                          value: event.target.value,
+                        };
+                        updateGroup({ conditions });
+                      }}
+                      placeholder="Value"
+                      className="rounded-lg border border-base bg-card px-2 py-2 text-sm"
+                    />
+                  )
+                ) : (
+                  <span className="rounded-lg bg-card px-2 py-2 text-xs text-faint">
+                    No value needed
+                  </span>
+                )}
+                <button
+                  type="button"
+                  disabled={draft.conditionGroup.conditions.length === 1}
+                  onClick={() =>
+                    updateGroup({
+                      conditions: draft.conditionGroup.conditions.filter(
+                        (_, itemIndex) => itemIndex !== index,
+                      ),
+                    })
+                  }
+                  className="px-1 text-sm text-rose-600 disabled:opacity-30"
+                  aria-label="Remove condition"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          disabled={
+            draft.conditionGroup.conditions.length >= 12 || !fields.length
+          }
+          onClick={() =>
+            updateGroup({
+              conditions: [
+                ...draft.conditionGroup.conditions,
+                {
+                  fieldKey: fields[0]?.key || "",
+                  operator: "equals",
+                  value: "",
+                },
+              ],
+            })
+          }
+          className="mt-3 text-sm font-medium text-blue-600 disabled:opacity-50"
+        >
+          + Add condition
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ComputedFieldSettings({
+  field,
+  availableFields,
+  onChange,
+}: {
+  field: TrackerField;
+  availableFields: TrackerField[];
+  onChange: (patch: Partial<TrackerField>) => void;
+}) {
+  const computed = field.computed!;
+  const sourceFields = availableFields.filter(
+    (item) => item.key && item.key !== field.key && !item.computed,
+  );
+  const typeFor = (kind: TrackerComputedKind): TrackerFieldType =>
+    kind === "percentage" || kind === "difference"
+      ? "number"
+      : kind === "combinedStatus"
+        ? "select"
+        : "text";
+  const defaultGroup: TrackerConditionGroup = {
+    mode: "ALL",
+    conditions: [
+      { fieldKey: sourceFields[0]?.key || "", operator: "equals", value: "" },
+    ],
+  };
+  const conditionGroup = computed.conditionGroup || defaultGroup;
+  const patchComputed = (next: TrackerComputed) =>
+    onChange({
+      computed: next,
+      type: typeFor(next.kind),
+      options:
+        next.kind === "combinedStatus"
+          ? [next.matchedLabel || "Ready", next.fallbackLabel || "Pending"]
+          : undefined,
+      optionInput: undefined,
+    });
+  const selectOptions = (candidate?: TrackerField) =>
+    candidate?.type === "toggle" ? ["Yes", "No"] : candidate?.options || [];
+  const operators: Array<{ value: TrackerRuleOperator; label: string }> = [
+    { value: "equals", label: "equals" },
+    { value: "not_equals", label: "does not equal" },
+    { value: "is_empty", label: "is empty" },
+    { value: "is_not_empty", label: "is not empty" },
+    { value: "contains", label: "contains" },
+    { value: "not_contains", label: "does not contain" },
+    { value: "greater_than", label: "greater than" },
+    { value: "greater_than_or_equal", label: "at least" },
+    { value: "less_than", label: "less than" },
+    { value: "less_than_or_equal", label: "at most" },
+  ];
+  const updateConditions = (patch: Partial<TrackerConditionGroup>) =>
+    patchComputed({
+      ...computed,
+      kind: "combinedStatus",
+      conditionGroup: { ...conditionGroup, ...patch },
+    });
+
+  return (
+    <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/50 p-3 dark:border-violet-900/50 dark:bg-violet-950/20">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-violet-800 dark:text-violet-200">
+          COMPUTED
+        </span>
+        <select
+          value={computed.kind}
+          onChange={(event) => {
+            const kind = event.target.value as TrackerComputedKind;
+            const primary = sourceFields[0]?.key || "";
+            const secondary =
+              sourceFields[1]?.key || sourceFields[0]?.key || "";
+            patchComputed(
+              kind === "combinedStatus"
+                ? {
+                    kind,
+                    conditionGroup: defaultGroup,
+                    matchedLabel: "Ready",
+                    fallbackLabel: "Pending",
+                  }
+                : {
+                    kind,
+                    primaryFieldKey: primary,
+                    secondaryFieldKey: secondary,
+                  },
+            );
+          }}
+          className="rounded-lg border border-base bg-card px-2 py-1 text-xs"
+        >
+          <option value="percentage">Coverage percentage</option>
+          <option value="difference">Upload difference</option>
+          <option value="progress">Progress</option>
+          <option value="combinedStatus">Combined status</option>
+        </select>
+      </div>
+
+      {computed.kind !== "combinedStatus" ? (
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <label className="text-xs text-muted">
+            {computed.kind === "difference"
+              ? "Expected quantity"
+              : computed.kind === "progress"
+                ? "Completed"
+                : "Covered"}
+            <select
+              value={computed.primaryFieldKey || ""}
+              onChange={(event) =>
+                patchComputed({
+                  ...computed,
+                  primaryFieldKey: event.target.value,
+                })
+              }
+              className="mt-1 w-full rounded-lg border border-base bg-card px-2 py-1.5 text-sm text-default"
+            >
+              <option value="">Choose column</option>
+              {sourceFields.map((item) => (
+                <option key={item.key} value={item.key}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-muted">
+            {computed.kind === "difference"
+              ? "Uploaded quantity"
+              : computed.kind === "progress"
+                ? "Total steps"
+                : "Required"}
+            <select
+              value={computed.secondaryFieldKey || ""}
+              onChange={(event) =>
+                patchComputed({
+                  ...computed,
+                  secondaryFieldKey: event.target.value,
+                })
+              }
+              className="mt-1 w-full rounded-lg border border-base bg-card px-2 py-1.5 text-sm text-default"
+            >
+              <option value="">Choose column</option>
+              {sourceFields.map((item) => (
+                <option key={item.key} value={item.key}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : (
+        <div className="mt-3 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs text-muted">
+              Return the matched label when these conditions are true.
+            </span>
+            <select
+              value={conditionGroup.mode}
+              onChange={(event) =>
+                updateConditions({ mode: event.target.value as "ALL" | "ANY" })
+              }
+              className="rounded-lg border border-base bg-card px-2 py-1 text-xs"
+            >
+              <option value="ALL">ALL conditions</option>
+              <option value="ANY">ANY condition</option>
+            </select>
+          </div>
+          {conditionGroup.conditions.map((condition, index) => {
+            const source = sourceFields.find(
+              (item) => item.key === condition.fieldKey,
+            );
+            const values = selectOptions(source);
+            const needsValue = !["is_empty", "is_not_empty"].includes(
+              condition.operator,
+            );
+            return (
+              <div
+                key={index}
+                className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_145px_minmax(0,1fr)_auto]"
+              >
+                <select
+                  value={condition.fieldKey}
+                  onChange={(event) => {
+                    const conditions = [...conditionGroup.conditions];
+                    conditions[index] = {
+                      fieldKey: event.target.value,
+                      operator: "equals",
+                      value: "",
+                    };
+                    updateConditions({ conditions });
+                  }}
+                  className="rounded-lg border border-base bg-card px-2 py-1.5 text-xs"
+                >
+                  {sourceFields.map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={condition.operator}
+                  onChange={(event) => {
+                    const conditions = [...conditionGroup.conditions];
+                    conditions[index] = {
+                      ...condition,
+                      operator: event.target.value as TrackerRuleOperator,
+                    };
+                    updateConditions({ conditions });
+                  }}
+                  className="rounded-lg border border-base bg-card px-2 py-1.5 text-xs"
+                >
+                  {operators.map((operator) => (
+                    <option key={operator.value} value={operator.value}>
+                      {operator.label}
+                    </option>
+                  ))}
+                </select>
+                {needsValue ? (
+                  values.length ? (
+                    <select
+                      value={String(condition.value ?? "")}
+                      onChange={(event) => {
+                        const conditions = [...conditionGroup.conditions];
+                        conditions[index] = {
+                          ...condition,
+                          value: event.target.value,
+                        };
+                        updateConditions({ conditions });
+                      }}
+                      className="rounded-lg border border-base bg-card px-2 py-1.5 text-xs"
+                    >
+                      <option value="">Choose value</option>
+                      {values.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={
+                        source?.type === "number"
+                          ? "number"
+                          : source?.type === "date"
+                            ? "date"
+                            : "text"
+                      }
+                      value={String(condition.value ?? "")}
+                      onChange={(event) => {
+                        const conditions = [...conditionGroup.conditions];
+                        conditions[index] = {
+                          ...condition,
+                          value: event.target.value,
+                        };
+                        updateConditions({ conditions });
+                      }}
+                      placeholder="Value"
+                      className="rounded-lg border border-base bg-card px-2 py-1.5 text-xs"
+                    />
+                  )
+                ) : (
+                  <span className="rounded-lg bg-card px-2 py-1.5 text-xs text-faint">
+                    No value needed
+                  </span>
+                )}
+                <button
+                  type="button"
+                  disabled={conditionGroup.conditions.length === 1}
+                  onClick={() =>
+                    updateConditions({
+                      conditions: conditionGroup.conditions.filter(
+                        (_, itemIndex) => itemIndex !== index,
+                      ),
+                    })
+                  }
+                  className="text-sm text-rose-600 disabled:opacity-30"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+          <button
+            type="button"
+            disabled={
+              conditionGroup.conditions.length >= 12 || !sourceFields.length
+            }
+            onClick={() =>
+              updateConditions({
+                conditions: [
+                  ...conditionGroup.conditions,
+                  {
+                    fieldKey: sourceFields[0]?.key || "",
+                    operator: "equals",
+                    value: "",
+                  },
+                ],
+              })
+            }
+            className="text-xs font-medium text-blue-600 disabled:opacity-50"
+          >
+            + Add condition
+          </button>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input
+              value={computed.matchedLabel || "Ready"}
+              onChange={(event) =>
+                patchComputed({ ...computed, matchedLabel: event.target.value })
+              }
+              placeholder="Matched label"
+              className="rounded-lg border border-base bg-card px-2 py-1.5 text-xs"
+            />
+            <input
+              value={computed.fallbackLabel || "Pending"}
+              onChange={(event) =>
+                patchComputed({
+                  ...computed,
+                  fallbackLabel: event.target.value,
+                })
+              }
+              placeholder="Fallback label"
+              className="rounded-lg border border-base bg-card px-2 py-1.5 text-xs"
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

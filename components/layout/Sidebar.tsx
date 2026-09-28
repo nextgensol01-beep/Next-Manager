@@ -43,6 +43,7 @@ const navItems = [
   { href: "/dashboard/financial-year",      label: "Financial Year",      icon: Calendar },
   { href: "/dashboard/credit-transactions", label: "Credit Transactions", icon: ArrowLeftRight },
   { href: "/dashboard/annual-return",       label: "EPR Annual Return",   icon: ClipboardCheck },
+  { href: "/dashboard/client-trackers",     label: "Client Trackers",     icon: ClipboardCheck },
   { href: "/dashboard/billing",             label: "Billing & Payments",  icon: Receipt },
   { href: "/dashboard/reports",             label: "Reports",             icon: BarChart2 },
   { href: "/dashboard/quotations",          label: "Quotations",           icon: FileText },

@@ -5,14 +5,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { isAdminSession } from "@/lib/authUsers";
 import { google } from "googleapis";
 
-const SCOPES = ["https://www.googleapis.com/auth/gmail.compose"];
+const SCOPES = [
+  "https://www.googleapis.com/auth/gmail.compose",
+  "https://www.googleapis.com/auth/gmail.settings.basic",
+  "https://www.googleapis.com/auth/gmail.readonly",
+];
 const REDIRECT_URI = "https://developers.google.com/oauthplayground";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!await isAdminSession(session)) return NextResponse.json({ error: "Administrator access required for Gmail setup." }, { status: 403 });
 
   const clientId     = process.env.GMAIL_OAUTH_CLIENT_ID;
   const clientSecret = process.env.GMAIL_OAUTH_CLIENT_SECRET;

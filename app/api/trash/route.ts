@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import DeletedRecord from "@/models/DeletedRecord";
+import { clientCredentialAccess } from "@/lib/server/client-credentials";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -17,7 +18,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ count });
     }
     const records = await DeletedRecord.find(query).sort({ deletedAt: -1 }).limit(200).lean();
-    return NextResponse.json(records);
+    const access = await clientCredentialAccess(session);
+    return NextResponse.json(records.map((record) => {
+      if (record.recordType !== "client" || !record.data?.client) return record;
+      return { ...record, data: { ...record.data, client: access.read(record.data.client) } };
+    }));
   } catch (error) {
     console.error("GET /api/trash:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

@@ -23,6 +23,7 @@ const TYPE_LABELS: Record<string, { label: string; color: string }> = {
   quotation:           { label: "Quotation",  color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
   payment_reminder:    { label: "Reminder",   color: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" },
   annual_return_draft: { label: "AR Draft",   color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" },
+  tracker:             { label: "Tracker",    color: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300" },
   custom:              { label: "Custom",     color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" },
 };
 
@@ -122,6 +123,7 @@ export default function EmailHistoryPage() {
             { key: "quotation",          label: "Quotations",count: counts.quotation || 0 },
             { key: "payment_reminder",   label: "Reminders", count: counts.payment_reminder || 0 },
             { key: "annual_return_draft",label: "AR Drafts", count: counts.annual_return_draft || 0 },
+            { key: "tracker",            label: "Trackers", count: counts.tracker || 0 },
             { key: "custom",             label: "Custom",    count: counts.custom || 0 },
           ].map(({ key, label, count }) => (
             <button key={key} onClick={() => setTypeFilter(key)}

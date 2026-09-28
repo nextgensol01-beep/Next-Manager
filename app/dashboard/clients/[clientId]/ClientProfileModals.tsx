@@ -38,6 +38,7 @@ type PaymentForm = {
   amountPaid: string;
   paymentDate: string;
   paymentMode: string;
+  billingId: string;
   paymentType: "billing" | "advance";
   referenceNumber: string;
   notes: string;
@@ -102,6 +103,7 @@ interface ClientProfileModalsProps {
   savePayment: (event: React.FormEvent) => void;
   paymentForm: PaymentForm;
   setPaymentForm: SetState<PaymentForm>;
+  billingOptions: Array<{ _id: string; billTitle?: string; billType?: "annual_return" | "general"; totalAmount: number; pendingAmount: number }>;
   breakdownRec: FYRecord | null;
   setBreakdownRec: SetState<FYRecord | null>;
   makeBreakdownProps: (record: FYRecord) => BreakdownProps;
@@ -158,6 +160,7 @@ export default function ClientProfileModals({
   savePayment,
   paymentForm,
   setPaymentForm,
+  billingOptions,
   breakdownRec,
   setBreakdownRec,
   makeBreakdownProps,
@@ -433,7 +436,10 @@ export default function ClientProfileModals({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Payment Type *</label>
-              <select className="input-field" value={paymentForm.paymentType} onChange={(e) => setPaymentForm({ ...paymentForm, paymentType: e.target.value === "advance" ? "advance" : "billing" })}>
+              <select className="input-field" value={paymentForm.paymentType} onChange={(e) => {
+                const paymentType = e.target.value === "advance" ? "advance" : "billing";
+                setPaymentForm({ ...paymentForm, paymentType, billingId: paymentType === "billing" ? (paymentForm.billingId || billingOptions[0]?._id || "") : "" });
+              }}>
                 <option value="billing">Billing Payment</option>
                 <option value="advance">Advance Payment</option>
               </select>
@@ -445,6 +451,25 @@ export default function ClientProfileModals({
               </select>
             </div>
           </div>
+          {paymentForm.paymentType === "billing" && (
+            <div>
+              <label className="label">Billing record *</label>
+              <select
+                className="input-field"
+                value={paymentForm.billingId}
+                onChange={(e) => setPaymentForm({ ...paymentForm, billingId: e.target.value })}
+                required
+              >
+                <option value="">Select billing</option>
+                {billingOptions.map((billing) => (
+                  <option key={billing._id} value={billing._id}>
+                    {(billing.billTitle || (billing.billType === "general" ? "General Bill" : "Annual Return Filing"))} · {formatCurrency(billing.pendingAmount)} pending
+                  </option>
+                ))}
+              </select>
+              {billingOptions.length === 0 && <p className="mt-1 text-xs text-amber-600">No bill is available for this FY. Record this amount as an advance instead.</p>}
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="label">Amount Paid *</label><input type="number" className="input-field" value={paymentForm.amountPaid} onChange={(e) => setPaymentForm({ ...paymentForm, amountPaid: e.target.value })} required min="1" step="0.01" placeholder="0.00" /></div>
             <div><label className="label">Payment Date *</label><input type="date" className="input-field" value={paymentForm.paymentDate} onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })} required /></div>

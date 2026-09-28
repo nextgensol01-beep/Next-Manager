@@ -27,6 +27,7 @@ const UploadRecordSchema = new Schema<IUploadRecord>(
 );
 
 UploadRecordSchema.index({ clientId: 1, financialYear: 1 });
+UploadRecordSchema.index({ clientId: 1, financialYear: 1, uploadType: 1 });
 
 export default mongoose.models.UploadRecord ||
   mongoose.model<IUploadRecord>("UploadRecord", UploadRecordSchema);

@@ -15,10 +15,14 @@ const createDraftSchema = z.object({
     mimeType: z.string().trim().min(1).max(120),
     contentBase64: z.string().min(1),
   })).max(5).optional(),
-  logType: z.enum(["quotation", "payment_reminder", "annual_return_draft", "custom"]).default("annual_return_draft"),
+  logType: z.enum(["quotation", "payment_reminder", "annual_return_draft", "custom", "tracker"]).default("annual_return_draft"),
   logClientId: z.string().trim().max(120).optional(),
   logClientName: z.string().trim().max(200).optional(),
   logFy: z.string().trim().max(20).optional(),
+  trackerId: z.string().trim().max(80).optional(),
+  workflowId: z.string().trim().max(80).optional(),
+  mailKind: z.enum(["initial", "reminder"]).optional(),
+  mode: z.enum(["draft", "send"]).default("draft"),
 });
 
 type DraftAttachment = {
@@ -29,6 +33,15 @@ type DraftAttachment = {
 
 function sanitizeHeaderValue(value: string) {
   return value.replace(/[\r\n"]/g, "").trim();
+}
+
+/** Keep the Gmail signature inside the same document as the generated body. */
+function appendGmailSignature(html: string, signature: string) {
+  if (!signature) return html;
+  const replacement = `<br><br>${signature}</body></html>`;
+  return /<\/body>\s*<\/html>\s*$/i.test(html)
+    ? html.replace(/<\/body>\s*<\/html>\s*$/i, replacement)
+    : `${html}<br><br>${signature}`;
 }
 
 function buildRawEmail(
@@ -92,11 +105,10 @@ function buildRawEmail(
   return Buffer.from(mime).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function createGmailDraft(
+async function getGmailAccessToken(
   clientId: string,
   clientSecret: string,
   refreshToken: string,
-  rawEmail: string,
 ) {
   const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -115,25 +127,46 @@ async function createGmailDraft(
     if (tokenData.error === "invalid_grant") error.name = "InvalidGrantError";
     throw error;
   }
+  return tokenData.access_token;
+}
 
-  const draftResponse = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
+async function getGmailDefaultSignature(accessToken: string, gmailUser: string) {
+  const signatureResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs/${encodeURIComponent(gmailUser)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  const signatureData = await signatureResponse.json() as { signature?: string; error?: { message?: string } };
+  if (!signatureResponse.ok) {
+    throw new Error(signatureData.error?.message || "Unable to read the Gmail default signature. Reconnect Gmail to grant signature access.");
+  }
+  return typeof signatureData.signature === "string" ? signatureData.signature.trim() : "";
+}
+
+async function createGmailDelivery(
+  accessToken: string,
+  rawEmail: string,
+  mode: "draft" | "send",
+) {
+  const draftResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/${mode === "send" ? "messages/send" : "drafts"}`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${tokenData.access_token}`,
+      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ message: { raw: rawEmail } }),
+    // Gmail's send endpoint accepts { raw }; the drafts endpoint accepts
+    // { message: { raw } }. Sending draft-shaped data causes a 400 error.
+    body: JSON.stringify(mode === "send" ? { raw: rawEmail } : { message: { raw: rawEmail } }),
     cache: "no-store",
   });
   const draftData = await draftResponse.json() as { id?: string; error?: { message?: string } };
   if (!draftResponse.ok) {
-    throw new Error(draftData.error?.message || "Gmail rejected the draft");
+    throw new Error(draftData.error?.message || `Gmail rejected the ${mode}`);
   }
   return draftData.id || "";
 }
 
-async function logDraft(input: {
-  logType: "quotation" | "payment_reminder" | "annual_return_draft" | "custom";
+async function logDelivery(input: {
+  logType: "quotation" | "payment_reminder" | "annual_return_draft" | "custom" | "tracker";
   toList: string[];
   ccList: string[];
   subject: string;
@@ -141,6 +174,10 @@ async function logDraft(input: {
   logClientName?: string;
   logFy?: string;
   draftId: string;
+  mode: "draft" | "send";
+  trackerId?: string;
+  workflowId?: string;
+  mailKind?: "initial" | "reminder";
 }) {
   try {
     await connectDB();
@@ -151,11 +188,14 @@ async function logDraft(input: {
       clientId: input.logClientId || "",
       clientName: input.logClientName || "",
       financialYear: input.logFy || "",
-      status: "draft",
-      notes: `To: ${input.toList.join(", ")}${input.ccList.length > 0 ? ` | Cc: ${input.ccList.join(", ")}` : ""}. Draft ID: ${input.draftId}`,
+      status: input.mode === "send" ? "sent" : "draft",
+      trackerId: input.trackerId || "",
+      workflowId: input.workflowId || "",
+      mailKind: input.mailKind || "initial",
+      notes: `To: ${input.toList.join(", ")}${input.ccList.length > 0 ? ` | Cc: ${input.ccList.join(", ")}` : ""}. ${input.mode === "send" ? "Message" : "Draft"} ID: ${input.draftId}`,
     });
   } catch (error) {
-    console.error("Failed to log Gmail draft:", error);
+    console.error("Failed to log Gmail delivery:", error);
   }
 }
 
@@ -167,7 +207,7 @@ export async function POST(req: NextRequest) {
   if (!parsedBody.success) {
     return NextResponse.json({ error: parsedBody.error.issues.map((issue) => issue.message).join("; ") }, { status: 400 });
   }
-  const { to, cc, subject, html, attachments = [], logType, logClientId, logClientName, logFy } = parsedBody.data;
+  const { to, cc, subject, html, attachments = [], logType, logClientId, logClientName, logFy, trackerId, workflowId, mailKind, mode } = parsedBody.data;
 
   const clientId     = process.env.GMAIL_OAUTH_CLIENT_ID;
   const clientSecret = process.env.GMAIL_OAUTH_CLIENT_SECRET;
@@ -193,10 +233,13 @@ export async function POST(req: NextRequest) {
     const ccList = Array.from(new Set(explicitCcList))
       .filter(email => !toList.includes(email));
 
-    const rawEmail = buildRawEmail(toList, ccList, subject, html, gmailUser, attachments);
-    const draftId = await createGmailDraft(clientId, clientSecret, refreshToken, rawEmail);
+    const accessToken = await getGmailAccessToken(clientId, clientSecret, refreshToken);
+    const defaultSignature = await getGmailDefaultSignature(accessToken, gmailUser);
+    const htmlWithSignature = appendGmailSignature(html, defaultSignature);
+    const rawEmail = buildRawEmail(toList, ccList, subject, htmlWithSignature, gmailUser, attachments);
+    const draftId = await createGmailDelivery(accessToken, rawEmail, mode);
 
-    after(logDraft({
+    after(logDelivery({
       logType,
       toList,
       ccList,
@@ -205,13 +248,17 @@ export async function POST(req: NextRequest) {
       logClientName,
       logFy,
       draftId,
+      mode,
+      trackerId,
+      workflowId,
+      mailKind,
     }));
 
-    const draftUrl = draftId
+    const draftUrl = mode === "draft" && draftId
       ? `https://mail.google.com/mail/#drafts/${draftId}`
       : "https://mail.google.com/mail/#drafts";
 
-    return NextResponse.json({ success: true, draftUrl, draftId, toList, ccList });
+    return NextResponse.json({ success: true, mode, draftUrl, draftId, toList, ccList });
 
   } catch (err: unknown) {
     const error = err as { message?: string; name?: string };

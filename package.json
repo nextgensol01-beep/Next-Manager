@@ -12,6 +12,7 @@
     "verify:report-interactions": "node scripts/verify-report-interactions.cjs",
     "verify:report-custom-fields": "node scripts/verify-report-custom-fields.cjs",
     "verify:quotation-additional-items": "node scripts/verify-quotation-additional-items.cjs",
+    "verify:client-form": "node scripts/verify-client-form.cjs",
     "resync:client-ids": "node scripts/resync-client-id-counters.js"
   },
   "dependencies": {

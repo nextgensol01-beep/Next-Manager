@@ -1470,6 +1470,7 @@ export default function ClientsPage() {
     formPersons: PersonEntry[],
     removedIds: string[]
   ) => {
+    if (saving) return;
     setSaving(true);
     try {
       const url = editClient ? `/api/clients/${editClient.clientId}` : "/api/clients";
@@ -1552,6 +1553,8 @@ export default function ClientsPage() {
       setModalOpen(false);
       invalidate("/api/clients", "/api/dashboard");
       refreshClients();
+    } catch {
+      toast.error("Unable to save. Check your connection and try again.");
     } finally {
       setSaving(false);
     }

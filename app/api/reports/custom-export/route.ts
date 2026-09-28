@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   try {
     await connectDB();
     const body = await req.json();
-    const result = await buildCustomClientExportData(body);
+    const result = await buildCustomClientExportData(body, session);
 
     if (result.fields.length === 0) {
       return NextResponse.json({ error: "No non-empty fields matched the current filters" }, { status: 400 });

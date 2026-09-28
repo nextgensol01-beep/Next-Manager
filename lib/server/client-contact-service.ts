@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+import { clientCredentialAccess, decryptClientSecret, encryptClientSecret } from "@/lib/server/client-credentials";
 import DeletedRecord from "@/models/DeletedRecord";
 import Client from "@/models/Client";
 import ClientContact from "@/models/ClientContact";
@@ -30,6 +32,10 @@ import {
 } from "@/lib/currentFyRegistration";
 
 type MaybeId = { toString(): string } | string;
+
+// All Mongoose operations inside connection.transaction share its session,
+// including the ID counter, person records, and company contact links.
+mongoose.set("transactionAsyncLocalStorage", true);
 
 type PersonRecord = {
   _id: MaybeId;
@@ -201,19 +207,20 @@ async function getClientDocumentSummaryMap(clientIds: string[]) {
 }
 
 async function getSearchableCustomFieldConditions(search: string) {
+  const { protectedKeys } = await clientCredentialAccess(null);
   const definitions = (await ClientCustomField.find({ active: true, searchable: true })
     .select("key")
     .lean()) as Array<{ key?: string }>;
 
   const customFieldPaths = definitions
     .map((definition) => (typeof definition.key === "string" ? definition.key.trim() : ""))
-    .filter((key) => Boolean(key) && key !== "legalName")
+    .filter((key) => Boolean(key) && key !== "legalName" && !protectedKeys.has(key))
     .map((key) => `customFields.${key}`);
 
   return buildSearchFieldConditions(customFieldPaths, search);
 }
 
-async function normalizeClientCustomFields(input: unknown, existingValues: unknown = {}, clientCategory = "") {
+async function normalizeClientCustomFields(input: unknown, existingValues: unknown = {}, clientCategory = "", excludedKeys: Set<string> = new Set()) {
   const definitions = await getActiveClientCustomFields();
   const rawValues = input && typeof input === "object" && !Array.isArray(input)
     ? input as Record<string, unknown>
@@ -230,12 +237,16 @@ async function normalizeClientCustomFields(input: unknown, existingValues: unkno
       !definition.applicableCategories.includes(clientCategory)
     ) continue;
 
-    const normalizedValue = normalizeCustomFieldValue(definition, rawValues[definition.key]);
-    if (definition.required && customFieldValueIsEmpty(definition, normalizedValue)) {
+    const supplied = Object.prototype.hasOwnProperty.call(rawValues, definition.key);
+    const current = supplied ? rawValues[definition.key] : values[definition.key];
+    const normalizedValue = definition.type === "password"
+      ? (supplied ? String(current ?? "") : decryptClientSecret(current))
+      : normalizeCustomFieldValue(definition, current);
+    if (definition.required && definition.showInForm !== false && !excludedKeys.has(definition.key) && customFieldValueIsEmpty(definition, normalizedValue)) {
       throw new Error(`${definition.label} is required`);
     }
 
-    values[definition.key] = normalizedValue;
+    values[definition.key] = definition.type === "password" ? encryptClientSecret(String(normalizedValue)) : normalizedValue;
   }
 
   return values;
@@ -289,7 +300,7 @@ const pickClientFields = (body: Record<string, unknown>) => {
     if (!(key in body)) continue;
 
     if (key === "cpcbPassword") {
-      fields[key] = typeof body[key] === "string" ? body[key] : "";
+      fields[key] = encryptClientSecret(typeof body[key] === "string" ? body[key] : "");
       continue;
     }
 
@@ -408,12 +419,10 @@ async function resolvePersonRecord(input: ClientPersonInput, index?: number) {
     const existingPerson = await Person.findById(personId);
     if (existingPerson) {
       usedExistingPerson = true;
-      existingPerson.name = name || existingPerson.name;
-      existingPerson.phoneNumbers = unique([...existingPerson.phoneNumbers, ...phoneNumbers]);
-      existingPerson.emails = unique([...existingPerson.emails, ...emails]);
-      await existingPerson.save();
-      availablePhones = normalizePhoneList(existingPerson.phoneNumbers);
-      availableEmails = normalizeEmailList(existingPerson.emails);
+      // Explicitly editing a linked person replaces their shared details.
+      await updatePersonProfile(personId!, { name, phoneNumbers, emails });
+      availablePhones = phoneNumbers;
+      availableEmails = emails;
     } else {
       personId = undefined;
     }
@@ -545,8 +554,12 @@ export async function syncClientPersons(clientId: string, persons: ClientPersonI
     await ClientContact.deleteMany({ clientId, personId: { $in: removedPersonIds } });
   }
 
+  const seen = new Set<string>();
+  const primaryIndex = Math.max(0, persons.findIndex((person) => person.isPrimaryContact));
   for (let index = 0; index < persons.length; index += 1) {
-    await upsertCompanyContactLink(clientId, persons[index], index);
+    const contact = await upsertCompanyContactLink(clientId, { ...persons[index], isPrimaryContact: index === primaryIndex }, index);
+    if (contact && seen.has(contact.personId)) throw new Error("Each contact must be linked only once");
+    if (contact) seen.add(contact.personId);
   }
 }
 
@@ -933,7 +946,11 @@ export async function getClientWithContacts(clientId: string) {
   return { ...client.toObject(), contacts };
 }
 
-export async function createClientRecord(body: Record<string, unknown>) {
+export async function createClientRecord(body: Record<string, unknown>, excludedKeys: Set<string> = new Set()) {
+  return mongoose.connection.transaction(async () => createClientRecordInTransaction(body, excludedKeys));
+}
+
+async function createClientRecordInTransaction(body: Record<string, unknown>, excludedKeys: Set<string>) {
   const { persons, removedPersonIds, contactIds, contactId, ...rest } = body;
   void removedPersonIds;
   void contactIds;
@@ -959,7 +976,7 @@ export async function createClientRecord(body: Record<string, unknown>) {
   const { clientId: ignoredClientId, ...clientData } = clientFields;
   void ignoredClientId;
 
-  const customFields = await normalizeClientCustomFields(body.customFields, {}, clientCategory);
+  const customFields = await normalizeClientCustomFields(body.customFields, {}, clientCategory, excludedKeys);
   const nextClientId = await allocateNextClientId(clientCategory);
   const client = await Client.create({ ...clientData, clientId: nextClientId, customFields });
   await syncClientPersons(
@@ -968,10 +985,14 @@ export async function createClientRecord(body: Record<string, unknown>) {
     []
   );
 
-  return client;
+  return getClientWithContacts(client.clientId);
 }
 
-export async function updateClientRecord(clientId: string, body: Record<string, unknown>) {
+export async function updateClientRecord(clientId: string, body: Record<string, unknown>, excludedKeys: Set<string> = new Set()) {
+  return mongoose.connection.transaction(async () => updateClientRecordInTransaction(clientId, body, excludedKeys));
+}
+
+async function updateClientRecordInTransaction(clientId: string, body: Record<string, unknown>, excludedKeys: Set<string>) {
   const { persons, removedPersonIds, contactIds, contactId, ...rest } = body;
   void contactIds;
   void contactId;
@@ -980,7 +1001,7 @@ export async function updateClientRecord(clientId: string, body: Record<string, 
     throw new Error("clientId cannot be changed");
   }
 
-  const existingClient = await Client.findOne({ clientId }).select("category customFields");
+  const existingClient = await Client.findOne({ clientId }).select("category customFields cpcbPassword");
   if (!existingClient) {
     return null;
   }
@@ -994,7 +1015,8 @@ export async function updateClientRecord(clientId: string, body: Record<string, 
   }
 
   const clientFields = pickClientFields(rest);
-  const customFields = await normalizeClientCustomFields(body.customFields, existingClient.customFields, existingClient.category);
+  if (!("cpcbPassword" in rest)) clientFields.cpcbPassword = encryptClientSecret(decryptClientSecret(existingClient.cpcbPassword));
+  const customFields = await normalizeClientCustomFields(body.customFields, existingClient.customFields, existingClient.category, excludedKeys);
   const client = await Client.findOneAndUpdate(
     { clientId },
     { $set: { ...clientFields, customFields } },

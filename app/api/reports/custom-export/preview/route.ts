@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
   try {
     await connectDB();
     const body = await req.json();
-    const result = await buildCustomClientExportData(body);
+    const result = await buildCustomClientExportData(body, session);
     return NextResponse.json({
       fy: result.fy,
       fields: result.fields,

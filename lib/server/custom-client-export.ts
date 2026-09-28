@@ -10,6 +10,7 @@ import UploadRecord from "@/models/UploadRecord";
 import Document from "@/models/Document";
 import EmailLog from "@/models/EmailLog";
 import ClientCustomField from "@/models/ClientCustomField";
+import { clientCredentialAccess } from "@/lib/server/client-credentials";
 import {
   CUSTOM_CLIENT_EXPORT_FIELDS,
   CUSTOM_EXPORT_CLIENT_CATEGORIES,
@@ -368,7 +369,8 @@ function normalizeRequest(request: CustomClientExportRequest) {
   };
 }
 
-export async function buildCustomClientExportData(request: CustomClientExportRequest): Promise<CustomClientExportResult> {
+export async function buildCustomClientExportData(request: CustomClientExportRequest, session: { user?: unknown } | null = null): Promise<CustomClientExportResult> {
+  const access = await clientCredentialAccess(session);
   const options = normalizeRequest(request);
   if (options.fields.length === 0) {
     throw new Error("Select at least one field to export");
@@ -411,7 +413,7 @@ export async function buildCustomClientExportData(request: CustomClientExportReq
     clientQuery.clientId = { $in: options.clientIds };
   }
 
-  const clients = await Client.find(clientQuery).sort({ companyName: 1 }).lean() as FlatRecord[];
+  const clients = (await Client.find(clientQuery).sort({ companyName: 1 }).lean() as FlatRecord[]).map(access.read);
   const clientIds = clients.map((client) => String(client.clientId || "")).filter(Boolean);
 
   if (clientIds.length === 0) {

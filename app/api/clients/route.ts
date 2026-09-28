@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
+import { clientCredentialAccess } from "@/lib/server/client-credentials";
 import {
   createClientRecord,
   listClientSummaries,
@@ -21,6 +22,7 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   await connectDB();
+  const access = await clientCredentialAccess(session);
 
   const { searchParams } = new URL(req.url);
   const summaryOnly = searchParams.get("summary") === "1";
@@ -65,7 +67,7 @@ export async function GET(req: NextRequest) {
       offset: Number.isFinite(parsedOffset) ? parsedOffset : 0,
     });
 
-    return NextResponse.json(page);
+    return NextResponse.json({ ...page, items: page.items.map(access.read) });
   }
 
   const clients = await listClientsWithContacts({
@@ -76,7 +78,7 @@ export async function GET(req: NextRequest) {
     financialYear: searchParams.get("fy"),
   });
 
-  return NextResponse.json(clients);
+  return NextResponse.json(clients.map(access.read));
 }
 
 export async function POST(req: NextRequest) {
@@ -85,13 +87,15 @@ export async function POST(req: NextRequest) {
 
   try {
     await connectDB();
+    const access = await clientCredentialAccess(session);
     const body = await req.json();
-    const client = await createClientRecord(body);
-    return NextResponse.json(client, { status: 201 });
+    const client = await createClientRecord(access.write(body), access.admin ? new Set() : access.protectedKeys);
+    if (!client) throw new Error("Unable to load saved client");
+    return NextResponse.json(access.read(client), { status: 201 });
   } catch (error: unknown) {
     console.error("POST /api/clients error:", error);
     const message = error instanceof Error ? error.message : "Internal server error";
-    const status = isClientValidationError(message) ? 400 : 500;
+    const status = message.includes("Admin access required") ? 403 : isClientValidationError(message) || message.includes("linked only once") ? 400 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

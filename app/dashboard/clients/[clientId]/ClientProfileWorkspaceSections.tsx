@@ -55,7 +55,7 @@ export type ComplianceSectionId =
 export type FinancialSectionId = "overview" | "quotations" | "billing" | "payments" | "ledger";
 export type DocumentsSectionId = "all" | "targets" | "compliance" | "financial" | "invoices" | "certificates" | "other";
 export type TimelineSectionId = "all" | "compliance" | "financial" | "communications" | "documents" | "system";
-export type NotesTasksSectionId = "notes" | "tasks" | "reminders" | "followUps" | "callsMeetings";
+export type NotesTasksSectionId = "notes" | "tasks" | "trackers" | "reminders" | "followUps" | "callsMeetings";
 export type InvoiceMonthStatus = "Pending" | "Received" | "Partial / Issue" | "Nil / No Invoice";
 export type InvoiceReceivedVia = "hardcopy" | "mail" | "whatsapp" | "excel" | "other";
 
@@ -163,6 +163,7 @@ export const TIMELINE_NAV: Array<ClientProfileSecondaryNavItem<TimelineSectionId
 export const NOTES_TASKS_NAV: Array<ClientProfileSecondaryNavItem<NotesTasksSectionId>> = [
   { id: "notes", label: "Notes", short: "Notes", icon: <ListChecks className="h-4 w-4" /> },
   { id: "tasks", label: "Tasks", short: "Tasks", icon: <ClipboardCheck className="h-4 w-4" /> },
+  { id: "trackers", label: "Trackers", short: "Trackers", icon: <Target className="h-4 w-4" /> },
   { id: "reminders", label: "Reminders", short: "Reminders", icon: <Bell className="h-4 w-4" /> },
   { id: "followUps", label: "Follow-ups", short: "Follow-ups", icon: <CalendarCheck className="h-4 w-4" /> },
   { id: "callsMeetings", label: "Calls / Meetings", short: "Calls", icon: <FileText className="h-4 w-4" /> },

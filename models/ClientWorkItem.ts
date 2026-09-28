@@ -14,6 +14,9 @@ export interface IClientWorkItem extends Document {
   dueAt?: Date;
   completedAt?: Date;
   createdBy?: string;
+  trackerId?: string;
+  campaignId?: string;
+  emailLogId?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -30,6 +33,9 @@ const ClientWorkItemSchema = new Schema<IClientWorkItem>({
   dueAt: Date,
   completedAt: Date,
   createdBy: { type: String, trim: true },
+  trackerId: { type: String, index: true },
+  campaignId: String,
+  emailLogId: String,
 }, { timestamps: true });
 
 ClientWorkItemSchema.index({ clientId: 1, kind: 1, status: 1, dueAt: 1 });

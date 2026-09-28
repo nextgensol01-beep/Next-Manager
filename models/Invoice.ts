@@ -27,6 +27,7 @@ const InvoiceSchema = new Schema<IInvoice>(
 );
 
 InvoiceSchema.index({ clientId: 1, financialYear: 1 });
+InvoiceSchema.index({ clientId: 1, financialYear: 1, invoiceType: 1, toDate: -1 });
 
 export default mongoose.models.Invoice ||
   mongoose.model<IInvoice>("Invoice", InvoiceSchema);

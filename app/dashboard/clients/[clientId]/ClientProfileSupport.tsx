@@ -88,7 +88,7 @@ export interface Billing {
     taxableAmount?: number; gstPercent: number; gstAmount?: number; totalAmount: number;
   }>;
   govtCharges: number; consultancyCharges: number; targetCharges: number; otherCharges: number;
-  notes?: string; dueDate?: string; invoiceNumber?: string; invoiceDate?: string; invoiceAmount?: number;
+  notes?: string; dueDate?: string; invoiceCreated?: boolean; invoiceNumber?: string; invoiceDate?: string; invoiceAmount?: number;
   totalPaid: number; pendingAmount: number; paymentStatus: string;
   updatedAt?: string; createdAt?: string;
 }
@@ -978,7 +978,7 @@ export function PersonEntryCard({
               color: entry.isPrimaryContact ? "var(--color-text)" : "var(--color-text-faint)",
             }}
           >
-            {entry.name ? entry.name.trim()[0].toUpperCase() : (index + 1)}
+            {entry.name.trim().charAt(0).toUpperCase() || (index + 1)}
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-[14px] font-medium leading-tight" style={{ color: "var(--color-text)" }}>
@@ -1053,10 +1053,11 @@ export function PersonEntryCard({
               Edit
             </button>
           )}
-          {total > 1 && (
+          {total > 0 && (
             <button
               type="button"
               onClick={onRemove}
+              aria-label="Remove contact"
               className="w-7 h-7 flex items-center justify-center rounded-full transition-all active:scale-90"
               style={{ color: "var(--color-text-faint)", backgroundColor: "transparent" }}
               onMouseEnter={e => {
@@ -1111,7 +1112,7 @@ export function PersonEntryCard({
             <label className="text-[11px] font-medium uppercase tracking-wide block mb-1.5" style={{ color: "var(--color-text-faint)" }}>Name *</label>
             <PersonSearch
               value={entry.name}
-              onChange={(value) => onChange({ ...entry, name: value, personId: undefined })}
+              onChange={(value) => onChange({ ...entry, name: value })}
               onSelect={handleSelect}
             />
           </div>

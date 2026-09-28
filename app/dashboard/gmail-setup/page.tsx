@@ -119,7 +119,7 @@ export default function GmailSetupPage() {
     <div>
       <PageHeader
         title="Gmail Setup"
-        description="Reconnect Gmail draft access and generate a fresh refresh token for annual return emails."
+        description="Reconnect Gmail draft and signature access, then generate a fresh refresh token for outgoing emails."
       />
 
       {loading ? (
@@ -133,7 +133,7 @@ export default function GmailSetupPage() {
                   <KeyRound className="h-3.5 w-3.5" />
                   Gmail OAuth Recovery
                 </div>
-                <h2 className="text-xl font-semibold text-default">Reconnect Gmail compose access</h2>
+                <h2 className="text-xl font-semibold text-default">Reconnect Gmail compose and signature access</h2>
                 <p className="mt-2 max-w-2xl text-sm text-muted">
                   Use this page when Gmail draft creation says the OAuth token expired or was never configured.
                 </p>
@@ -168,7 +168,7 @@ export default function GmailSetupPage() {
                     <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-faint">Step 1</div>
                     <div className="mt-2 text-sm font-semibold text-default">Open Google consent</div>
                     <p className="mt-1 text-sm text-muted">
-                      Start the Gmail authorisation flow in a new tab and approve access with the Gmail account used for drafts.
+                      Start the Gmail authorisation flow in a new tab and approve access with the Gmail account used for drafts and sending. Its current default signature will be used automatically.
                     </p>
                     <button
                       type="button"

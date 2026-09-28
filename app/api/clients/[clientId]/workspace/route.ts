@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import { getClientWithContacts } from "@/lib/server/client-contact-service";
+import { clientCredentialAccess } from "@/lib/server/client-credentials";
 import { GET as getFinancialYears } from "@/app/api/financial-year/route";
 import { GET as getDocuments } from "@/app/api/documents/route";
 import { GET as getBillings } from "@/app/api/billing/route";
@@ -81,6 +82,7 @@ export async function GET(
 
   try {
     await connectDB();
+    const access = await clientCredentialAccess(session);
     const { clientId } = await params;
     const clientStartedAt = performance.now();
     const clientPromise = getClientWithContacts(clientId).then((client) => ({
@@ -124,7 +126,7 @@ export async function GET(
 
     return NextResponse.json(
       {
-        client: clientResult.client,
+        client: access.read(clientResult.client),
         financialYears: dataBySection.financialYears || [],
         documents: dataBySection.documents || [],
         billings: dataBySection.billings || [],

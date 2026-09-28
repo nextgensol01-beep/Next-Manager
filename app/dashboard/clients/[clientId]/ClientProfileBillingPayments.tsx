@@ -4,7 +4,7 @@ import { PaymentStatusBadge } from "@/components/ui/CategoryBadge";
 import { PendingChip, pendingRowClass } from "@/components/ui/PendingIndicator";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { WithPending } from "@/lib/usePendingList";
-import { AlertCircle, ArrowDownLeft, CheckCircle2, Clock3, IndianRupee, Pencil, Plus, Receipt, Send, Trash2, Wallet } from "lucide-react";
+import { AlertCircle, ArrowDownLeft, ArrowLeftRight, CheckCircle2, Clock3, FileText, IndianRupee, Pencil, Plus, Receipt, Send, Trash2, Wallet } from "lucide-react";
 import { formatDateTime, type Billing, type Payment } from "./ClientProfileSupport";
 
 type ClientProfileBillingPaymentsProps = {
@@ -16,7 +16,8 @@ type ClientProfileBillingPaymentsProps = {
   isPWP: boolean;
   openReminderModal: (billing?: Billing) => void;
   openBillingModalForRecord: (billing?: Billing | null) => void;
-  openBillingWorkspace: (billing: Billing) => void;
+  openApplyAdvanceModal: (billing: Billing) => void;
+  openBillingInvoiceModal: (billing: Billing) => void;
   deleteBilling: (billing: Billing) => void;
   openFYModal: () => void;
   openPaymentModalForRecord: (payment?: Payment | null) => void;
@@ -33,7 +34,8 @@ export default function ClientProfileBillingPayments({
   isPWP,
   openReminderModal,
   openBillingModalForRecord,
-  openBillingWorkspace,
+  openApplyAdvanceModal,
+  openBillingInvoiceModal,
   deleteBilling,
   openFYModal,
   openPaymentModalForRecord,
@@ -115,8 +117,16 @@ export default function ClientProfileBillingPayments({
                         <Send className="w-3 h-3" /> Reminder
                       </button>
                     )}
-                    <button type="button" className="glass-pill" disabled={isPending} onClick={() => isGeneral ? openBillingWorkspace(record) : openBillingModalForRecord(record)}>
-                      <Pencil className="w-3 h-3" /> {isGeneral ? "Manage" : "Edit"}
+                    <button type="button" className="glass-pill" disabled={isPending} onClick={() => openBillingModalForRecord(record)}>
+                      <Pencil className="w-3 h-3" /> Edit
+                    </button>
+                    {!isPending && record.pendingAmount > 0 && (
+                      <button type="button" className="glass-pill" onClick={() => openApplyAdvanceModal(record)}>
+                        <ArrowLeftRight className="w-3 h-3" /> Apply advance
+                      </button>
+                    )}
+                    <button type="button" className="glass-pill" disabled={isPending} onClick={() => openBillingInvoiceModal(record)}>
+                      <FileText className="w-3 h-3" /> {record.invoiceCreated ? "Invoice" : "Mark invoice"}
                     </button>
                     <button type="button" className="glass-pill" style={{ color: "#ff3b30" }} disabled={isPending} onClick={() => deleteBilling(record)}>
                       <Trash2 className="w-3 h-3" /> Delete
