@@ -259,7 +259,9 @@ export function cleanTrackerEmailWorkflows(
         ...(content ? { content } : {}),
         order: Math.max(
           0,
-          Math.min(99, Number(rule.order) || contentRules.length),
+          Math.min(99, rule.order !== null && rule.order !== "" && Number.isFinite(Number(rule.order))
+            ? Number(rule.order)
+            : contentRules.length),
         ),
       });
     }

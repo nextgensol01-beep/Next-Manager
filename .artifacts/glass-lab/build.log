@@ -1,0 +1,173 @@
+
+> nextgen-erp@0.1.0 build
+> next build
+
+   ▲ Next.js 15.5.15
+   - Environments: .env
+
+   Creating an optimized production build ...
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ Compiled successfully in 74s
+   Linting and checking validity of types ...
+
+./app/dashboard/client-trackers/page.tsx
+250:9  Warning: The 'clients' conditional could make the dependencies of useMemo Hook (at line 292) change on every render. To fix this, wrap the initialization of 'clients' in its own useMemo() Hook.  react-hooks/exhaustive-deps
+
+./app/dashboard/client-trackers/[id]/page.tsx
+21:3  Warning: 'CheckCircle2' is defined but never used.  @typescript-eslint/no-unused-vars
+65:8  Warning: 'TrackerDataLink' is defined but never used.  @typescript-eslint/no-unused-vars
+1665:7  Warning: Expected an assignment or function call and instead saw an expression.  @typescript-eslint/no-unused-expressions
+3104:19  Warning: Expected an assignment or function call and instead saw an expression.  @typescript-eslint/no-unused-expressions
+4048:6  Warning: React Hook useEffect has a missing dependency: 'active'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/dashboard/clients/[clientId]/ClientProfilePremiumSections.tsx
+1552:11  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./app/dashboard/clients/[clientId]/page.tsx
+98:3  Warning: 'buildFyEntries' is defined but never used.  @typescript-eslint/no-unused-vars
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/app/api-reference/config/eslint#disabling-rules
+   Collecting page data ...
+   Generating static pages (0/83) ...
+   Generating static pages (20/83) 
+   Generating static pages (41/83) 
+   Generating static pages (62/83) 
+ ✓ Generating static pages (83/83)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                          Size  First Load JS
+┌ ƒ /                                               371 B         103 kB
+├ ○ /_not-found                                      1 kB         103 kB
+├ ƒ /api/activities                                 371 B         103 kB
+├ ƒ /api/annual-return                              371 B         103 kB
+├ ƒ /api/annual-return/[id]                         371 B         103 kB
+├ ƒ /api/annual-return/bulk-init                    371 B         103 kB
+├ ƒ /api/annual-return/reconcile                    371 B         103 kB
+├ ƒ /api/auth/[...nextauth]                         371 B         103 kB
+├ ƒ /api/auth/admin-login                           371 B         103 kB
+├ ƒ /api/billing                                    371 B         103 kB
+├ ƒ /api/billing/[id]                               371 B         103 kB
+├ ƒ /api/client-contacts                            371 B         103 kB
+├ ƒ /api/client-custom-field-groups                 371 B         103 kB
+├ ƒ /api/client-custom-field-groups/[id]            371 B         103 kB
+├ ƒ /api/client-custom-fields                       371 B         103 kB
+├ ƒ /api/client-custom-fields/[id]                  371 B         103 kB
+├ ƒ /api/client-notes                               371 B         103 kB
+├ ƒ /api/client-notes/[id]                          371 B         103 kB
+├ ƒ /api/client-trackers                            371 B         103 kB
+├ ƒ /api/client-trackers/[id]                       371 B         103 kB
+├ ƒ /api/client-trackers/[id]/activity              371 B         103 kB
+├ ƒ /api/client-trackers/[id]/email                 371 B         103 kB
+├ ƒ /api/client-trackers/[id]/email/deliver         371 B         103 kB
+├ ƒ /api/client-trackers/[id]/email/export          371 B         103 kB
+├ ƒ /api/client-trackers/[id]/email/replies         371 B         103 kB
+├ ƒ /api/client-trackers/[id]/entries/[entryId]     371 B         103 kB
+├ ƒ /api/client-trackers/[id]/entries/bulk          371 B         103 kB
+├ ƒ /api/client-trackers/[id]/export                371 B         103 kB
+├ ƒ /api/client-work-items                          371 B         103 kB
+├ ƒ /api/client-work-items/[id]                     371 B         103 kB
+├ ƒ /api/clients                                    371 B         103 kB
+├ ƒ /api/clients/[clientId]                         371 B         103 kB
+├ ƒ /api/clients/[clientId]/workspace               371 B         103 kB
+├ ƒ /api/clients/generate-id                        371 B         103 kB
+├ ƒ /api/contacts                                   371 B         103 kB
+├ ƒ /api/contacts/[id]                              371 B         103 kB
+├ ƒ /api/credit-transactions                        371 B         103 kB
+├ ƒ /api/credit-transactions/[id]                   371 B         103 kB
+├ ƒ /api/credit-transactions/insights               371 B         103 kB
+├ ƒ /api/dashboard                                  371 B         103 kB
+├ ƒ /api/documents                                  371 B         103 kB
+├ ƒ /api/documents/[id]                             371 B         103 kB
+├ ƒ /api/documents/[id]/migrate                     371 B         103 kB
+├ ƒ /api/documents/[id]/preview                     371 B         103 kB
+├ ƒ /api/documents/upload                           371 B         103 kB
+├ ƒ /api/email                                      371 B         103 kB
+├ ƒ /api/email-log                                  371 B         103 kB
+├ ƒ /api/email-message-templates                    371 B         103 kB
+├ ƒ /api/email-message-templates/[id]               371 B         103 kB
+├ ƒ /api/email/bulk-reminder                        371 B         103 kB
+├ ƒ /api/email/create-draft                         371 B         103 kB
+├ ƒ /api/email/default-signature                    371 B         103 kB
+├ ƒ /api/email/send                                 371 B         103 kB
+├ ƒ /api/email/template                             371 B         103 kB
+├ ƒ /api/financial-year                             371 B         103 kB
+├ ƒ /api/financial-year-preference                  371 B         103 kB
+├ ƒ /api/financial-year/[id]                        371 B         103 kB
+├ ƒ /api/fix-indexes                                371 B         103 kB
+├ ƒ /api/gmail-oauth                                371 B         103 kB
+├ ƒ /api/google-drive-oauth                         371 B         103 kB
+├ ƒ /api/invoices                                   371 B         103 kB
+├ ƒ /api/invoices/[id]                              371 B         103 kB
+├ ƒ /api/invoices/coverage                          371 B         103 kB
+├ ƒ /api/migrate-client-contact-selections          371 B         103 kB
+├ ƒ /api/migrate-contacts                           371 B         103 kB
+├ ƒ /api/payments                                   371 B         103 kB
+├ ƒ /api/payments/[id]                              371 B         103 kB
+├ ƒ /api/payments/apply-advance                     371 B         103 kB
+├ ƒ /api/persons                                    371 B         103 kB
+├ ƒ /api/persons/[id]                               371 B         103 kB
+├ ƒ /api/quotation/generate                         371 B         103 kB
+├ ƒ /api/quotation/pdf                              371 B         103 kB
+├ ƒ /api/quotation/template                         371 B         103 kB
+├ ƒ /api/quotations                                 371 B         103 kB
+├ ƒ /api/quotations/[id]                            371 B         103 kB
+├ ƒ /api/quotations/[id]/billing                    371 B         103 kB
+├ ƒ /api/quotations/[id]/create-revision            371 B         103 kB
+├ ƒ /api/quotations/[id]/duplicate                  371 B         103 kB
+├ ƒ /api/quotations/[id]/finalize                   371 B         103 kB
+├ ƒ /api/quotations/[id]/link-client                371 B         103 kB
+├ ƒ /api/quotations/[id]/status                     371 B         103 kB
+├ ƒ /api/quotations/analytics                       371 B         103 kB
+├ ƒ /api/reports                                    371 B         103 kB
+├ ƒ /api/reports/custom-export                      371 B         103 kB
+├ ƒ /api/reports/custom-export/presets              371 B         103 kB
+├ ƒ /api/reports/custom-export/preview              371 B         103 kB
+├ ƒ /api/reports/export                             371 B         103 kB
+├ ƒ /api/reports/studio                             371 B         103 kB
+├ ƒ /api/reports/studio/export                      371 B         103 kB
+├ ƒ /api/reports/studio/quality                     371 B         103 kB
+├ ƒ /api/reports/studio/relationships/[clientId]    371 B         103 kB
+├ ƒ /api/reports/studio/saved                       371 B         103 kB
+├ ƒ /api/reports/studio/saved/[id]                  371 B         103 kB
+├ ƒ /api/sessions                                   371 B         103 kB
+├ ƒ /api/trash                                      371 B         103 kB
+├ ƒ /api/trash/[id]                                 371 B         103 kB
+├ ƒ /api/trash/empty                                371 B         103 kB
+├ ƒ /api/upload-records                             371 B         103 kB
+├ ƒ /api/upload-records/[id]                        371 B         103 kB
+├ ƒ /api/users                                      371 B         103 kB
+├ ƒ /dashboard                                    9.07 kB         186 kB
+├ ƒ /dashboard/annual-return                      11.1 kB         193 kB
+├ ƒ /dashboard/billing                            25.9 kB         219 kB
+├ ƒ /dashboard/client-trackers                    7.83 kB         184 kB
+├ ƒ /dashboard/client-trackers/[id]               41.8 kB         224 kB
+├ ƒ /dashboard/clients                            18.9 kB         200 kB
+├ ƒ /dashboard/clients/[clientId]                 76.6 kB         289 kB
+├ ƒ /dashboard/contacts                           7.88 kB         168 kB
+├ ƒ /dashboard/cpcb-uploads/invoice-tracking      7.46 kB         189 kB
+├ ƒ /dashboard/cpcb-uploads/upload-records        6.19 kB         188 kB
+├ ƒ /dashboard/credit-transactions                8.49 kB         190 kB
+├ ƒ /dashboard/email-history                      5.43 kB         113 kB
+├ ƒ /dashboard/financial-year                     26.7 kB         214 kB
+├ ƒ /dashboard/gmail-setup                        4.01 kB         106 kB
+├ ƒ /dashboard/quotation                            371 B         103 kB
+├ ƒ /dashboard/quotations                         6.51 kB         186 kB
+├ ƒ /dashboard/quotations/[id]                    38.9 kB         214 kB
+├ ƒ /dashboard/reports                            71.2 kB         250 kB
+├ ƒ /dashboard/sessions                           12.3 kB         120 kB
+├ ƒ /dashboard/settings                             43 kB         216 kB
+├ ƒ /dashboard/trash                              4.58 kB         112 kB
+├ ○ /dev/liquid-glass                             11.7 kB         170 kB
+└ ○ /login                                        4.23 kB         116 kB
++ First Load JS shared by all                      102 kB
+  ├ chunks/1255-55f5611cfd370a3f.js               45.7 kB
+  ├ chunks/4bd1b696-100b9d70ed4e49c1.js           54.2 kB
+  └ other shared chunks (total)                   2.33 kB
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

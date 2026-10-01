@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "../components/ui/liquid-glass/liquid-glass.css";
 import "./clients-premium.css";
 import "./client-profile-premium.css";
 import Providers from "./providers";

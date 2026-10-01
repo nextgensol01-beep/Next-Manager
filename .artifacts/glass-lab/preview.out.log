@@ -1,0 +1,901 @@
+   ▲ Next.js 15.5.15
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.1.24:3000
+   - Environments: .env
+
+ ✓ Starting...
+ ✓ Ready in 3.6s
+ ○ Compiling /dev/liquid-glass ...
+ ✓ Compiled /dev/liquid-glass in 5.7s (1543 modules)
+ ✓ Compiled in 1212ms (722 modules)
+ GET /dev/liquid-glass 200 in 6951ms
+ ✓ Compiled in 148ms (708 modules)
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 1506ms (1751 modules)
+ GET /api/auth/session 200 in 3721ms
+ GET /api/auth/session 200 in 952ms
+ GET /dev/liquid-glass 200 in 363ms
+ GET /api/auth/session 200 in 142ms
+ ○ Compiling /api/financial-year-preference ...
+ ✓ Compiled /api/financial-year-preference in 720ms (1768 modules)
+ GET /api/financial-year-preference 200 in 1074ms
+ PATCH /api/financial-year-preference 200 in 145ms
+ GET /api/auth/session 200 in 141ms
+ GET /dev/liquid-glass 200 in 408ms
+ GET /api/auth/session 200 in 123ms
+ GET /api/financial-year-preference 200 in 152ms
+ PATCH /api/financial-year-preference 200 in 176ms
+ GET /api/auth/session 200 in 115ms
+ GET /api/auth/session 200 in 132ms
+ ○ Compiling /dashboard/client-trackers ...
+ ✓ Compiled /dashboard/client-trackers in 1106ms (1923 modules)
+ GET /dashboard/client-trackers 200 in 2976ms
+ ○ Compiling /api/client-trackers ...
+ ✓ Compiled /api/trash in 3.8s (1971 modules)
+ GET /api/auth/session 200 in 5483ms
+ GET /api/email-log?count=1 200 in 3905ms
+ GET /api/trash?type=all&count=1 200 in 4148ms
+ ○ Compiling /api/financial-year-preference ...
+ GET /api/client-trackers 200 in 6424ms
+ ✓ Compiled /api/financial-year-preference in 1101ms (1206 modules)
+ GET /api/clients 200 in 7332ms
+ GET /api/financial-year-preference 200 in 1876ms
+ PATCH /api/financial-year-preference 200 in 144ms
+ ○ Compiling /dashboard/client-trackers/[id] ...
+ ✓ Compiled /dashboard/client-trackers/[id] in 1031ms (1969 modules)
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 2308ms
+ ○ Compiling /api/client-trackers/[id]/email ...
+ ✓ Compiled /api/client-trackers/[id]/email in 3.8s (3103 modules)
+ GET /api/documents 200 in 6849ms
+ GET /api/documents 200 in 152ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/activity 200 in 8674ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/activity 200 in 255ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef?limit=100&offset=0 200 in 9106ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef?limit=100&offset=0 200 in 436ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/email 200 in 11451ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/email 200 in 184ms
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 643ms (1181 modules)
+ GET /api/auth/session 200 in 1550ms
+ GET /api/auth/session 200 in 165ms
+ GET /api/auth/session 200 in 151ms
+ GET /api/auth/session 200 in 146ms
+ GET /api/auth/session 200 in 152ms
+ GET /api/auth/session 200 in 319ms
+ ✓ Compiled in 1637ms (809 modules)
+ ✓ Compiled in 744ms (809 modules)
+ GET /dev/liquid-glass 200 in 1005ms
+ ✓ Compiled in 915ms (809 modules)
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 1088ms
+ GET /dev/liquid-glass 200 in 181ms
+ GET /dev/liquid-glass 200 in 107ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 228ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 149ms
+ ✓ Compiled /api/client-trackers/[id]/email in 1839ms (1983 modules)
+ ✓ Compiled in 1ms (2323 modules)
+ ✓ Compiled in 1745ms (3134 modules)
+ ✓ Compiled in 2.3s (3149 modules)
+ GET /dev/liquid-glass 200 in 10610ms
+ GET /api/documents 200 in 11216ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/activity 200 in 11206ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 10755ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/email 200 in 11287ms
+ GET /dev/liquid-glass 200 in 208ms
+ GET /api/clients 200 in 11574ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 296ms
+ GET /dev/liquid-glass 200 in 249ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef?limit=100&offset=0 200 in 11688ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 203ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef?limit=100&offset=0 200 in 487ms
+ ✓ Compiled in 3.4s (3149 modules)
+ GET /dev/liquid-glass 200 in 197ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 429ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 1250ms
+ ○ Compiling /api/auth/[...nextauth] ...
+ GET /api/documents 200 in 4258ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0/email 200 in 4249ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0?limit=100&offset=0 200 in 4582ms
+ GET /api/clients 200 in 4764ms
+ ✓ Compiled /api/email-log in 4.9s (2327 modules)
+ ✓ Compiled (2331 modules)
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0/activity 200 in 6434ms
+ GET /api/auth/session 200 in 6405ms
+ GET /api/trash?type=all&count=1 200 in 2208ms
+ GET /api/email-log?count=1 200 in 2214ms
+ ✓ Compiled /api/financial-year-preference in 482ms (2336 modules)
+ GET /api/financial-year-preference 200 in 778ms
+ PATCH /api/financial-year-preference 200 in 142ms
+ ✓ Compiled in 1453ms (3160 modules)
+ GET /dev/liquid-glass 200 in 270ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 559ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 561ms
+ GET /api/auth/session 200 in 330ms
+ ✓ Compiled in 1132ms (811 modules)
+ GET /dev/liquid-glass 200 in 320ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 354ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 364ms
+ ✓ Compiled in 3.1s (1993 modules)
+ GET /dev/liquid-glass 200 in 716ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 771ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 769ms
+ ✓ Compiled in 2.7s (2019 modules)
+ GET /dev/liquid-glass 200 in 451ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 502ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 504ms
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 5s (1186 modules)
+ GET /api/auth/session 200 in 6251ms
+ ✓ Compiled in 2.4s (2013 modules)
+ GET /dev/liquid-glass 200 in 596ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 609ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 611ms
+ ✓ Compiled in 3.7s (2006 modules)
+ GET /dev/liquid-glass 200 in 687ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 777ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 774ms
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 701ms (1186 modules)
+ GET /api/auth/session 200 in 1165ms
+ ✓ Compiled in 2.9s (2006 modules)
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 734ms
+ GET /dev/liquid-glass 200 in 239ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 291ms
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 1098ms (1186 modules)
+ GET /api/auth/session 200 in 2052ms
+ GET /api/auth/session 200 in 239ms
+ ✓ Compiled in 5s (2013 modules)
+ GET /dev/liquid-glass 200 in 249ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 503ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 515ms
+ GET /api/auth/session 200 in 202ms
+ GET /api/auth/session 200 in 157ms
+ ✓ Compiled in 14.4s (1999 modules)
+ GET /dev/liquid-glass 200 in 1287ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 1357ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 1364ms
+ ○ Compiling /api/client-trackers/[id]/email ...
+ ✓ Compiled /api/client-trackers/[id]/email in 1477ms (1223 modules)
+ ✓ Compiled (2331 modules)
+ GET /api/clients 200 in 17309ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef?limit=100&offset=0 200 in 18302ms
+ GET /api/documents 200 in 18570ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/email 200 in 18679ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/activity 200 in 18867ms
+ GET /api/documents 200 in 49594ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0/activity 200 in 49585ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0/email 200 in 49606ms
+ GET /api/clients 200 in 50896ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 1374ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0?limit=100&offset=0 200 in 51035ms
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 741ms (2333 modules)
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/activity 200 in 9125ms
+ GET /api/documents 200 in 9477ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/email 200 in 9651ms
+ GET /api/auth/session 200 in 11262ms
+ ○ Compiling /api/trash ...
+ GET /api/clients 200 in 11952ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef?limit=100&offset=0 200 in 12320ms
+ ✓ Compiled /api/financial-year-preference in 15.7s (3159 modules)
+ GET /dev/liquid-glass 200 in 684ms
+ GET /api/financial-year-preference 200 in 9642ms
+ GET /api/trash?type=all&count=1 200 in 12042ms
+ GET /api/email-log?count=1 200 in 12021ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 861ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 888ms
+ PATCH /api/financial-year-preference 200 in 226ms
+ GET /api/auth/session 200 in 597ms
+ ✓ Compiled in 3.4s (2012 modules)
+ GET /dev/liquid-glass 200 in 7612ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 7762ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 7719ms
+ ✓ Compiled in 1794ms (2012 modules)
+ GET /dev/liquid-glass 200 in 211ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 480ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 509ms
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 1812ms (1189 modules)
+ GET /api/auth/session 200 in 3289ms
+ GET /api/auth/session 200 in 1420ms
+ GET /api/auth/session 200 in 446ms
+ GET /api/auth/session 200 in 602ms
+ GET /api/auth/session 200 in 438ms
+ ✓ Compiled in 78.5s (2012 modules)
+ ✓ Compiled in 1578ms (817 modules)
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 3.7s (1189 modules)
+ GET /api/auth/session 200 in 5592ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 1638ms
+ ○ Compiling /api/client-trackers/[id]/activity ...
+ ✓ Compiled /api/client-trackers/[id]/activity in 1377ms (1225 modules)
+ ✓ Compiled (2333 modules)
+ GET /api/auth/session 200 in 29909ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0/activity 200 in 29937ms
+ GET /api/documents 200 in 30086ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0/email 200 in 30278ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0?limit=100&offset=0 200 in 30300ms
+ ○ Compiling /api/financial-year-preference ...
+ GET /api/clients 200 in 31756ms
+ ✓ Compiled /api/financial-year-preference in 2.3s (2335 modules)
+ ✓ Compiled (2342 modules)
+ GET /api/financial-year-preference 200 in 3827ms
+ GET /api/email-log?count=1 200 in 3986ms
+ GET /api/trash?type=all&count=1 200 in 3984ms
+ PATCH /api/financial-year-preference 200 in 217ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 307 in 4456ms
+ ○ Compiling /login ...
+ ✓ Compiled /login in 6.2s (3162 modules)
+ GET /login 200 in 6439ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 307 in 224ms
+ GET /login 200 in 88ms
+ ✓ Compiled in 7.1s (2006 modules)
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 1244ms
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 1006ms (1189 modules)
+ GET /api/auth/session 200 in 2451ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 1206ms
+ ○ Compiling /api/client-trackers/[id]/activity ...
+ ✓ Compiled /api/client-trackers/[id]/activity in 855ms (1225 modules)
+ ✓ Compiled (2333 modules)
+ GET /api/documents 200 in 8193ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/activity 200 in 8365ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/email 200 in 8886ms
+ GET /api/auth/session 200 in 10833ms
+ GET /api/clients 200 in 31101ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef?limit=100&offset=0 200 in 31907ms
+ ○ Compiling /api/financial-year-preference ...
+ ✓ Compiled /api/financial-year-preference in 998ms (2335 modules)
+ ✓ Compiled (2342 modules)
+ GET /api/email-log?count=1 200 in 23502ms
+ GET /api/trash?type=all&count=1 200 in 23562ms
+ GET /api/financial-year-preference 200 in 1994ms
+ PATCH /api/financial-year-preference 200 in 204ms
+ GET /api/auth/session 200 in 395ms
+ GET /api/auth/session 200 in 210ms
+ GET /api/auth/session 200 in 477ms
+ GET /api/auth/session 200 in 210ms
+ GET /dashboard/client-trackers 200 in 767ms
+ ○ Compiling /api/clients ...
+ ✓ Compiled /api/clients in 28.4s (1208 modules)
+ ✓ Compiled (1231 modules)
+ GET /api/client-trackers 200 in 4329ms
+ GET /api/client-trackers 200 in 31545ms
+ GET /api/clients 200 in 32399ms
+ GET /api/clients 200 in 5225ms
+ GET /dashboard/client-trackers 200 in 5943ms
+ ✓ Compiled /api/auth/[...nextauth] in 430ms (1233 modules)
+ GET /api/auth/session 200 in 1126ms
+ GET /api/client-trackers 200 in 1336ms
+ ○ Compiling /api/financial-year-preference ...
+ GET /api/clients 200 in 2198ms
+ ✓ Compiled /api/email-log in 1438ms (1238 modules)
+ ✓ Compiled in 0ms (1242 modules)
+ ✓ Compiled in 0ms (1242 modules)
+ GET /dashboard/client-trackers/6ab1145307584443b0ff7dfe 200 in 1522ms
+ ✓ Compiled in 1ms (1242 modules)
+ GET /api/financial-year-preference 200 in 3503ms
+ GET /api/trash?type=all&count=1 200 in 3334ms
+ GET /api/email-log?count=1 200 in 3376ms
+ ○ Compiling /api/client-trackers/[id]/email ...
+ ✓ Compiled /api/client-trackers/[id]/email in 3.3s (1250 modules)
+ ✓ Compiled (2344 modules)
+ GET /api/client-trackers/6ab1145307584443b0ff7dfe/activity 200 in 31434ms
+ GET /api/client-trackers/6ab1145307584443b0ff7dfe/email 200 in 31437ms
+ PATCH /api/financial-year-preference 200 in 28759ms
+ GET /api/documents 200 in 31502ms
+ GET /api/client-trackers/6ab1145307584443b0ff7dfe?limit=100&offset=0 200 in 31688ms
+ GET /api/documents 200 in 213ms
+ GET /api/client-trackers/6ab1145307584443b0ff7dfe/activity 200 in 232ms
+ GET /api/client-trackers/6ab1145307584443b0ff7dfe/email 200 in 235ms
+ GET /api/client-trackers/6ab1145307584443b0ff7dfe?limit=100&offset=0 200 in 426ms
+ GET /api/auth/session 200 in 453ms
+ GET /api/auth/session 200 in 965ms
+ ○ Compiling /dashboard/clients ...
+ ✓ Compiled /dashboard/clients in 46s (2124 modules)
+ GET /dashboard/clients 200 in 47728ms
+ ✓ Compiled in 1519ms (878 modules)
+ GET /dashboard/clients 200 in 483ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 587ms
+ GET /dashboard/clients 200 in 280ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 226ms
+ ○ Compiling /api/clients ...
+ ✓ Compiled /api/clients in 11.7s (1282 modules)
+ GET /api/clients?limit=30&offset=0 200 in 13992ms
+ ○ Compiling /api/clients/[clientId]/workspace ...
+ ✓ Compiled /api/clients/[clientId]/workspace in 1691ms (2178 modules)
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 1689ms
+ GET /api/clients/IMP-076/workspace 200 in 4374ms
+ GET /api/clients/PWP-016/workspace 200 in 4225ms
+ GET /api/clients/IMP-075/workspace 200 in 4666ms
+ GET /api/clients/IMP-077/workspace 200 in 4374ms
+ GET /api/clients/IMP-079/workspace 200 in 4243ms
+ GET /api/clients/PRD-077/workspace 200 in 4469ms
+ GET /dashboard/clients 200 in 400ms
+ GET /api/clients?limit=30&offset=0 200 in 922ms
+ ✓ Compiled /api/auth/[...nextauth] in 319ms (1302 modules)
+ GET /api/auth/session 200 in 890ms
+ GET /api/clients?limit=30&offset=0 200 in 1008ms
+ GET /api/clients?limit=30&offset=0 200 in 295ms
+ GET /api/clients?limit=30&offset=30 200 in 279ms
+ GET /dashboard/clients?search=Azhar+Traders 200 in 118ms
+ GET /api/clients?search=Azhar+Traders&limit=30&offset=0 200 in 404ms
+ ○ Compiling /api/client-custom-field-groups ...
+ ✓ Compiled /api/client-custom-field-groups in 1646ms (2172 modules)
+ GET /api/client-custom-field-groups 200 in 1969ms
+ GET /api/client-custom-fields 200 in 2103ms
+ GET /dashboard/clients?search=Azhar+Traders 200 in 447ms
+ GET /api/clients/generate-id?category=PWP 200 in 2184ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 531ms
+ GET /api/clients/generate-id?category=Importer 200 in 265ms
+ GET /api/clients?search=Azhar+Traders&limit=30&offset=0 200 in 502ms
+ ○ Compiling /api/contacts ...
+ ✓ Compiled /api/contacts in 1975ms (2168 modules)
+ GET /api/contacts?search=IMRAN%20ALI&withCompanies=true 200 in 2853ms
+ ✓ Compiled in 1046ms (878 modules)
+ GET /dashboard/clients?search=Azhar+Traders 200 in 1217ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 1261ms
+ GET /dashboard/clients?search=Azhar+Traders 200 in 325ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 312ms
+ GET /api/clients?search=Azhar+Traders&limit=30&offset=0 200 in 532ms
+ GET /api/clients?search=Azhar+Traders&limit=30&offset=0 200 in 483ms
+ GET /api/clients?search=Azhar+Traders&limit=30&offset=0 200 in 481ms
+ GET /api/clients?search=Azhar+Traders&limit=30&offset=0 200 in 472ms
+ POST /api/clients 201 in 1005ms
+ GET /api/clients?search=Azhar+Traders&limit=30&offset=0 200 in 581ms
+ ○ Compiling /dashboard/clients/[clientId] ...
+ ✓ Compiled /dashboard/clients/[clientId] in 623ms (1300 modules)
+ ✓ Compiled in 5.6s (932 modules)
+ ✓ Compiled in 1589ms (932 modules)
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 1931ms
+ GET /api/clients/IMP-080/workspace 200 in 8639ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 205ms
+ GET /dashboard/clients/IMP-080 200 in 8779ms
+ GET /dashboard/clients/IMP-080 200 in 192ms
+ GET /dashboard/clients/IMP-080 200 in 282ms
+ GET /dashboard/clients/IMP-080 200 in 263ms
+ ○ Compiling /api/activities ...
+ ✓ Compiled /api/activities in 3.5s (2293 modules)
+ GET /api/client-notes?clientId=IMP-080 200 in 4064ms
+ GET /api/client-work-items?clientId=IMP-080 200 in 4117ms
+ GET /api/client-work-items?clientId=IMP-080 200 in 4095ms
+ GET /api/client-notes?clientId=IMP-080 200 in 4108ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 541ms
+ GET /api/client-trackers?clientId=IMP-080 200 in 4170ms
+ GET /api/client-trackers?clientId=IMP-080 200 in 410ms
+ ○ Compiling /api/quotations ...
+ GET /api/activities?clientId=IMP-080&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 4719ms
+ ✓ Compiled /dashboard/financial-year in 41.5s (2496 modules)
+ GET /dashboard/financial-year?open=targets&clientId=IMP-080&fy=2025-26 200 in 47264ms
+ GET /dashboard/financial-year?open=targets&clientId=IMP-080&fy=2025-26 200 in 20749ms
+ GET /dashboard/financial-year?open=targets&clientId=IMP-080&fy=2025-26 200 in 21797ms
+ GET /api/quotations?financialYear=2025-26&clientId=IMP-080 200 in 47943ms
+ GET /dashboard/clients/IMP-080 200 in 47955ms
+ GET /api/activities?clientId=IMP-080&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 47472ms
+ GET /dashboard/financial-year?open=targets&clientId=IMP-080&fy=2025-26 200 in 843ms
+ GET /dashboard/financial-year?open=targets&clientId=IMP-080&fy=2025-26 200 in 850ms
+ GET /dashboard/financial-year?open=targets&clientId=IMP-080&fy=2025-26 200 in 876ms
+ GET /dashboard/financial-year?open=targets&clientId=IMP-080&fy=2025-26 200 in 891ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 2234ms
+ GET /dashboard/financial-year?open=targets&clientId=IMP-080&fy=2025-26 200 in 507ms
+ ○ Compiling /api/clients ...
+ ✓ Compiled /api/clients in 7.7s (2483 modules)
+ GET /api/financial-year?fy=2025-26 200 in 8529ms
+ GET /api/financial-year?fy=2025-26 200 in 257ms
+ GET /api/clients 200 in 8876ms
+ GET /api/clients 200 in 596ms
+ GET /api/client-notes?clientId=IMP-080 200 in 450ms
+ GET /api/client-work-items?clientId=IMP-080 200 in 456ms
+ GET /api/client-work-items?clientId=IMP-080 200 in 417ms
+ GET /api/client-notes?clientId=IMP-080 200 in 419ms
+ GET /api/client-trackers?clientId=IMP-080 200 in 463ms
+ GET /api/client-trackers?clientId=IMP-080 200 in 515ms
+ ○ Compiling /api/client-custom-field-groups ...
+ ✓ Compiled /api/client-custom-field-groups in 1241ms (1487 modules)
+ ✓ Compiled (1500 modules)
+ GET /api/quotations?financialYear=2025-26&clientId=IMP-080 200 in 2342ms
+ GET /api/client-custom-fields 200 in 2423ms
+ GET /api/client-custom-field-groups 200 in 2456ms
+ GET /api/client-custom-fields 200 in 220ms
+ GET /api/client-custom-field-groups 200 in 210ms
+ GET /api/clients/IMP-080/workspace 200 in 2767ms
+ GET /api/activities?clientId=IMP-080&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 2802ms
+ GET /api/activities?clientId=IMP-080&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 241ms
+ GET /api/quotations?financialYear=2025-26&clientId=IMP-080 200 in 245ms
+ GET /dashboard/financial-year?open=targets&clientId=IMP-080&fy=2025-26 200 in 137ms
+ GET /api/client-notes?clientId=IMP-080 200 in 291ms
+ GET /api/client-work-items?clientId=IMP-080 200 in 325ms
+ GET /api/client-work-items?clientId=IMP-080 200 in 311ms
+ GET /api/client-notes?clientId=IMP-080 200 in 322ms
+ GET /api/activities?clientId=IMP-080&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 352ms
+ GET /api/client-trackers?clientId=IMP-080 200 in 389ms
+ GET /api/client-trackers?clientId=IMP-080 200 in 229ms
+ GET /api/quotations?financialYear=2025-26&clientId=IMP-080 200 in 310ms
+ GET /api/activities?clientId=IMP-080&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 289ms
+ GET /api/clients/IMP-080/workspace 200 in 490ms
+ GET /api/quotations?financialYear=2025-26&clientId=IMP-080 200 in 241ms
+ GET /dashboard/financial-year?open=targets&clientId=IMP-080&fy=2025-26 200 in 52ms
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 3.3s (1499 modules)
+ GET /api/auth/session 200 in 4464ms
+ GET /api/client-notes?clientId=IMP-080 200 in 292ms
+ GET /api/client-work-items?clientId=IMP-080 200 in 288ms
+ GET /api/client-notes?clientId=IMP-080 200 in 282ms
+ GET /api/client-work-items?clientId=IMP-080 200 in 321ms
+ GET /api/client-trackers?clientId=IMP-080 200 in 332ms
+ GET /api/quotations?financialYear=2025-26&clientId=IMP-080 200 in 293ms
+ GET /api/client-trackers?clientId=IMP-080 200 in 326ms
+ GET /api/activities?clientId=IMP-080&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 599ms
+ GET /api/activities?clientId=IMP-080&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 195ms
+ GET /api/clients/IMP-080/workspace 200 in 605ms
+ GET /api/quotations?financialYear=2025-26&clientId=IMP-080 200 in 261ms
+ GET /dashboard/financial-year?open=targets&clientId=IMP-080&fy=2025-26 200 in 142ms
+ ✓ Compiled /api/financial-year in 413ms (1496 modules)
+ POST /api/financial-year 201 in 1108ms
+ GET /api/financial-year?fy=2025-26 200 in 331ms
+ GET /dashboard/clients 200 in 89ms
+ ✓ Compiled /api/clients in 456ms (1496 modules)
+ GET /api/clients?limit=30&offset=0 200 in 932ms
+   ▲ Next.js 15.5.15
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.1.24:3000
+   - Environments: .env
+
+ ✓ Starting...
+ ✓ Ready in 9.6s
+ ○ Compiling /dashboard/clients ...
+ ✓ Compiled /api/clients in 24.2s (2028 modules)
+ GET /api/clients?limit=30&offset=0 200 in 15206ms
+ GET /dashboard/clients 200 in 26529ms
+ ✓ Compiled /api/auth/[...nextauth] in 459ms (2016 modules)
+ GET /api/auth/session 200 in 1682ms
+ ○ Compiling /api/financial-year-preference ...
+ ✓ Compiled /api/financial-year-preference in 758ms (2025 modules)
+ GET /api/trash?type=all&count=1 200 in 1016ms
+ GET /api/email-log?count=1 200 in 1020ms
+ GET /api/financial-year-preference 200 in 807ms
+ GET /api/clients?limit=30&offset=0 200 in 969ms
+ PATCH /api/financial-year-preference 200 in 153ms
+ GET /api/clients?limit=30&offset=0 200 in 294ms
+ GET /dashboard/clients?search=Goel+Trading+Co. 200 in 141ms
+ GET /api/clients?search=Goel+Trading+Co.&limit=30&offset=0 200 in 379ms
+ ○ Compiling /api/client-custom-field-groups ...
+ ✓ Compiled /api/client-custom-field-groups in 1341ms (2031 modules)
+ GET /api/client-custom-field-groups 200 in 1742ms
+ GET /api/client-custom-fields 200 in 1748ms
+ GET /api/clients/generate-id?category=PWP 200 in 1783ms
+ GET /api/clients/generate-id?category=Importer 200 in 160ms
+ ○ Compiling /api/contacts ...
+ ✓ Compiled /api/contacts in 613ms (2022 modules)
+ GET /api/contacts?search=ANKUR%20GOEL&withCompanies=true 200 in 1075ms
+ GET /api/clients?search=Goel+Trading+Co.&limit=30&offset=0 200 in 328ms
+ POST /api/clients 201 in 661ms
+ GET /api/clients?search=Goel+Trading+Co.&limit=30&offset=0 200 in 384ms
+ ○ Compiling /dashboard/clients/[clientId] ...
+ ✓ Compiled /dashboard/clients/[clientId] in 5.9s (2157 modules)
+ GET /api/clients/IMP-081/workspace 200 in 23589ms
+ GET /dashboard/clients/IMP-081 200 in 24035ms
+ GET /dashboard/clients/IMP-081 200 in 572ms
+ ○ Compiling /api/client-trackers ...
+ ✓ Compiled /api/client-trackers in 2.3s (2169 modules)
+ GET /api/client-notes?clientId=IMP-081 200 in 2655ms
+ GET /api/client-notes?clientId=IMP-081 200 in 2635ms
+ GET /api/client-work-items?clientId=IMP-081 200 in 2645ms
+ GET /api/client-work-items?clientId=IMP-081 200 in 2666ms
+ GET /api/client-trackers?clientId=IMP-081 200 in 2700ms
+ GET /api/client-trackers?clientId=IMP-081 200 in 2701ms
+ ○ Compiling /api/quotations ...
+ ✓ Compiled /api/quotations in 916ms (2255 modules)
+ GET /api/quotations?financialYear=2025-26&clientId=IMP-081 200 in 1824ms
+ GET /api/activities?clientId=IMP-081&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 2281ms
+ GET /api/activities?clientId=IMP-081&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 243ms
+ ○ Compiling /dashboard/financial-year ...
+ ✓ Compiled /dashboard/financial-year in 22s (2364 modules)
+ GET /dashboard/financial-year?open=targets&clientId=IMP-081&fy=2025-26 200 in 22230ms
+ ○ Compiling /api/financial-year ...
+ ✓ Compiled /api/financial-year in 1423ms (2365 modules)
+ GET /api/financial-year?fy=2025-26 200 in 1876ms
+ GET /api/financial-year?fy=2025-26 200 in 216ms
+ GET /api/clients 200 in 2249ms
+ GET /api/clients 200 in 578ms
+ POST /api/financial-year 201 in 646ms
+ GET /api/financial-year?fy=2025-26 200 in 342ms
+ GET /api/client-work-items?clientId=IMP-081 200 in 291ms
+ GET /api/client-notes?clientId=IMP-081 200 in 327ms
+ GET /api/client-work-items?clientId=IMP-081 200 in 342ms
+ GET /api/client-notes?clientId=IMP-081 200 in 326ms
+ GET /api/client-trackers?clientId=IMP-081 200 in 455ms
+ GET /api/quotations?financialYear=2025-26&clientId=IMP-081 200 in 460ms
+ GET /api/activities?clientId=IMP-081&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 885ms
+ GET /api/client-trackers?clientId=IMP-081 200 in 945ms
+ GET /api/activities?clientId=IMP-081&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 193ms
+ GET /api/clients/IMP-081/workspace 200 in 1082ms
+ GET /api/clients?search=Goel+Trading+Co.&limit=30&offset=0 200 in 593ms
+ GET /dashboard/clients 200 in 236ms
+ GET /api/clients?search=Goel+Trading+Co.&limit=30&offset=0 200 in 692ms
+ GET /api/clients?limit=30&offset=0 200 in 561ms
+ GET /api/clients?limit=30&offset=0 200 in 431ms
+ GET /dashboard/clients?search=Agt+Software+Impex 200 in 83ms
+ GET /api/clients?search=Agt+Software+Impex&limit=30&offset=0 200 in 463ms
+ ○ Compiling /api/clients/generate-id ...
+ ✓ Compiled /api/clients/generate-id in 1480ms (1334 modules)
+ ✓ Compiled (1338 modules)
+ GET /api/clients/generate-id?category=PWP 200 in 17466ms
+ GET /api/clients/generate-id?category=Importer 200 in 13283ms
+ GET /api/client-custom-field-groups 200 in 17483ms
+ GET /api/client-custom-fields 200 in 17526ms
+ GET /api/clients?search=Agt+Software+Impex&limit=30&offset=0 200 in 506ms
+ ✓ Compiled /api/contacts in 374ms (1340 modules)
+ GET /api/contacts?search=AMAN%20%20AGGARWAL&withCompanies=true 200 in 888ms
+ GET /api/contacts?search=NAMAN%20SINGH&withCompanies=true 200 in 986ms
+ GET /api/clients?search=Agt+Software+Impex&limit=30&offset=0 200 in 508ms
+ GET /api/clients?search=Agt+Software+Impex&limit=30&offset=0 200 in 484ms
+ GET /api/clients?search=Agt+Software+Impex&limit=30&offset=0 200 in 483ms
+ GET /api/clients?search=Agt+Software+Impex&limit=30&offset=0 200 in 493ms
+ POST /api/clients 201 in 1235ms
+ GET /api/clients?search=Agt+Software+Impex&limit=30&offset=0 200 in 583ms
+ GET /api/clients?search=Agt+Software+Impex&limit=30&offset=0 200 in 546ms
+ ○ Compiling /api/clients ...
+ ✓ Compiled /api/clients in 976ms (1298 modules)
+ ✓ Compiled (1334 modules)
+ GET /api/auth/session 200 in 1825ms
+ GET /api/clients?search=Agt+Software+Impex&limit=30&offset=0 200 in 2287ms
+ GET /dashboard/clients 200 in 206ms
+ GET /api/clients?search=Agt+Software+Impex&limit=30&offset=0 200 in 695ms
+ GET /api/clients?limit=30&offset=0 200 in 552ms
+ GET /dashboard/clients?search=Jain+Plastic 200 in 75ms
+ GET /api/clients?search=Jain+Plastic&limit=30&offset=0 200 in 428ms
+ ○ Compiling /api/clients/generate-id ...
+ ✓ Compiled /api/clients/generate-id in 541ms (1336 modules)
+ ✓ Compiled (1340 modules)
+ GET /api/client-custom-field-groups 200 in 1211ms
+ GET /api/client-custom-fields 200 in 1232ms
+ GET /api/clients/generate-id?category=PWP 200 in 1256ms
+ GET /api/clients/generate-id?category=Importer 200 in 491ms
+ GET /api/clients?search=Jain+Plastic&limit=30&offset=0 200 in 433ms
+ ○ Compiling /api/contacts ...
+ ✓ Compiled /api/contacts in 606ms (1340 modules)
+ GET /api/contacts?search=PANKAJ%20P%20JAIN&withCompanies=true 200 in 1033ms
+ GET /api/clients?search=Jain+Plastic&limit=30&offset=0 200 in 487ms
+ GET /api/clients?search=Jain+Plastic&limit=30&offset=0 200 in 503ms
+ GET /api/clients?search=Jain+Plastic&limit=30&offset=0 200 in 486ms
+ POST /api/clients 201 in 961ms
+ GET /api/clients?search=Jain+Plastic&limit=30&offset=0 200 in 562ms
+ GET /api/clients?search=Jain+Plastic&limit=30&offset=0 200 in 519ms
+ GET /dashboard/clients?search=Jain++Industries 200 in 133ms
+ GET /api/clients?search=Jain++Industries&limit=30&offset=0 200 in 475ms
+ GET /api/clients/generate-id?category=PWP 200 in 250ms
+ GET /api/clients/generate-id?category=Producer 200 in 230ms
+ GET /api/clients?search=Jain++Industries&limit=30&offset=0 200 in 461ms
+ GET /api/contacts?search=GYANENDER%20JAIN&withCompanies=true 200 in 199ms
+ GET /api/clients?search=Jain++Industries&limit=30&offset=0 200 in 497ms
+ GET /api/clients?search=Jain++Industries&limit=30&offset=0 200 in 529ms
+ GET /api/clients?search=Jain++Industries&limit=30&offset=0 200 in 493ms
+ POST /api/clients 201 in 932ms
+ GET /api/clients?search=Jain++Industries&limit=30&offset=0 200 in 557ms
+ GET /api/clients?search=Jain++Industries&limit=30&offset=0 200 in 521ms
+ GET /dashboard/clients?search=Yashika+Techno+Plast 200 in 90ms
+ GET /api/clients?search=Yashika+Techno+Plast&limit=30&offset=0 200 in 432ms
+ GET /api/client-custom-fields 200 in 241ms
+ GET /api/client-custom-field-groups 200 in 245ms
+ GET /api/clients/generate-id?category=PWP 200 in 270ms
+ GET /api/clients?search=Yashika+Techno+Plast&limit=30&offset=0 200 in 501ms
+ GET /api/contacts?search=SACHIN%20ARORA&withCompanies=true 200 in 211ms
+ GET /api/clients?search=Yashika+Techno+Plast&limit=30&offset=0 200 in 491ms
+ GET /api/clients?search=Yashika+Techno+Plast&limit=30&offset=0 200 in 581ms
+ POST /api/clients 201 in 921ms
+ GET /api/clients?search=Yashika+Techno+Plast&limit=30&offset=0 200 in 586ms
+ GET /api/clients?search=Yashika+Techno+Plast&limit=30&offset=0 200 in 576ms
+ GET /dashboard/clients?search=Greenparadise+Packaging+Llp 200 in 83ms
+ GET /api/clients?search=Greenparadise+Packaging+Llp&limit=30&offset=0 200 in 522ms
+ GET /api/clients/generate-id?category=PWP 200 in 200ms
+ GET /api/clients/generate-id?category=Producer 200 in 201ms
+ GET /api/clients?search=Greenparadise+Packaging+Llp&limit=30&offset=0 200 in 531ms
+ GET /api/contacts?search=SAGAR%20JI&withCompanies=true 200 in 259ms
+ GET /api/contacts?search=HARMANDEEP%20SINGH&withCompanies=true 200 in 313ms
+ GET /api/clients?search=Greenparadise+Packaging+Llp&limit=30&offset=0 200 in 597ms
+ GET /api/clients?search=Greenparadise+Packaging+Llp&limit=30&offset=0 200 in 508ms
+ GET /api/clients?search=Greenparadise+Packaging+Llp&limit=30&offset=0 200 in 514ms
+ POST /api/clients 201 in 1105ms
+ GET /api/clients?search=Greenparadise+Packaging+Llp&limit=30&offset=0 200 in 501ms
+ GET /api/client-custom-fields 200 in 262ms
+ GET /api/client-custom-field-groups 200 in 274ms
+ GET /api/clients/generate-id?category=PWP 200 in 289ms
+ GET /api/clients?search=Greenparadise+Packaging+Llp&limit=30&offset=0 200 in 520ms
+ GET /dashboard/clients?search=Bhatia+Plastic+Udyog 200 in 107ms
+ GET /api/clients?search=Bhatia+Plastic+Udyog&limit=30&offset=0 200 in 526ms
+ GET /api/clients/generate-id?category=PWP 200 in 232ms
+ GET /api/clients/generate-id?category=Producer 200 in 254ms
+ GET /api/clients?search=Bhatia+Plastic+Udyog&limit=30&offset=0 200 in 485ms
+ GET /api/contacts?search=BHUPINDER%20SINGH&withCompanies=true 200 in 214ms
+ ○ Compiling /api/persons ...
+ ✓ Compiled /api/persons in 2.6s (2268 modules)
+ GET /api/persons?search=ne 200 in 3158ms
+ GET /api/persons?search=next 200 in 2723ms
+ GET /dashboard/clients?search=Bhatia+Plastic+Udyog 200 in 647ms
+ GET /api/clients?search=Bhatia+Plastic+Udyog&limit=30&offset=0 200 in 514ms
+ GET /api/clients?search=Bhatia+Plastic+Udyog&limit=30&offset=0 200 in 474ms
+ GET /api/clients?search=Bhatia+Plastic+Udyog&limit=30&offset=0 200 in 564ms
+ GET /api/clients?search=Bhatia+Plastic+Udyog&limit=30&offset=0 200 in 482ms
+ POST /api/clients 201 in 1238ms
+ GET /api/clients?search=Bhatia+Plastic+Udyog&limit=30&offset=0 200 in 544ms
+ GET /api/clients?search=Bhatia+Plastic+Udyog&limit=30&offset=0 200 in 585ms
+ GET /dashboard/clients?search=Plastics+Experts 200 in 74ms
+ GET /api/clients?search=Plastics+Experts&limit=30&offset=0 200 in 482ms
+ GET /api/clients/generate-id?category=PWP 200 in 248ms
+ GET /api/clients/generate-id?category=Importer 200 in 243ms
+ GET /api/clients?search=Plastics+Experts&limit=30&offset=0 200 in 512ms
+ GET /api/contacts?search=RAJNI%20PAHWA&withCompanies=true 200 in 214ms
+ GET /api/clients?search=Plastics+Experts&limit=30&offset=0 200 in 480ms
+ GET /api/contacts?search=RAJNI%20PAHWA&withCompanies=true 200 in 211ms
+ GET /api/contacts?search=RAJNI%20PAHWA%20(&withCompanies=true 200 in 194ms
+ GET /api/contacts?search=RAJNI%20PAHWA%20()&withCompanies=true 200 in 205ms
+ GET /api/contacts?search=RAJNI%20PAHWA%20(RAJESH%20PAHWA)&withCompanies=true 200 in 213ms
+ GET /api/clients?search=Plastics+Experts&limit=30&offset=0 200 in 485ms
+ GET /api/clients?search=Plastics+Experts&limit=30&offset=0 200 in 617ms
+ GET /api/clients?search=Plastics+Experts&limit=30&offset=0 200 in 602ms
+ POST /api/clients 201 in 1363ms
+ GET /api/clients?search=Plastics+Experts&limit=30&offset=0 200 in 794ms
+ GET /api/clients?search=Plastics+Experts&limit=30&offset=0 200 in 804ms
+ GET /api/clients?search=Plastics+Experts&limit=30&offset=0 200 in 877ms
+ GET /dashboard/clients?search=Gangotri+Polymers 200 in 79ms
+ GET /api/clients?search=Gangotri+Polymers&limit=30&offset=0 200 in 672ms
+ GET /api/clients/generate-id?category=PWP 200 in 296ms
+ GET /api/client-custom-field-groups 200 in 323ms
+ GET /api/client-custom-fields 200 in 339ms
+ GET /api/contacts?search=ARUN%20GOEL%20JI&withCompanies=true 200 in 266ms
+ GET /api/contacts?search=GULJARI%20LAL&withCompanies=true 200 in 292ms
+ GET /api/clients?search=Gangotri+Polymers&limit=30&offset=0 200 in 662ms
+ GET /api/clients?search=Gangotri+Polymers&limit=30&offset=0 200 in 701ms
+ POST /api/clients 201 in 1739ms
+ GET /api/clients?search=Gangotri+Polymers&limit=30&offset=0 200 in 802ms
+ GET /dashboard/clients 200 in 116ms
+ GET /api/clients?limit=30&offset=0 200 in 639ms
+ GET /api/clients?limit=30&offset=0 200 in 613ms
+ GET /dashboard/clients?search=Shri+Balaji+Plastic 200 in 78ms
+ GET /api/clients?search=Shri+Balaji+Plastic&limit=30&offset=0 200 in 855ms
+ ○ Compiling /api/clients/[clientId]/workspace ...
+ ✓ Compiled /api/clients/[clientId]/workspace in 941ms (1352 modules)
+ GET /dashboard/clients/PWP-007 200 in 1513ms
+ ○ Compiling /api/client-trackers ...
+ GET /api/clients/PWP-007/workspace 200 in 3479ms
+ ✓ Compiled /api/client-trackers in 11.8s (1355 modules)
+ ✓ Compiled (1366 modules)
+ GET /api/client-notes?clientId=PWP-007 200 in 20494ms
+ GET /api/client-work-items?clientId=PWP-007 200 in 20518ms
+ GET /api/client-work-items?clientId=PWP-007 200 in 20551ms
+ GET /api/client-trackers?clientId=PWP-007 200 in 12048ms
+ GET /api/client-notes?clientId=PWP-007 200 in 20621ms
+ GET /api/client-trackers?clientId=PWP-007 200 in 20719ms
+ ○ Compiling /api/quotations ...
+ ✓ Compiled /api/quotations in 523ms (1368 modules)
+ ✓ Compiled (1452 modules)
+ GET /api/quotations?financialYear=2025-26&clientId=PWP-007 200 in 2033ms
+ GET /api/activities?clientId=PWP-007&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 2196ms
+ GET /api/activities?clientId=PWP-007&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 2655ms
+ GET /api/clients?search=Shri+Balaji+Plastic&limit=30&offset=0 200 in 563ms
+ ○ Compiling /api/clients/generate-id ...
+ ✓ Compiled /api/clients/generate-id in 932ms (1454 modules)
+ GET /api/clients/generate-id?category=PWP 200 in 1357ms
+ GET /api/clients?search=Shri+Balaji+Plastic&limit=30&offset=0 200 in 430ms
+ ✓ Compiled /api/contacts in 411ms (1456 modules)
+ GET /api/contacts?search=AMIT%20GUPTA&withCompanies=true 200 in 766ms
+ GET /api/clients?search=Shri+Balaji+Plastic&limit=30&offset=0 200 in 475ms
+ GET /api/clients?search=Shri+Balaji+Plastic&limit=30&offset=0 200 in 447ms
+ GET /api/clients?search=Shri+Balaji+Plastic&limit=30&offset=0 200 in 495ms
+ POST /api/clients 201 in 690ms
+ GET /api/clients?search=Shri+Balaji+Plastic&limit=30&offset=0 200 in 439ms
+ GET /api/clients?search=Shri+Balaji+Plastic&limit=30&offset=0 200 in 431ms
+ GET /dashboard/clients?search=21+Century+Polymers 200 in 158ms
+ GET /api/clients?search=21+Century+Polymers&limit=30&offset=0 200 in 443ms
+ GET /api/clients/generate-id?category=PWP 200 in 221ms
+ GET /api/contacts?search=RAJESH%20PAHWA&withCompanies=true 200 in 297ms
+ GET /api/clients?search=21+Century+Polymers&limit=30&offset=0 200 in 441ms
+ GET /api/clients?search=21+Century+Polymers&limit=30&offset=0 200 in 450ms
+ POST /api/clients 201 in 858ms
+ GET /api/clients?search=21+Century+Polymers&limit=30&offset=0 200 in 479ms
+ GET /api/clients?search=21+Century+Polymers&limit=30&offset=0 200 in 382ms
+ GET /dashboard/clients?search=Paradise+Enterprises 200 in 83ms
+ GET /api/clients?search=Paradise+Enterprises&limit=30&offset=0 200 in 345ms
+ ○ Compiling /api/client-custom-field-groups ...
+ ✓ Compiled /api/client-custom-field-groups in 885ms (1336 modules)
+ ✓ Compiled (1338 modules)
+ GET /api/client-custom-field-groups 200 in 1712ms
+ GET /api/clients/generate-id?category=PWP 200 in 1737ms
+ GET /api/client-custom-fields 200 in 1821ms
+ GET /api/clients/generate-id?category=Producer 200 in 339ms
+ GET /api/clients?search=Paradise+Enterprises&limit=30&offset=0 200 in 675ms
+ ✓ Compiled /api/contacts in 298ms (1340 modules)
+ GET /api/contacts?search=SAGAR%20JI&withCompanies=true 200 in 679ms
+ GET /api/contacts?search=HARMANDEEP%20SINGH&withCompanies=true 200 in 814ms
+ GET /api/clients?search=Paradise+Enterprises&limit=30&offset=0 200 in 679ms
+ GET /api/clients?search=Paradise+Enterprises&limit=30&offset=0 200 in 684ms
+ GET /api/clients?search=Paradise+Enterprises&limit=30&offset=0 200 in 696ms
+ POST /api/clients 201 in 1864ms
+ GET /api/clients?search=Paradise+Enterprises&limit=30&offset=0 200 in 743ms
+ GET /api/clients?search=Paradise+Enterprises&limit=30&offset=0 200 in 523ms
+ GET /dashboard/clients?search=21+Century+Polymers+Private+Limited 200 in 150ms
+ GET /api/clients?search=21+Century+Polymers+Private+Limited&limit=30&offset=0 200 in 506ms
+ GET /api/clients/generate-id?category=PWP 200 in 316ms
+ GET /api/clients/generate-id?category=Importer 200 in 328ms
+ GET /api/clients?search=21+Century+Polymers+Private+Limited&limit=30&offset=0 200 in 677ms
+ GET /api/contacts?search=RAJESH%20PAHWA&withCompanies=true 200 in 409ms
+ GET /api/clients?search=21+Century+Polymers+Private+Limited&limit=30&offset=0 200 in 670ms
+ GET /api/clients?search=21+Century+Polymers+Private+Limited&limit=30&offset=0 200 in 698ms
+ GET /api/clients?search=21+Century+Polymers+Private+Limited&limit=30&offset=0 200 in 687ms
+ POST /api/clients 201 in 1400ms
+ GET /api/clients?search=21+Century+Polymers+Private+Limited&limit=30&offset=0 200 in 746ms
+ GET /api/clients?search=21+Century+Polymers+Private+Limited&limit=30&offset=0 200 in 531ms
+ GET /dashboard/clients?search=Ganpati+Plastic 200 in 82ms
+ GET /api/clients?search=Ganpati+Plastic&limit=30&offset=0 200 in 459ms
+ GET /api/client-custom-fields 200 in 236ms
+ GET /api/client-custom-field-groups 200 in 242ms
+ GET /api/clients/generate-id?category=PWP 200 in 356ms
+ GET /api/clients/generate-id?category=Producer 200 in 330ms
+ GET /api/clients/generate-id?category=Importer 200 in 410ms
+ GET /api/clients?search=Ganpati+Plastic&limit=30&offset=0 200 in 683ms
+ GET /api/contacts?search=LAVISH%20GARG&withCompanies=true 200 in 211ms
+ GET /api/contacts?search=Aman%20Mishra&withCompanies=true 200 in 267ms
+ GET /api/clients?search=Ganpati+Plastic&limit=30&offset=0 200 in 609ms
+ GET /api/clients?search=Ganpati+Plastic&limit=30&offset=0 200 in 613ms
+ GET /api/clients?search=Ganpati+Plastic&limit=30&offset=0 200 in 768ms
+ POST /api/clients 201 in 1559ms
+ GET /api/clients?search=Ganpati+Plastic&limit=30&offset=0 200 in 741ms
+ GET /api/clients?search=Ganpati+Plastic&limit=30&offset=0 200 in 596ms
+ GET /api/clients?search=Ganpati+Plastic&limit=30&offset=0 200 in 550ms
+ GET /dashboard/clients?search=Electromark 200 in 83ms
+ GET /api/clients?search=Electromark&limit=30&offset=0 200 in 440ms
+ GET /api/clients/generate-id?category=PWP 200 in 240ms
+ GET /api/clients/generate-id?category=Importer 200 in 258ms
+ GET /api/contacts?search=DHARMENDRA%20KUMAR%20SHARMA&withCompanies=true 200 in 208ms
+ POST /api/clients 201 in 915ms
+ GET /api/clients?search=Electromark&limit=30&offset=0 200 in 590ms
+ GET /api/clients?search=Electromark&limit=30&offset=0 200 in 563ms
+ GET /dashboard/clients?search=Pearl+Plastic 200 in 85ms
+ GET /api/clients?search=Pearl+Plastic&limit=30&offset=0 200 in 424ms
+ GET /api/clients/generate-id?category=PWP 200 in 255ms
+ GET /api/clients/generate-id?category=Importer 200 in 233ms
+ GET /api/contacts?search=ANKIT%20GOEL&withCompanies=true 200 in 210ms
+ GET /api/clients?search=Pearl+Plastic&limit=30&offset=0 200 in 486ms
+ POST /api/clients 201 in 924ms
+ GET /api/clients?search=Pearl+Plastic&limit=30&offset=0 200 in 691ms
+ GET /api/clients?search=Pearl+Plastic&limit=30&offset=0 200 in 555ms
+ GET /dashboard/clients?search=Arihant+Packaging 200 in 86ms
+ GET /api/clients?search=Arihant+Packaging&limit=30&offset=0 200 in 438ms
+ GET /api/client-custom-field-groups 200 in 224ms
+ GET /api/client-custom-fields 200 in 252ms
+ GET /api/clients/generate-id?category=PWP 200 in 290ms
+ GET /api/clients/generate-id?category=Producer 200 in 244ms
+ GET /api/clients?search=Arihant+Packaging&limit=30&offset=0 200 in 494ms
+ GET /api/contacts?search=SRIKANT%20JAIN&withCompanies=true 200 in 204ms
+ GET /api/clients?search=Arihant+Packaging&limit=30&offset=0 200 in 483ms
+ GET /api/clients?search=Arihant+Packaging&limit=30&offset=0 200 in 490ms
+ GET /api/clients?search=Arihant+Packaging&limit=30&offset=0 200 in 525ms
+ POST /api/clients 201 in 929ms
+ GET /api/clients?search=Arihant+Packaging&limit=30&offset=0 200 in 626ms
+ GET /dashboard/clients 200 in 116ms
+ GET /api/clients?limit=30&offset=0 200 in 452ms
+ GET /api/clients?limit=30&offset=0 200 in 383ms
+ ○ Compiling /api/clients/[clientId]/workspace ...
+ ✓ Compiled /api/clients/[clientId]/workspace in 801ms (1354 modules)
+ GET /api/clients/IMP-088/workspace 200 in 1121ms
+ GET /api/clients/PRD-082/workspace 200 in 1451ms
+ GET /dashboard/clients/PRD-082 200 in 156ms
+ ○ Compiling /api/client-trackers ...
+ ✓ Compiled /api/client-trackers in 2.6s (1357 modules)
+ ✓ Compiled (1370 modules)
+ GET /api/client-work-items?clientId=PRD-082 200 in 3673ms
+ GET /api/client-work-items?clientId=PRD-082 200 in 3711ms
+ GET /api/client-trackers?clientId=PRD-082 200 in 3710ms
+ GET /api/client-notes?clientId=PRD-082 200 in 3702ms
+ GET /api/client-notes?clientId=PRD-082 200 in 3755ms
+ GET /api/activities?clientId=PRD-082&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 3793ms
+ GET /api/client-trackers?clientId=PRD-082 200 in 229ms
+ ○ Compiling /api/quotations ...
+ ✓ Compiled /api/quotations in 614ms (1454 modules)
+ GET /dashboard/financial-year?open=targets&clientId=PRD-082&fy=2025-26 200 in 1354ms
+ GET /api/activities?clientId=PRD-082&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 1396ms
+ GET /api/quotations?financialYear=2025-26&clientId=PRD-082 200 in 1516ms
+ ✓ Compiled /api/financial-year in 412ms (1455 modules)
+ GET /api/financial-year?fy=2025-26 200 in 1265ms
+ GET /api/clients 200 in 1560ms
+ GET /api/financial-year?fy=2025-26 200 in 325ms
+ GET /api/clients 200 in 666ms
+ GET /api/client-notes?clientId=PRD-082 200 in 339ms
+ GET /api/client-work-items?clientId=PRD-082 200 in 323ms
+ GET /api/client-notes?clientId=PRD-082 200 in 344ms
+ GET /api/client-work-items?clientId=PRD-082 200 in 392ms
+ GET /api/client-trackers?clientId=PRD-082 200 in 425ms
+ GET /api/activities?clientId=PRD-082&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 426ms
+ GET /api/client-trackers?clientId=PRD-082 200 in 336ms
+ GET /api/quotations?financialYear=2025-26&clientId=PRD-082 200 in 363ms
+ GET /api/clients/PRD-082/workspace 200 in 615ms
+ GET /api/quotations?financialYear=2025-26&clientId=PRD-082 200 in 165ms
+ GET /api/activities?clientId=PRD-082&financialYear=2025-26&limit=10&offset=0&range=30d 200 in 769ms
+ ○ Compiling /dashboard/client-trackers ...
+ ✓ Compiled /dashboard/client-trackers in 2.1s (2396 modules)
+ GET /dashboard/client-trackers 200 in 2948ms
+ ✓ Compiled in 1002ms (933 modules)
+ GET /dashboard/client-trackers 200 in 305ms
+ GET /dashboard/client-trackers 200 in 140ms
+ GET /api/client-trackers 200 in 244ms
+ GET /api/client-trackers 200 in 168ms
+ ✓ Compiled in 752ms (933 modules)
+ ✓ Compiled in 1000ms (933 modules)
+ GET /dashboard/client-trackers 200 in 1074ms
+ ✓ Compiled in 953ms (933 modules)
+ GET /dashboard/client-trackers 200 in 1103ms
+ GET /dashboard/client-trackers 200 in 164ms
+ ✓ Compiled in 851ms (933 modules)
+ GET /dashboard/client-trackers 200 in 310ms
+ ✓ Compiled in 952ms (933 modules)
+ GET /dashboard/client-trackers 200 in 148ms
+ ✓ Compiled in 2.9s (2247 modules)
+ GET /dashboard/client-trackers 200 in 530ms
+ ✓ Compiled in 1418ms (933 modules)
+ GET /dashboard/client-trackers 200 in 251ms
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 1633ms (1308 modules)
+ GET /api/auth/session 200 in 2755ms
+ ○ Compiling /dashboard/client-trackers/[id] ...
+ ✓ Compiled /dashboard/client-trackers/[id] in 13.1s (2318 modules)
+ GET /dashboard/client-trackers 200 in 786ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 17519ms
+ ✓ Compiled /api/documents in 368ms (1384 modules)
+ ✓ Compiled in 2.3s (956 modules)
+ GET /api/auth/session 200 in 28475ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0/activity 200 in 28497ms
+ GET /api/documents 200 in 28595ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0?limit=100&offset=0 200 in 28867ms
+ GET /api/clients 200 in 29108ms
+ ○ Compiling /api/financial-year-preference ...
+ ✓ Compiled /api/financial-year-preference in 1724ms (2491 modules)
+ ✓ Compiled (2498 modules)
+ GET /api/financial-year-preference 200 in 3092ms
+ GET /api/trash?type=all&count=1 200 in 3241ms
+ GET /api/email-log?count=1 200 in 3225ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0/email 200 in 33707ms
+ PATCH /api/financial-year-preference 200 in 295ms
+ ✓ Compiled in 980ms (1341 modules)
+ ✓ Compiled in 5.9s (2297 modules)
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 1517ms
+ GET /dashboard/client-trackers 200 in 1519ms
+ ○ Compiling /api/auth/[...nextauth] ...
+ ✓ Compiled /api/auth/[...nextauth] in 15.9s (2331 modules)
+ GET /api/auth/session 200 in 17396ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 3476ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 1103ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 220ms
+ ○ Compiling /api/clients ...
+ ✓ Compiled /api/clients in 5.6s (1365 modules)
+ ✓ Compiled (2489 modules)
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/activity 200 in 39903ms
+ GET /api/documents 200 in 39977ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/email 200 in 40234ms
+ GET /api/clients 200 in 40668ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 22873ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 22895ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef?limit=100&offset=0 200 in 40999ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/email 200 in 1505ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/activity 200 in 1881ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef?limit=100&offset=0 200 in 2582ms
+ GET /api/documents 200 in 1792ms
+ GET /api/clients 200 in 2467ms
+ ✓ Compiled in 5.2s (3457 modules)
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 1340ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 182ms
+ ○ Compiling /api/client-trackers/[id]/activity ...
+ ✓ Compiled /api/client-trackers/[id]/activity in 22s (2311 modules)
+ ✓ Compiled in 0ms (2487 modules)
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0/email 200 in 24997ms
+ GET /api/documents 200 in 25388ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0/activity 200 in 25368ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/activity 200 in 25649ms
+ GET /api/documents 200 in 25681ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef/email 200 in 25721ms
+ GET /dashboard/client-trackers/6ab3c371bd19cbdfd50342ef 200 in 18944ms
+ GET /dashboard/client-trackers/6ab11fba07584443b0ff86f0 200 in 18935ms
+ GET /api/client-trackers/6ab11fba07584443b0ff86f0?limit=100&offset=0 200 in 26096ms
+ GET /api/clients 200 in 26427ms
+ GET /api/clients 200 in 26298ms
+ GET /api/client-trackers/6ab3c371bd19cbdfd50342ef?limit=100&offset=0 200 in 26730ms
