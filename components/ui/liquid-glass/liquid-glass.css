@@ -330,7 +330,13 @@
 }
 .condition-select-surface::after { opacity: .3; }
 .dark .condition-select-surface.glass-surface { background: color-mix(in srgb, var(--color-card) 50%, var(--glass-tint)); }
-.condition-select-options { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.condition-select-options { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(120,120,128,.4) transparent; }
+.dark .condition-select-options { scrollbar-color: rgba(190,195,205,.38) transparent; }
+.condition-select-options::-webkit-scrollbar { width: 5px; }
+.condition-select-options::-webkit-scrollbar-track { background: transparent; }
+.condition-select-options::-webkit-scrollbar-thumb { background: rgba(120,120,128,.4); border-radius: 8px; }
+.dark .condition-select-options::-webkit-scrollbar-thumb { background: rgba(190,195,205,.38); }
+.condition-select-options::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .condition-select-option {
   display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px;
   padding: 9px 10px; border: 0; border-radius: 9px; background: transparent;

@@ -1,4 +1,5 @@
 "use client";
+import { useClientSearch } from "@/lib/search/use-client-search";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
@@ -140,15 +141,19 @@ export default function UploadRecordsPage() {
     invoiceCount: "0",
   });
 
-  const { data: rawClients } = useCache<Client[]>("/api/clients");
+  const { data: rawClients, loading: clientsLoading } = useCache<Client[]>("/api/clients");
   const clients = useMemo(() => (Array.isArray(rawClients) ? rawClients : []), [rawClients]);
 
-  const { data: rawUploads, loading, refetch } = useCache<UploadRecord[]>(`/api/upload-records?fy=${fy}`, { enabled: financialYearLoaded });
+  const { data: rawUploads, loading: recordsLoading, refetch } = useCache<UploadRecord[]>(`/api/upload-records?fy=${fy}`, { enabled: financialYearLoaded });
+  const loading = recordsLoading || clientsLoading;
   const uploads = useMemo(() => (Array.isArray(rawUploads) ? rawUploads : []), [rawUploads]);
 
+  const matchedClientIds = useClientSearch(clients, search);
+  const clientMap = useMemo(() => new Map(clients.map(client => [client.clientId, client])), [clients]);
+
   const clientName = useCallback(
-    (clientId: string) => clients.find((client) => client.clientId === clientId)?.companyName || clientId,
-    [clients]
+    (clientId: string) => clientMap.get(clientId)?.companyName || clientId,
+    [clientMap]
   );
 
   const selectedClient = useMemo(
@@ -156,16 +161,17 @@ export default function UploadRecordsPage() {
     [clients, form.clientId]
   );
 
+  const pickerMatchedIds = useClientSearch(clients, clientQuery);
   const filteredClientOptions = useMemo(() => {
     const query = clientQuery.trim().toLowerCase();
     const matches = query
       ? clients.filter((client) =>
-          client.companyName.toLowerCase().includes(query) ||
+          pickerMatchedIds.has(client.clientId) || client.companyName.toLowerCase().includes(query) ||
           client.clientId.toLowerCase().includes(query)
         )
       : clients;
     return matches.slice(0, 8);
-  }, [clients, clientQuery]);
+  }, [clients, clientQuery, pickerMatchedIds]);
 
   const uploadFormTotal = useMemo(() => (
     (Number(form.cat1) || 0) +
@@ -189,11 +195,12 @@ export default function UploadRecordsPage() {
     if (!search.trim()) return uploads;
     const query = search.toLowerCase();
     return uploads.filter((upload) =>
+      matchedClientIds.has(upload.clientId) ||
       clientName(upload.clientId).toLowerCase().includes(query) ||
       upload.clientId.toLowerCase().includes(query) ||
       uploadTypeLabel(upload.uploadType).toLowerCase().includes(query)
     );
-  }, [uploads, search, clientName]);
+  }, [uploads, search, clientName, matchedClientIds]);
 
   const uploadSummaries = useMemo<UploadSummary[]>(() => {
     const grouped = new Map<string, UploadRecord[]>();

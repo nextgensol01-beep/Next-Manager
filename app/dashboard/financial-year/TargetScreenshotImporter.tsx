@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { readJsonResponse } from "@/lib/http-response";
+
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -47,6 +49,10 @@ function targetAt(extraction: ScreenshotTargetExtraction, category: TargetCatego
   return extraction.targets.find((target) => target.category === category && target.type === type);
 }
 
+function ScreenshotImportFrame({ embedded, ...props }: ComponentProps<typeof Modal> & { embedded?: boolean }) {
+  return embedded ? props.open ? <div className="fy-screenshot-import">{props.children}</div> : null : <Modal {...props} />;
+}
+
 export default function TargetScreenshotImporter({
   open,
   clientId,
@@ -54,6 +60,7 @@ export default function TargetScreenshotImporter({
   existingTargets,
   onClose,
   onConfirm,
+  embedded = false,
 }: {
   open: boolean;
   clientId: string;
@@ -61,6 +68,7 @@ export default function TargetScreenshotImporter({
   existingTargets: TargetEntry[];
   onClose: () => void;
   onConfirm: (targets: TargetEntry[]) => void;
+  embedded?: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const analysisVersionRef = useRef(0);
@@ -81,7 +89,7 @@ export default function TargetScreenshotImporter({
   ), [existingTargets]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) { analysisVersionRef.current++; return; }
     analysisVersionRef.current += 1;
     setPhase("choose");
     setFile(null);
@@ -100,8 +108,9 @@ export default function TargetScreenshotImporter({
       cache: "no-store",
       signal: controller.signal,
     })
-      .then(async (response) => response.ok ? response.json() as Promise<SavedScreenshot[]> : [])
+      .then(async (response) => response.ok ? readJsonResponse(response) as Promise<SavedScreenshot[]> : [])
       .then((documents) => {
+        if (controller.signal.aborted) return;
         setSavedScreenshot(documents.find((document) => (
           document.documentKind === "target-screenshot" && document.financialYear === financialYear
         )) || null);
@@ -110,9 +119,15 @@ export default function TargetScreenshotImporter({
         if (requestError instanceof DOMException && requestError.name === "AbortError") return;
         setSavedScreenshot(null);
       })
-      .finally(() => setLoadingSavedScreenshot(false));
-    return () => controller.abort();
+      .finally(() => { if (!controller.signal.aborted) setLoadingSavedScreenshot(false); });
+    return () => { analysisVersionRef.current++; controller.abort(); };
   }, [clientId, financialYear, open]);
+
+  useEffect(() => {
+    if (!open || !embedded) return;
+    const frame = requestAnimationFrame(() => fileInputRef.current?.parentElement?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [open, embedded]);
 
   useEffect(() => () => {
     if (originalPreview) URL.revokeObjectURL(originalPreview);
@@ -158,12 +173,14 @@ export default function TargetScreenshotImporter({
 
   const readSavedScreenshot = async () => {
     if (!savedScreenshot) return;
+    const requestVersion = analysisVersionRef.current;
     setLoadingSavedScreenshot(true);
     setError("");
     try {
       const response = await fetch(`/api/documents/${savedScreenshot._id}/preview?fresh=${Date.now()}`, { cache: "no-store" });
       if (!response.ok) throw new Error("The saved target screenshot could not be opened.");
       const blob = await response.blob();
+      if (requestVersion !== analysisVersionRef.current) return;
       await processFile(new File([blob], savedScreenshot.documentName || `Target ${financialYear}.png`, {
         type: blob.type || savedScreenshot.mimeType || "image/png",
       }));
@@ -230,7 +247,8 @@ export default function TargetScreenshotImporter({
   };
 
   return (
-    <Modal
+    <ScreenshotImportFrame
+      embedded={embedded}
       open={open}
       onClose={phase === "processing" ? () => undefined : onClose}
       title="Import Targets from Screenshot"
@@ -466,6 +484,6 @@ export default function TargetScreenshotImporter({
           </div>
         </div>
       )}
-    </Modal>
+    </ScreenshotImportFrame>
   );
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { readJsonResponse } from "@/lib/http-response";
+
 import React, { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { Send } from "lucide-react";
@@ -61,7 +63,7 @@ export default function EmailReminderModal({ billing, clients, onClose }: EmailR
     (async () => {
       try {
         const response = await fetch("/api/email/template?name=payment-reminder");
-        const { html: template } = await response.json();
+        const { html: template } = await readJsonResponse(response);
         if (!cancelled) setReminderPreviewHtml(buildReminderHtml(template, billing, cName));
       } catch {
         if (!cancelled) setReminderPreviewHtml(null);
@@ -121,7 +123,7 @@ export default function EmailReminderModal({ billing, clients, onClose }: EmailR
           logClientName: client?.companyName || billing.clientId,
           logFy: billing.financialYear,
         }),
-      }).then((res) => res.json())));
+      }).then((res) => readJsonResponse(res))));
       const failed = results.filter((data) => !data.success);
       if (failed.length > 0) toast.error(`${failed.length} email(s) failed`);
       else {

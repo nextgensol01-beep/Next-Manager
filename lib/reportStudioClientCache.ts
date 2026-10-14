@@ -1,3 +1,4 @@
+import { readJsonResponse } from "@/lib/http-response";
 import type { ReportStudioConfig, ReportStudioResponse } from "@/lib/report-studio";
 
 type CacheEntry = {
@@ -61,7 +62,7 @@ export async function fetchReportStudio(config: ReportStudioConfig, options: { r
     cache: "no-store",
     body: JSON.stringify(config),
   }).then(async (response) => {
-    const body = await response.json().catch(() => null);
+    const body = await readJsonResponse(response).catch(() => null);
     if (!response.ok) throw new Error(body?.error || "Unable to run report");
     const data = body as ReportStudioResponse;
     responseCache.set(key, { data, storedAt: Date.now() });

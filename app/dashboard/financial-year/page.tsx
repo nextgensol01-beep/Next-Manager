@@ -1,4 +1,6 @@
 "use client";
+import { useClientSearch } from "@/lib/search/use-client-search";
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
@@ -9,147 +11,38 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import TableWrapper from "@/components/ui/TableWrapper";
 import EmptyState from "@/components/ui/EmptyState";
 import FYTabBar from "@/components/ui/FYTabBar";
-import { FINANCIAL_YEARS } from "@/lib/utils";
-import { Plus, Pencil, Trash2, BarChart2, ChevronDown, Search, X, Recycle, Leaf, ScanText } from "lucide-react";
+import { Plus, Pencil, Trash2, BarChart2, ChevronDown, Search, X, Recycle, Leaf } from "lucide-react";
 import { useCache, invalidate } from "@/lib/useCache";
-import { useFinancialYearPreference, useFinancialYearState } from "@/app/providers";
+import { useFinancialYearState } from "@/app/providers";
 import FinancialYearInsightsModal from "./FinancialYearInsightsModal";
-import TargetScreenshotImporter from "./TargetScreenshotImporter";
+import FinancialYearModal from "@/components/financial-year/FinancialYearModal";
 
 import {
   RemainingTooltip,
-  CAT_IDS,
-  TargetRow,
   TD,
   TH,
   buildEntryValueMap,
-  createEmptyGeneratedForm,
-  emptyTarget,
   type Client,
   type FYRecord,
-  type GeneratedEntry,
-  type TargetEntry,
 } from "./FinancialYearSupport";
-
-const CREDIT_TYPE_VALUES = ["RECYCLING", "EOL"] as const;
-const ENTRY_COMBO_COUNT = CAT_IDS.length * CREDIT_TYPE_VALUES.length;
-
-function numberValue(value: unknown) {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function normaliseEntry(entry: TargetEntry): TargetEntry {
-  return {
-    categoryId: String(entry.categoryId),
-    type: entry.type === "EOL" ? "EOL" : "RECYCLING",
-    value: numberValue(entry.value),
-  };
-}
-
-function activeEntries<T extends TargetEntry>(entries: T[]): T[] {
-  return entries
-    .map((entry) => normaliseEntry(entry) as T)
-    .filter((entry) => (CAT_IDS as readonly string[]).includes(entry.categoryId) && entry.value > 0);
-}
-
-function duplicateEntryIndices(entries: TargetEntry[]) {
-  const firstIndex = new Map<string, number>();
-  const duplicates = new Set<number>();
-
-  entries.forEach((rawEntry, index) => {
-    const entry = normaliseEntry(rawEntry);
-    if (entry.value <= 0) return;
-
-    const key = `${entry.categoryId}|${entry.type}`;
-    const first = firstIndex.get(key);
-
-    if (first === undefined) {
-      firstIndex.set(key, index);
-      return;
-    }
-
-    duplicates.add(first);
-    duplicates.add(index);
-  });
-
-  return duplicates;
-}
-
-function entrySummary(entries: TargetEntry[]) {
-  return activeEntries(entries).reduce(
-    (summary, entry) => {
-      summary.total += entry.value;
-      if (entry.type === "EOL") summary.eol += entry.value;
-      else summary.recycling += entry.value;
-      return summary;
-    },
-    { total: 0, recycling: 0, eol: 0 }
-  );
-}
-
-function selectedEntryCombos(entries: TargetEntry[]) {
-  return new Set(entries.map((entry) => `${entry.categoryId}|${entry.type === "EOL" ? "EOL" : "RECYCLING"}`));
-}
-
-function nextAvailableEntry(entries: TargetEntry[]): TargetEntry {
-  const selected = selectedEntryCombos(entries);
-
-  for (const categoryId of CAT_IDS) {
-    for (const type of CREDIT_TYPE_VALUES) {
-      if (!selected.has(`${categoryId}|${type}`)) {
-        return { categoryId, type, value: 0 };
-      }
-    }
-  }
-
-  return emptyTarget();
-}
-
-function ensureEditableRows<T extends TargetEntry>(entries: T[]): T[] {
-  return entries.length > 0 ? entries : [emptyTarget() as T];
-}
-
-function migratedLegacyEntries(rec: FYRecord, mode: "generated" | "targets"): TargetEntry[] {
-  const migrated: TargetEntry[] = [];
-  const record = rec as unknown as Record<string, unknown>;
-
-  for (const categoryId of CAT_IDS) {
-    const value = mode === "generated"
-      ? numberValue(record[`cat${categoryId}Generated`] ?? record[`creditsCat${categoryId}`])
-      : numberValue(record[`cat${categoryId}Target`] ?? record[`targetCat${categoryId}`]);
-
-    if (value > 0) {
-      migrated.push({ categoryId, type: "RECYCLING", value });
-    }
-  }
-
-  return migrated;
-}
 
 export default function FinancialYearPage() {
   const [fy, setFy, financialYearLoaded] = useFinancialYearState();
-  const { effectiveFinancialYear } = useFinancialYearPreference();
   const [modalOpen, setModalOpen] = useState(false);
   const [editRecord, setEditRecord] = useState<FYRecord | null>(null);
-  const [saving, setSaving] = useState(false);
   const [breakdownRec, setBreakdownRec] = useState<FYRecord | null>(null);
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [expandedFY, setExpandedFY] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const targetDeepLinkHandled = useRef(false);
-  const [screenshotImporterOpen, setScreenshotImporterOpen] = useState(false);
-  const [screenshotImportConfirmed, setScreenshotImportConfirmed] = useState(false);
+  const [modalContext, setModalContext] = useState({ clientId: "", financialYear: fy });
 
-  // Form state - generated fields (PWP) + targets[] (PIBO)
-  const [genForm, setGenForm] = useState(() => createEmptyGeneratedForm(effectiveFinancialYear));
-  const [generated, setGenerated] = useState<GeneratedEntry[]>([]);
-  const [targets, setTargets] = useState<TargetEntry[]>([]);
-
-  const { data: records, loading: recLoading, refetch: refetchRecords } =
+  const { data: records, loading: recLoading, refetch: refetchRecords, mutate: mutateRecords } =
     useCache<FYRecord[]>(`/api/financial-year?fy=${fy}`, { enabled: financialYearLoaded, initialData: [] });
   const { data: clients, loading: clientsLoading } = useCache<Client[]>("/api/clients", { initialData: [] });
+
+  const matchedClientIds = useClientSearch(clients, search);
 
   const clientMap = useMemo(() => new Map(clients.map((client) => [client.clientId, client])), [clients]);
   const getCategory = (id: string) => clientMap.get(id)?.category || "";
@@ -163,76 +56,22 @@ export default function FinancialYearPage() {
     const category = client?.category || "";
 
     return (
+      matchedClientIds.has(rec.clientId) ||
+      rec.financialYear.toLowerCase().includes(q) ||
       clientName.toLowerCase().includes(q) ||
       rec.clientId.toLowerCase().includes(q) ||
       category.toLowerCase().includes(q)
     );
-  }), [clientMap, records, search]);
+  }), [clientMap, records, search, matchedClientIds]);
 
   // -- Modal open helpers --------------------------------------------------
 
   const openAdd = () => {
-    setEditRecord(null);
-    setScreenshotImportConfirmed(false);
-    setGenForm(createEmptyGeneratedForm(fy));
-    setGenerated([emptyTarget()]);
-    setTargets([emptyTarget()]);
-    setModalOpen(true);
+    setEditRecord(null); setModalContext({ clientId: "", financialYear: fy }); setModalOpen(true);
   };
-
-  const openEditFromInsights = (rec: FYRecord) => {
-    setInsightsOpen(false);
-    openEdit(rec);
-  };
-
-  const openEdit = (rec: FYRecord) => {
-    setEditRecord(rec);
-    setScreenshotImportConfirmed(false);
-    setGenForm({
-      clientId: rec.clientId,
-      financialYear: rec.financialYear,
-    });
-
-    // Populate generated[]: use new structure if present, migrate from legacy flat fields
-    const recordGenerated = activeEntries(rec.generated ?? []);
-    if (recordGenerated.length > 0) {
-      setGenerated(recordGenerated.map((t) => ({ ...t })));
-    } else {
-      setGenerated(ensureEditableRows(migratedLegacyEntries(rec, "generated") as GeneratedEntry[]));
-    }
-
-    // Populate targets[]: use new structure if present, migrate from legacy flat fields
-    const recordTargets = activeEntries(rec.targets ?? []);
-    if (recordTargets.length > 0) {
-      setTargets(recordTargets.map((t) => ({ ...t })));
-    } else {
-      setTargets(ensureEditableRows(migratedLegacyEntries(rec, "targets")));
-    }
-
-    setModalOpen(true);
-  };
-
-  const openScreenshotImporter = () => {
-    if (!genForm.clientId || !genForm.financialYear) {
-      toast.error("Select a client and financial year first.");
-      return;
-    }
-    setScreenshotImportConfirmed(false);
-    setModalOpen(false);
-    setScreenshotImporterOpen(true);
-  };
-
-  const closeScreenshotImporter = () => {
-    setScreenshotImporterOpen(false);
-    setModalOpen(true);
-  };
-
-  const confirmScreenshotTargets = (reviewedTargets: TargetEntry[]) => {
-    setTargets(reviewedTargets);
-    setScreenshotImportConfirmed(true);
-    setScreenshotImporterOpen(false);
-    setModalOpen(true);
-    toast.success("Verified screenshot values added to the form. Click Save Record to update the database.");
+  const openEditFromInsights = (record: FYRecord) => { setInsightsOpen(false); openEdit(record); };
+  const openEdit = (record: FYRecord) => {
+    setEditRecord(record); setModalContext({ clientId: record.clientId, financialYear: record.financialYear }); setModalOpen(true);
   };
 
   useEffect(() => {
@@ -259,62 +98,12 @@ export default function FinancialYearPage() {
 
     setSearch(linkedClientId);
     const record = records.find((entry) => entry.clientId === linkedClientId && entry.financialYear === linkedFy);
-    if (record) {
-      setEditRecord(record);
-      setGenForm({ clientId: record.clientId, financialYear: record.financialYear });
-
-      const recordGenerated = activeEntries(record.generated ?? []);
-      setGenerated(recordGenerated.length > 0
-        ? recordGenerated.map((entry) => ({ ...entry }))
-        : ensureEditableRows(migratedLegacyEntries(record, "generated") as GeneratedEntry[]));
-
-      const recordTargets = activeEntries(record.targets ?? []);
-      setTargets(recordTargets.length > 0
-        ? recordTargets.map((entry) => ({ ...entry }))
-        : ensureEditableRows(migratedLegacyEntries(record, "targets")));
-      setModalOpen(true);
-    } else if (clientMap.has(linkedClientId)) {
-      setEditRecord(null);
-      setGenForm({ clientId: linkedClientId, financialYear: linkedFy });
-      setGenerated([emptyTarget()]);
-      setTargets([emptyTarget()]);
-      setModalOpen(true);
-    } else {
-      toast.error("The linked client could not be found.");
-    }
+    if (record || clientMap.has(linkedClientId)) {
+      setEditRecord(record || null); setModalContext({ clientId: linkedClientId, financialYear: linkedFy }); setModalOpen(true);
+    } else toast.error("The linked client could not be found.");
 
     targetDeepLinkHandled.current = true;
   }, [clientMap, clientsLoading, financialYearLoaded, fy, recLoading, records, setFy]);
-
-  // -- Target row mutations ------------------------------------------------
-
-  const handleGeneratedChange = (idx: number, updated: GeneratedEntry) => {
-    setGenerated((prev) => prev.map((t, i) => (i === idx ? updated : t)));
-  };
-  const addGenerated = () => setGenerated((prev) => (
-    selectedEntryCombos(prev).size >= ENTRY_COMBO_COUNT ? prev : [...prev, nextAvailableEntry(prev)]
-  ));
-  const removeGenerated = (idx: number) =>
-    setGenerated((prev) => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
-
-  const handleTargetChange = (idx: number, updated: TargetEntry) => {
-    setTargets((prev) => prev.map((t, i) => (i === idx ? updated : t)));
-  };
-
-  const addTarget = () => setTargets((prev) => (
-    selectedEntryCombos(prev).size >= ENTRY_COMBO_COUNT ? prev : [...prev, nextAvailableEntry(prev)]
-  ));
-
-  const removeTarget = (idx: number) =>
-    setTargets((prev) => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
-
-  const genDupeIndices = useMemo(() => duplicateEntryIndices(generated), [generated]);
-  const dupeIndices = useMemo(() => duplicateEntryIndices(targets), [targets]);
-  const hasGenDupes = genDupeIndices.size > 0;
-  const hasTgtDupes = dupeIndices.size > 0;
-  const hasDupes = hasGenDupes || hasTgtDupes;
-  const canAddGenerated = useMemo(() => selectedEntryCombos(generated).size < ENTRY_COMBO_COUNT, [generated]);
-  const canAddTarget = useMemo(() => selectedEntryCombos(targets).size < ENTRY_COMBO_COUNT, [targets]);
 
   // -- Delete --------------------------------------------------------------
 
@@ -331,89 +120,6 @@ export default function FinancialYearPage() {
       setDeletingId(null);
     }
   };
-
-  // -- Submit --------------------------------------------------------------
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (hasDupes) { toast.error("Remove duplicate category+type combinations before saving"); return; }
-
-    try {
-      const selectedCat = getCategory(genForm.clientId);
-      const isPWP = selectedCat === "PWP";
-      const isSIMP = selectedCat === "SIMP";
-
-      if (!selectedCat) {
-        toast.error("Select a client before saving");
-        return;
-      }
-      if (isSIMP) {
-        toast.error("SIMP clients do not need targets or credits");
-        return;
-      }
-
-      const generatedToSave = activeEntries(generated);
-      const targetsToSave = activeEntries(targets);
-      const entriesToSave = isPWP ? generatedToSave : targetsToSave;
-
-      if (!editRecord && entriesToSave.length === 0) {
-        toast.error(`Enter at least one ${isPWP ? "generated credit" : "target"} value before saving`);
-        return;
-      }
-
-      setSaving(true);
-
-      const payload: Record<string, unknown> = {
-        clientId: genForm.clientId,
-        financialYear: genForm.financialYear,
-      };
-
-      if (isPWP) {
-        // Include generated[] - backend derives flat cat1Generated...cat4Generated
-        payload.generated = generatedToSave;
-        payload.targets = [];
-      } else {
-        // Include targets[] - backend derives flat cat1Target...cat4Target
-        payload.generated = [];
-        payload.targets = targetsToSave;
-        if (screenshotImportConfirmed) payload.targetImportReviewConfirmed = true;
-      }
-
-      const url = editRecord ? `/api/financial-year/${editRecord._id}` : "/api/financial-year";
-      const method = editRecord ? "PUT" : "POST";
-      const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      if (!r.ok) {
-        const data = await r.json().catch(() => null);
-        toast.error(data?.error || "Error saving");
-        return;
-      }
-      toast.success(editRecord ? "Updated!" : "Saved!");
-      invalidate("/api/financial-year", "/api/dashboard");
-      setModalOpen(false);
-      setScreenshotImportConfirmed(false);
-      refetchRecords();
-    } catch {
-      toast.error("Something went wrong saving the record");
-    } finally { setSaving(false); }
-  };
-
-  const selectedCat = getCategory(genForm.clientId);
-  const isPWP = selectedCat === "PWP";
-  const isSIMP = selectedCat === "SIMP";
-
-  // Target totals for the summary bar
-  const targetSummary = useMemo(() => entrySummary(targets), [targets]);
-  const targetTotal = targetSummary.total;
-  const targetTotalRecycl = targetSummary.recycling;
-  const targetTotalEOL = targetSummary.eol;
-
-  // Generated totals for PWP summary bar
-  const generatedSummary = useMemo(() => entrySummary(generated), [generated]);
-  const generatedTotal = generatedSummary.total;
-  const generatedTotalRecycl = generatedSummary.recycling;
-  const generatedTotalEOL = generatedSummary.eol;
-  const hasActiveModalEntries = isPWP ? generatedTotal > 0 : targetTotal > 0;
-  const saveDisabled = saving || !selectedCat || isSIMP || hasDupes || (!editRecord && !hasActiveModalEntries);
 
   /**
    * Build typed entries + achievedMap for the breakdown modal.
@@ -794,268 +500,16 @@ export default function FinancialYearPage() {
         onEditRecord={openEditFromInsights}
       />
 
-      {/* -- Add / Edit modal -- */}
-      <Modal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={editRecord ? "Edit FY Record" : "Add FY Record"}
-        size="lg"
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-
-          {/* Client + FY selectors */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="label">Client *</label>
-              <select
-                className="input-field"
-                value={genForm.clientId}
-                onChange={(e) => {
-                  setScreenshotImportConfirmed(false);
-                  setGenForm({ ...genForm, clientId: e.target.value });
-                }}
-                required
-                disabled={!!editRecord}
-              >
-                <option value="">Select Client</option>
-                {clients.map((c) => (
-                  <option key={c.clientId} value={c.clientId}>
-                    {c.companyName} ({c.category})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="label">Financial Year *</label>
-              <select
-                className="input-field"
-                value={genForm.financialYear}
-                onChange={(e) => {
-                  setScreenshotImportConfirmed(false);
-                  setGenForm({ ...genForm, financialYear: e.target.value });
-                }}
-                required
-              >
-                {FINANCIAL_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* -- PWP: Credits Generated (per category + type) -- */}
-          {selectedCat && isPWP && (
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-xs font-semibold text-muted uppercase tracking-wide">
-                  Credits Generated - Category &amp; Type
-                </p>
-                <span className="text-[10px] text-faint">Same category can have both types</span>
-              </div>
-
-              {/* Column headers */}
-              <div className="grid grid-cols-[1fr_1.7fr_1fr_26px] items-center gap-2 px-2 mb-1.5
-                text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-wide">
-                <span>Category</span>
-                <span className="text-center">Type</span>
-                <span className="text-right">Generated</span>
-                <span />
-              </div>
-
-              {/* Generated rows */}
-              <div className="space-y-2 relative">
-                {generated.map((entry, idx) => (
-                  <div key={idx} className="relative">
-                    <TargetRow
-                      entry={entry}
-                      index={idx}
-                      isDupe={genDupeIndices.has(idx)}
-                      canRemove={generated.length > 1}
-                      onChange={handleGeneratedChange}
-                      onRemove={removeGenerated}
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={addGenerated}
-                disabled={!canAddGenerated}
-                className="mt-2 flex items-center gap-1.5 text-xs font-medium text-brand-600 dark:text-brand-400
-                           hover:text-brand-700 px-2 py-1 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20
-                           transition-colors disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-              >
-                <Plus className="w-3.5 h-3.5" /> Add Generated Row
-              </button>
-
-              {hasGenDupes && (
-                <p className="mt-2 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-                  <span>Warning:</span> Remove duplicate Category + Type combinations before saving.
-                </p>
-              )}
-
-              {generatedTotal > 0 && (
-                <div className="mt-3 bg-surface rounded-xl p-3 text-sm">
-                  <div className="flex justify-between mb-1.5">
-                    <span className="text-muted">Total Generated:</span>
-                    <span className="font-bold text-brand-700">{generatedTotal.toLocaleString()}</span>
-                  </div>
-                  <div className="flex gap-4 text-xs text-[var(--color-text-faint)]">
-                    {generatedTotalRecycl > 0 && (
-                      <span className="flex items-center gap-1">
-                        <Recycle className="w-3 h-3 text-teal-500" />
-                        Recycling: <strong className="text-[var(--color-text)] ml-0.5">{generatedTotalRecycl.toLocaleString()}</strong>
-                      </span>
-                    )}
-                    {generatedTotalEOL > 0 && (
-                      <span className="flex items-center gap-1">
-                        <Leaf className="w-3 h-3 text-amber-500" />
-                        EOL: <strong className="text-[var(--color-text)] ml-0.5">{generatedTotalEOL.toLocaleString()}</strong>
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* -- PIBO: EPR Targets (multi-row with type) -- */}
-          {selectedCat && !isPWP && !isSIMP && (
-            <div>
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                <p className="text-xs font-semibold text-muted uppercase tracking-wide">
-                  EPR Targets - Category &amp; Type
-                </p>
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <span className="text-[10px] text-faint">Same category can have both types</span>
-                  <button
-                    type="button"
-                    onClick={openScreenshotImporter}
-                    className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-2.5 text-[11px] font-semibold text-brand-600 transition-colors hover:border-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20"
-                  >
-                    <ScanText className="h-3.5 w-3.5" /> Import from Screenshot
-                  </button>
-                </div>
-              </div>
-
-              {screenshotImportConfirmed && (
-                <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
-                  Screenshot values were reviewed and added to this form. Nothing changes in the database until you click Save Record.
-                </div>
-              )}
-
-              {/* Column headers */}
-              <div className="grid grid-cols-[1fr_1.7fr_1fr_26px] items-center gap-2 px-2 mb-1.5
-                    text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-wide">
-                <span>Category</span>
-                <span className="text-center">Type</span>
-                <span className="text-right">Target</span>
-                <span />
-              </div>
-
-              {/* Target rows */}
-              <div className="space-y-2 relative">
-                {targets.map((entry, idx) => (
-                  <div key={idx} className="relative">
-                    <TargetRow
-                      entry={entry}
-                      index={idx}
-                      isDupe={dupeIndices.has(idx)}
-                      canRemove={targets.length > 1}
-                      onChange={handleTargetChange}
-                      onRemove={removeTarget}
-                    />
-                  </div>
-                ))}
-              </div>
-
-              {/* Add row button */}
-              <button
-                type="button"
-                onClick={addTarget}
-                disabled={!canAddTarget}
-                className="mt-2 flex items-center gap-1.5 text-xs font-medium text-brand-600 dark:text-brand-400
-                           hover:text-brand-700 px-2 py-1 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20
-                           transition-colors disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-              >
-                <Plus className="w-3.5 h-3.5" /> Add Target Row
-              </button>
-
-              {/* Duplicate warning */}
-              {hasTgtDupes && (
-                <p className="mt-2 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-                  <span>Warning:</span> Remove duplicate Category + Type combinations before saving.
-                </p>
-              )}
-
-              {/* Totals summary */}
-              {targetTotal > 0 && (
-                <div className="mt-3 bg-surface rounded-xl p-3 text-sm">
-                  <div className="flex justify-between mb-1.5">
-                    <span className="text-muted">Total Target:</span>
-                    <span className="font-bold text-brand-700">{targetTotal.toLocaleString()}</span>
-                  </div>
-                  <div className="flex gap-4 text-xs text-[var(--color-text-faint)]">
-                    {targetTotalRecycl > 0 && (
-                      <span className="flex items-center gap-1">
-                        <Recycle className="w-3 h-3 text-teal-500" />
-                        Recycling: <strong className="text-[var(--color-text)] ml-0.5">{targetTotalRecycl.toLocaleString()}</strong>
-                      </span>
-                    )}
-                    {targetTotalEOL > 0 && (
-                      <span className="flex items-center gap-1">
-                        <Leaf className="w-3 h-3 text-amber-500" />
-                        EOL: <strong className="text-[var(--color-text)] ml-0.5">{targetTotalEOL.toLocaleString()}</strong>
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* SIMP notice */}
-          {isSIMP && (
-            <div className="bg-pink-50 dark:bg-pink-900/20 border border-pink-200 dark:border-pink-800
-                            rounded-xl p-3 text-sm text-pink-700 dark:text-pink-300">
-              SIMP clients are registered for compliance tracking only - no targets or credits needed.
-            </div>
-          )}
-
-          {!selectedCat && (
-            <p className="text-sm text-faint text-center py-4">
-              Select a client to see the relevant fields
-            </p>
-          )}
-
-          {selectedCat && !isSIMP && !editRecord && !hasActiveModalEntries && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
-              Enter at least one positive {isPWP ? "generated credit" : "target"} value to save a new record.
-            </p>
-          )}
-
-          <div className="flex gap-2 pt-2">
-            <button
-              type="submit"
-              className="btn-primary flex-1 justify-center"
-              disabled={saveDisabled}
-            >
-              {saving ? "Saving..." : "Save Record"}
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => setModalOpen(false)}>
-              Cancel
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      <TargetScreenshotImporter
-        open={screenshotImporterOpen}
-        clientId={genForm.clientId}
-        financialYear={genForm.financialYear}
-        existingTargets={targets}
-        onClose={closeScreenshotImporter}
-        onConfirm={confirmScreenshotTargets}
-      />
+      <FinancialYearModal open={modalOpen} onClose={() => setModalOpen(false)} clients={clients}
+        initialClientId={modalContext.clientId} initialFinancialYear={modalContext.financialYear} initialRecord={editRecord}
+        onSaved={saved => {
+          invalidate("/api/financial-year", "/api/dashboard", "/api/activities");
+          if (saved.financialYear === fy && saved._id) mutateRecords(current => {
+            const record = saved as FYRecord;
+            return current.some(item => item._id === record._id) ? current.map(item => item._id === record._id ? record : item) : [...current, record];
+          });
+          else setFy(saved.financialYear);
+        }} />
     </div>
   );
 }

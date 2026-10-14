@@ -1,3 +1,5 @@
+import { recordClientSearchStages } from "@/lib/server/client-search";
+import { MAX_SEARCH_LENGTH } from "@/lib/search/client-search";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -21,18 +23,10 @@ export async function GET(req: NextRequest) {
     const query: Record<string, unknown> = {};
     if (fy) query.financialYear = fy;
 
-    if (search) {
-      const matchingClients = await Client.find({
-        $or: [
-          { clientId: { $regex: search, $options: "i" } },
-          { companyName: { $regex: search, $options: "i" } },
-        ],
-      }).select("clientId").lean() as Array<{ clientId?: string }>;
-      const matchingClientIds = matchingClients.map((client) => client.clientId).filter(Boolean);
-      query.clientId = { $in: matchingClientIds };
-    }
+    if (search.length > MAX_SEARCH_LENGTH) return NextResponse.json({ error: "Search is too long" }, { status: 400 });
+    const stages = await recordClientSearchStages(search, ["clientId"]);
 
-    const invoices = await Invoice.find(query).sort({ fromDate: 1 }).lean() as FlatRecord[];
+    const invoices = await Invoice.aggregate([{ $match: query }, ...stages, { $sort: { fromDate: 1, _id: 1 } }]) as FlatRecord[];
     const clientIds = Array.from(new Set(invoices.map((invoice) => String(invoice.clientId || "")).filter(Boolean)));
     const clients = await Client.find({ clientId: { $in: clientIds } }).select("clientId companyName").lean() as Array<{
       clientId?: string;

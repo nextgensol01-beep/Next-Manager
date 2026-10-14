@@ -33,7 +33,7 @@ export function decryptClientSecret(value: unknown): string {
 
 export async function clientCredentialAccess(session: { user?: unknown } | null) {
   const admin = (session?.user as { role?: string } | undefined)?.role === "admin";
-  const fields = await ClientCustomField.find({}).select("key type formTab groupId").lean();
+  const fields = await ClientCustomField.find({}).select("key type formTab groupId active searchable").lean();
   const groups = await ClientCustomFieldGroup.find({ formTab: "portal" }).select("_id").lean();
   const portalGroups = new Set(groups.map((group) => String(group._id)));
   const protectedKeys = new Set(fields.filter((field) => field.type === "password" || field.formTab === "portal" || portalGroups.has(String(field.groupId))).map((field) => String(field.key)));
@@ -72,6 +72,7 @@ export async function clientCredentialAccess(session: { user?: unknown } | null)
       return output;
     },
     protectedKeys,
+    searchableKeys: fields.filter(field => field.active === true && field.searchable === true && field.key !== "legalName" && !protectedKeys.has(String(field.key))).map(field => String(field.key)),
     admin,
   };
 }

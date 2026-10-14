@@ -1,4 +1,5 @@
 "use client";
+import { useClientSearch } from "@/lib/search/use-client-search";
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
@@ -91,10 +92,13 @@ export default function BillingPage() {
   // Data
   const { data: billings, loading: bLoading, refetch: refetchBillings, mutate: mutateBillings } = useCache<Billing[]>(`/api/billing?fy=${fy}`, { enabled: financialYearLoaded, initialData: [] });
   const { data: payments, refetch: refetchPayments, mutate: mutatePayments } = useCache<Payment[]>(`/api/payments?fy=${fy}`, { enabled: financialYearLoaded, initialData: [] });
-  const { data: clients } = useCache<Client[]>("/api/clients", { initialData: [] });
-  const loading = !financialYearLoaded || bLoading;
+  const { data: clients, loading: clientsLoading } = useCache<Client[]>("/api/clients", { initialData: [] });
+  const loading = !financialYearLoaded || bLoading || clientsLoading;
 
-  const clientName = useCallback((id: string) => clients.find((c) => c.clientId === id)?.companyName || id, [clients]);
+  const matchedClientIds = useClientSearch(clients, search);
+
+  const clientMap = useMemo(() => new Map(clients.map(client => [client.clientId, client])), [clients]);
+  const clientName = useCallback((id: string) => clientMap.get(id)?.companyName || id, [clientMap]);
 
   const paymentsByBilling = useMemo(() => {
     const map = new Map<string, Payment[]>();
@@ -125,12 +129,12 @@ export default function BillingPage() {
     if (!q) return billings;
     return billings.filter((billing) => {
       const name = clientName(billing.clientId).toLowerCase();
-      return name.includes(q) ||
+      return matchedClientIds.has(billing.clientId) || name.includes(q) ||
         billing.clientId.toLowerCase().includes(q) ||
         billing.paymentStatus.toLowerCase().includes(q) ||
         (billing.billTitle || "").toLowerCase().includes(q);
     });
-  }, [billings, clientName, search]);
+  }, [billings, clientName, search, matchedClientIds]);
 
   const scopedBillings = useMemo(() => (
     billTypeFilter === "all"
@@ -229,9 +233,9 @@ export default function BillingPage() {
     return advanceClientRows.filter((row) => {
       const paymentText = [...row.advances, ...row.appliedPayments]
         .some((p) => [p.paymentMode, p.referenceNumber, p.notes].some((v) => (v || "").toLowerCase().includes(q)));
-      return row.clientName.toLowerCase().includes(q) || row.clientId.toLowerCase().includes(q) || paymentText;
+      return matchedClientIds.has(row.clientId) || row.clientName.toLowerCase().includes(q) || row.clientId.toLowerCase().includes(q) || paymentText;
     });
-  }, [advanceClientRows, search]);
+  }, [advanceClientRows, search, matchedClientIds]);
 
   // ── Modal openers ─────────────────────────────────────────────────────────
   const openBillingModal = useCallback(() => {

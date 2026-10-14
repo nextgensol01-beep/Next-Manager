@@ -6,6 +6,7 @@ import FinancialYear from "@/models/FinancialYear";
 import DeletedRecord from "@/models/DeletedRecord";
 import type { ITargetEntry } from "@/models/FinancialYear";
 import { validateReviewedTargetImport } from "@/lib/server/financial-year-entry-validation";
+import { recordActivityEvent } from "@/lib/server/activity-events";
 
 const VALID_TYPES = new Set(["RECYCLING", "EOL"]);
 const CAT_KEYS = ["1", "2", "3", "4"] as const;
@@ -58,6 +59,20 @@ export async function PUT(
   const body = await req.json();
   const { id } = await params;
 
+  const guarded = Object.prototype.hasOwnProperty.call(body, "expectedUpdatedAt");
+  let expectedDate: Date | null = null;
+  if (guarded) {
+    if (!body.clientId || !body.financialYear) return NextResponse.json({ error: "Client and financial year are required." }, { status: 400 });
+    if (body.expectedUpdatedAt !== null) {
+      expectedDate = new Date(body.expectedUpdatedAt);
+      if (Number.isNaN(expectedDate.getTime())) return NextResponse.json({ error: "The record revision is invalid. Reload it before saving." }, { status: 400 });
+    }
+    for (const entries of [body.targets, body.generated]) {
+      const error = validateReviewedTargetImport(entries);
+      if (error) return NextResponse.json({ error }, { status: 400 });
+    }
+  }
+
   if (body.targetImportReviewConfirmed === true) {
     const validationError = validateReviewedTargetImport(body.targets);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
@@ -65,6 +80,7 @@ export async function PUT(
 
   let update = { ...body };
   delete update.targetImportReviewConfirmed;
+  delete update.expectedUpdatedAt;
 
   if (Array.isArray(body.generated)) {
     const generated = normaliseEntries(body.generated);
@@ -92,8 +108,15 @@ export async function PUT(
     };
   }
 
-  const record = await FinancialYear.findByIdAndUpdate(id, update, { new: true });
+  const record = guarded ? await FinancialYear.findOneAndUpdate({ _id: id, clientId: body.clientId, financialYear: body.financialYear,
+    updatedAt: expectedDate || { $exists: false } }, { $set: update }, { new: true, runValidators: true })
+    : await FinancialYear.findByIdAndUpdate(id, update, { new: true });
+  if (guarded && !record) return NextResponse.json({ error: "This FY record changed or was removed while you were editing. Reload the current record before saving." }, { status: 409 });
   if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (guarded) await recordActivityEvent({ clientId: record.clientId, category: "compliance", type: "fy_data_updated", label: "FY Data Updated",
+    detail: `FY ${record.financialYear} · category and type quantities updated`, color: "violet", badge: "Updated",
+    badgeColor: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300", financialYear: record.financialYear,
+    entityId: String(record._id), entityType: "financial-year", relatedEntityIds: [String(record._id)] }, session);
   return NextResponse.json(record);
   } catch (error) {
     console.error("PUT /api/financial-year/[id]:", error);

@@ -1,5 +1,7 @@
+import { buildSearchFieldConditions, clientSearchStages, contactSearchStages, clientSearchProjection, searchableClientCustomKeys } from "@/lib/server/client-search";
+import { escapeSearchRegex as escapeRegex } from "@/lib/search/client-search";
 import mongoose from "mongoose";
-import { clientCredentialAccess, decryptClientSecret, encryptClientSecret } from "@/lib/server/client-credentials";
+import { decryptClientSecret, encryptClientSecret } from "@/lib/server/client-credentials";
 import DeletedRecord from "@/models/DeletedRecord";
 import Client from "@/models/Client";
 import ClientContact from "@/models/ClientContact";
@@ -139,34 +141,6 @@ const CLIENT_ID_PREFIXES: Record<string, string> = {
   SIMP: "SMP",
 };
 
-const MAX_NORMALIZED_SEARCH_CHARS = 80;
-const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const normalizeSearchText = (value: string) =>
-  value
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "")
-    .slice(0, MAX_NORMALIZED_SEARCH_CHARS);
-const buildFlexibleNormalizedRegex = (value: string) => {
-  const normalized = normalizeSearchText(value);
-  if (!normalized) return "";
-  return normalized.split("").map(escapeRegex).join("[^a-z0-9]*");
-};
-const buildSearchFieldConditions = (fields: string[], search: string) => {
-  const escapedSearch = escapeRegex(search);
-  const flexibleSearch = buildFlexibleNormalizedRegex(search);
-  const conditions: Record<string, unknown>[] = fields.map((field) => ({
-    [field]: { $regex: escapedSearch, $options: "i" },
-  }));
-
-  if (flexibleSearch) {
-    fields.forEach((field) => {
-      conditions.push({ [field]: { $regex: flexibleSearch, $options: "i" } });
-    });
-  }
-
-  return conditions;
-};
 const toIdString = (value: MaybeId | null | undefined) => (value ? value.toString() : "");
 const unique = <T>(values: T[]) => Array.from(new Set(values));
 const stripModelMetadata = <T extends Record<string, unknown>>(record: T) => {
@@ -204,20 +178,6 @@ async function getClientDocumentSummaryMap(clientIds: string[]) {
     latestDate: row.latestDate,
     categories: row.categories || [],
   }]));
-}
-
-async function getSearchableCustomFieldConditions(search: string) {
-  const { protectedKeys } = await clientCredentialAccess(null);
-  const definitions = (await ClientCustomField.find({ active: true, searchable: true })
-    .select("key")
-    .lean()) as Array<{ key?: string }>;
-
-  const customFieldPaths = definitions
-    .map((definition) => (typeof definition.key === "string" ? definition.key.trim() : ""))
-    .filter((key) => Boolean(key) && key !== "legalName" && !protectedKeys.has(key))
-    .map((key) => `customFields.${key}`);
-
-  return buildSearchFieldConditions(customFieldPaths, search);
 }
 
 async function normalizeClientCustomFields(input: unknown, existingValues: unknown = {}, clientCategory = "", excludedKeys: Set<string> = new Set()) {
@@ -735,39 +695,15 @@ export async function getContactDirectoryEntry(personId: string) {
 }
 
 export async function findClientIdsByContactSearch(search: string) {
-  const term = search.trim();
-  if (!term) return [];
-
-  const persons = (await Person.find({
-    $or: buildSearchFieldConditions(["name", "phoneNumbers", "emails"], term),
-  })
-    .select("_id")
-    .lean()) as Array<{ _id: MaybeId }>;
-
-  if (persons.length === 0) {
-    return [];
-  }
-
-  return ClientContact.find({ personId: { $in: persons.map((person) => toIdString(person._id)) } }).distinct("clientId");
+  if (!search.trim()) return [];
+  const rows = await ClientContact.aggregate([...contactSearchStages(search), { $group: { _id: "$clientId" } }]);
+  return rows.map(row => String(row._id));
 }
 
 export async function findClientIdsByContactName(search: string) {
-  const term = search.trim();
-  if (!term) return [];
-
-  const persons = (await Person.find({
-    $or: buildSearchFieldConditions(["name"], term),
-  })
-    .select("_id")
-    .lean()) as Array<{ _id: MaybeId }>;
-
-  if (persons.length === 0) {
-    return [];
-  }
-
-  return ClientContact.find({
-    personId: { $in: persons.map((person) => toIdString(person._id)) },
-  }).distinct("clientId");
+  if (!search.trim()) return [];
+  const rows = await ClientContact.aggregate([...contactSearchStages(search, true), { $group: { _id: "$clientId" } }]);
+  return rows.map(row => String(row._id));
 }
 
 async function buildClientListQuery(options: {
@@ -787,16 +723,6 @@ async function buildClientListQuery(options: {
     query.state = options.state;
   }
 
-  const search = options.search?.trim();
-  if (search) {
-    const matchedClientIds = await findClientIdsByContactSearch(search);
-    const customFieldConditions = await getSearchableCustomFieldConditions(search);
-    query.$or = [
-      ...buildSearchFieldConditions(["clientId", "companyName", "legalName"], search),
-      ...customFieldConditions,
-      ...(matchedClientIds.length > 0 ? [{ clientId: { $in: matchedClientIds } }] : []),
-    ];
-  }
 
   if (options.registeredThisFy) {
     const fieldDefinitions = await ClientCustomField.find({ active: { $ne: false } })
@@ -822,6 +748,7 @@ async function buildClientListQuery(options: {
 }
 
 export async function listClientsWithContacts(options: {
+  searchKeys?: string[];
   category?: string | null;
   state?: string | null;
   search?: string | null;
@@ -829,16 +756,17 @@ export async function listClientsWithContacts(options: {
   financialYear?: string | null;
 }) {
   const query = await buildClientListQuery(options);
-  const clients = await Client.find(query).sort({ createdAt: -1 });
-  const contactsMap = await getClientContactsMap(clients.map((client) => client.clientId));
-
-  return clients.map((client) => ({
-    ...client.toObject(),
-    contacts: contactsMap.get(client.clientId) || [],
+  const keys = options.searchKeys ?? await searchableClientCustomKeys();
+  const stages = await clientSearchStages(options.search || "", [], keys);
+  const clients = await Client.aggregate([{ $match: query }, ...stages, { $sort: { createdAt: -1, _id: -1 } }]);
+  const contactsMap = await getClientContactsMap(clients.map(client => client.clientId));
+  return clients.map(client => ({ ...client, contacts: contactsMap.get(client.clientId) || [],
+    searchValues: clientSearchProjection(client, keys, contactsMap.get(client.clientId) || []),
   }));
 }
 
 export async function listClientsWithContactsPage(options: {
+  searchKeys?: string[];
   category?: string | null;
   state?: string | null;
   search?: string | null;
@@ -851,15 +779,16 @@ export async function listClientsWithContactsPage(options: {
   const limit = Math.max(1, Math.min(Math.floor(options.limit), 100));
   const offset = Math.max(0, Math.floor(options.offset));
 
-  const [clients, total] = await Promise.all([
-    Client.find(query)
-      .select("clientId companyName legalName category state address gstNumber registrationNumber cpcbLoginId cpcbPassword otpMobileNumber customFields createdAt")
-      .sort({ createdAt: -1 })
-      .skip(offset)
-      .limit(limit)
-      .lean(),
-    Client.countDocuments(query),
+  const stages = await clientSearchStages(options.search || "", [], options.searchKeys);
+  const [page] = await Client.aggregate([
+    { $match: query }, ...stages, { $sort: { createdAt: -1, _id: -1 } },
+    { $facet: {
+      items: [{ $skip: offset }, { $limit: limit }],
+      total: [{ $count: "value" }],
+    } },
   ]);
+  const clients = page.items as Array<Record<string, unknown> & { clientId: string }>;
+  const total = Number(page.total[0]?.value || 0);
   const clientIds = clients.map((client) => client.clientId);
   const [contactsMap, documentSummaryMap] = await Promise.all([
     getClientContactsMap(clientIds),
@@ -885,6 +814,7 @@ export async function listClientsWithContactsPage(options: {
 }
 
 export async function listClientSummaries(options: {
+  searchKeys?: string[];
   category?: string | null;
   categories?: string[];
   state?: string | null;
@@ -903,25 +833,13 @@ export async function listClientSummaries(options: {
     query.state = options.state;
   }
 
-  const search = options.search?.trim();
-  if (search) {
-    const customFieldConditions = await getSearchableCustomFieldConditions(search);
-    query.$or = [
-      ...buildSearchFieldConditions(["clientId", "companyName", "legalName"], search),
-      ...customFieldConditions,
-    ];
-  }
-
-  const clientQuery = Client.find(query)
-    .select("clientId companyName legalName category state address gstNumber")
-    .sort({ companyName: 1 })
-    .lean();
-
-  if (typeof options.limit === "number" && Number.isFinite(options.limit) && options.limit > 0) {
-    clientQuery.limit(Math.min(Math.floor(options.limit), 250));
-  }
-
-  const clients = await clientQuery;
+  const stages = await clientSearchStages(options.search || "", [], options.searchKeys);
+  const limit = typeof options.limit === "number" && Number.isFinite(options.limit) && options.limit > 0
+    ? Math.min(Math.floor(options.limit), 250) : 250;
+  const clients = await Client.aggregate([
+    { $match: query }, ...stages, { $sort: { companyName: 1, _id: 1 } }, { $limit: limit },
+    { $project: { clientId: 1, companyName: 1, legalName: 1, category: 1, state: 1, address: 1, gstNumber: 1 } },
+  ]);
 
   return clients
     .map((client) => ({

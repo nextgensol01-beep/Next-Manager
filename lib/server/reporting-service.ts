@@ -1,3 +1,5 @@
+import { clientSearchStages } from "@/lib/server/client-search";
+import { createSearchMatcher } from "@/lib/search/client-search";
 import Client from "@/models/Client";
 import FinancialYear from "@/models/FinancialYear";
 import CreditTransaction from "@/models/CreditTransaction";
@@ -229,6 +231,8 @@ export async function buildReport(rawQuery: ReportQuery, options: {
   exportAll?: boolean;
   sections?: ReadonlySet<ReportDataSection>;
   customFieldKeys?: ReadonlySet<string>;
+  clientSearchFields?: string[];
+  clientSearch?: string;
 } = {}): Promise<ReportResponse> {
   const query = reportQuerySchema.parse(rawQuery);
   const include = (section: ReportDataSection) => !options.sections || options.sections.has(section);
@@ -237,6 +241,10 @@ export async function buildReport(rawQuery: ReportQuery, options: {
   if (query.states.length > 0) clientMatch.state = { $in: query.states };
 
   const clients = await Client.find(clientMatch).sort({ companyName: 1 }).lean() as FlatRecord[];
+  const clientSearch = options.clientSearch ?? query.search;
+  const matchesClientValue = createSearchMatcher(clientSearch);
+  const searchMatches = clientSearch ? await Client.aggregate([{ $match: clientMatch }, ...await clientSearchStages(clientSearch, options.clientSearchFields || []), { $project: { clientId: 1 } }]) : [];
+  const matchingClientIds = new Set(searchMatches.map(client => String(client.clientId)));
   const clientIds = clients.map((client) => textValue(client.clientId)).filter(Boolean);
 
   const [
@@ -436,7 +444,8 @@ export async function buildReport(rawQuery: ReportQuery, options: {
 
     const searchable = [row.clientId, row.companyName, row.legalName, row.clientCategory, row.state, ...row.quotations.map((quotation) => quotation.quotationNumber)]
       .join(" ").toLowerCase();
-    if (query.search && !searchable.includes(query.search.toLowerCase())) continue;
+    if (query.search && !matchingClientIds.has(row.clientId) && !searchable.includes(query.search.toLowerCase())) continue;
+    if (options.clientSearch && !matchingClientIds.has(row.clientId) && !matchesClientValue(row.legalName)) continue;
     if (query.hasTarget === "yes" && targetTotal <= 0) continue;
     if (query.hasTarget === "no" && targetTotal > 0) continue;
     if (query.paymentStatus !== "all" && currentPaymentStatus !== query.paymentStatus) continue;

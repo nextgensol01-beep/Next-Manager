@@ -1,11 +1,13 @@
 "use client";
+import { useNetworkSearch } from "@/lib/search/use-network-search";
+import { usePagedSearch } from "@/lib/search/use-paged-search";
 import React, { useState, useMemo } from "react";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import TableWrapper from "@/components/ui/TableWrapper";
 import { Trash2, RefreshCw, Inbox, ChevronDown, Search } from "lucide-react";
-import { useCache, invalidate } from "@/lib/useCache";
+import { invalidate } from "@/lib/useCache";
 
 interface EmailLog {
   _id: string;
@@ -46,8 +48,12 @@ export default function EmailHistoryPage() {
   const [expandedId, setExpandedId]   = useState<string | null>(null);
   const [search, setSearch]             = useState("");
 
-  const logsUrl = `/api/email-log${typeFilter !== "all" ? `?type=${typeFilter}` : ""}`;
-  const { data: rawLogs, loading, refetch } = useCache<EmailLog[]>(logsUrl);
+  const appliedSearch = useNetworkSearch(search);
+  const logParams = new URLSearchParams();
+  if (typeFilter !== "all") logParams.set("type", typeFilter);
+  if (appliedSearch) logParams.set("search", appliedSearch);
+  const logsUrl = "/api/email-log?" + logParams;
+  const { data: rawLogs, loading, refetch, collectionRef } = usePagedSearch<EmailLog>(logsUrl);
   const logs = useMemo(() => (Array.isArray(rawLogs) ? rawLogs : []), [rawLogs]);
 
   const toggleSelect = (id: string) =>
@@ -92,17 +98,7 @@ export default function EmailHistoryPage() {
     } finally { setDeleting(false); }
   };
 
-  const filteredLogs = useMemo(() => {
-    if (!search.trim()) return logs;
-    const q = search.toLowerCase();
-    return logs.filter(
-      (l) =>
-        l.subject.toLowerCase().includes(q) ||
-        l.clientName?.toLowerCase().includes(q) ||
-        l.to.some((e) => e.toLowerCase().includes(q)) ||
-        l.financialYear?.toLowerCase().includes(q)
-    );
-  }, [logs, search]);
+  const filteredLogs = logs;
 
   // Summary counts
   const counts = logs.reduce((acc, l) => {
@@ -112,7 +108,7 @@ export default function EmailHistoryPage() {
   }, {} as Record<string, number>);
 
   return (
-    <div>
+    <div ref={collectionRef}>
       <PageHeader title="Email History" description="All emails sent and drafts created from this system" />
 
       {/* Summary chips + actions */}

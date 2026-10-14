@@ -1,5 +1,7 @@
 "use client";
 
+import { readJsonResponse } from "@/lib/http-response";
+
 import React, { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "framer-motion";
 import toast from "react-hot-toast";
@@ -213,8 +215,8 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
           fetch(`/api/financial-year?clientId=${encodeURIComponent(form.clientId)}&fy=${encodeURIComponent(form.financialYear)}`, { cache: "no-store" }),
           fetch(`/api/credit-transactions?toClientId=${encodeURIComponent(form.clientId)}&fy=${encodeURIComponent(form.financialYear)}`, { cache: "no-store" }),
         ]);
-        const fyBody = await fyRes.json().catch(() => null);
-        const txBody = await txRes.json().catch(() => null);
+        const fyBody = await readJsonResponse(fyRes).catch(() => null);
+        const txBody = await readJsonResponse(txRes).catch(() => null);
         if (!fyRes.ok) throw new Error(fyBody?.error || "Failed to load target data");
         if (!txRes.ok) throw new Error(txBody?.error || "Failed to load transaction rates");
         if (cancelled) return;

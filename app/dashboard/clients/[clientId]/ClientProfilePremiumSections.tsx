@@ -1762,7 +1762,7 @@ type TargetScreenshotsSectionProps = Pick<
   documents: Document[];
   selectedFy: string;
   onUpload: (financialYear: string) => void;
-  targetsHref: (financialYear: string) => string;
+  onOpenTargets: (financialYear: string) => void;
 };
 
 const financialYearStart = (financialYear: string) => {
@@ -1776,7 +1776,7 @@ export function TargetScreenshotsSection({
   busyAction,
   canManageDocuments,
   onUpload,
-  targetsHref,
+  onOpenTargets,
   onEdit,
   onDelete,
   onMigrate,
@@ -1896,11 +1896,10 @@ export function TargetScreenshotsSection({
                     {group.financialYear === latestFy && (
                       <span className="client-profile-target-latest">Latest FY</span>
                     )}
-                    <a href={targetsHref(group.financialYear)} className="client-profile-target-open-fy">
+                    <button type="button" onClick={() => onOpenTargets(group.financialYear)} className="client-profile-target-open-fy">
                       <Target className="h-3.5 w-3.5" />
                       <span>FY Targets</span>
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
+                    </button>
                   </div>
                 )}
               </div>

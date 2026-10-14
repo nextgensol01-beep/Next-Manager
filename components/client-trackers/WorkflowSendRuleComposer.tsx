@@ -69,8 +69,8 @@ export default function WorkflowSendRuleComposer({ group, fields, onChange, valu
       <h4 id={`${prefix}-heading`}>{heading}</h4>
       <div className="workflow-rule-mode" role="group" aria-label="Condition match mode" aria-describedby={`${prefix}-helper`}>
         <motion.span className="workflow-rule-selection" aria-hidden="true" initial={false}
-          animate={{ x: group.mode === "ANY" ? "100%" : "0%" }}
-          transition={reduced ? { duration: .01 } : { type: "spring", stiffness: 380, damping: 38, mass: 1 }} />
+          animate={{ x: group.mode === "ANY" ? "100%" : "0%", scaleX: reduced ? 1 : [1, .97, 1] }}
+          transition={{ duration: reduced ? .01 : .25, ease }} />
         {(["ALL", "ANY"] as const).map(mode => <button key={mode} type="button"
           aria-pressed={group.mode === mode} onClick={() => onChange({ mode })}>
           {mode === "ALL" ? "All" : "Any"}

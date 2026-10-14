@@ -1,5 +1,7 @@
 "use client";
 
+import { readJsonResponse } from "@/lib/http-response";
+
 import { useEffect, useState } from "react";
 import PageHeader from "@/components/ui/PageHeader";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
@@ -42,7 +44,7 @@ export default function GmailSetupPage() {
 
       try {
         const res = await fetch("/api/gmail-oauth");
-        const data = await res.json() as GmailOAuthStartResponse;
+        const data = await readJsonResponse(res) as GmailOAuthStartResponse;
 
         if (!active) return;
 
@@ -85,7 +87,7 @@ export default function GmailSetupPage() {
 
     try {
       const res = await fetch(`/api/gmail-oauth?code=${encodeURIComponent(code.trim())}`);
-      const data = await res.json() as GmailOAuthExchangeResponse;
+      const data = await readJsonResponse(res) as GmailOAuthExchangeResponse;
 
       if (!res.ok || !data.success) {
         setExchangeError(data.error || "Token exchange failed");

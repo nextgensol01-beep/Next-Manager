@@ -1,3 +1,4 @@
+import { withTrackerApiErrors, readTrackerRequestBody } from "@/lib/server/tracker-api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -8,12 +9,12 @@ import type { TrackerField, TrackerValue } from "@/lib/clientTrackers";
 import { recordActivityEvent } from "@/lib/server/activity-events";
 import { normalizeTrackerValue } from "@/lib/server/tracker-values";
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string; entryId: string }> }) {
+export const PATCH = withTrackerApiErrors(async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string; entryId: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await connectDB();
   const { id, entryId } = await params;
-  const body = await req.json();
+  const body = await readTrackerRequestBody(req);
   const key = typeof body.key === "string" ? body.key : "";
   const tracker = await ClientTracker.findById(id).lean() as unknown as { fields: TrackerField[]; status: "active" | "archived"; name: string; financialYear?: string } | null;
   if (tracker?.status === "archived") return NextResponse.json({ error: "Restore this tracker before editing marks." }, { status: 409 });
@@ -43,4 +44,4 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     entityType: "client_tracker",
   }, session);
   return NextResponse.json(entry);
-}
+});

@@ -16,6 +16,10 @@ export interface ITrackerEmailCampaign extends Document {
   failed: number;
   items: unknown[];
   createdBy?: string;
+  batchHash?: string;
+  approvalId?: string;
+  authorizedBy?: string;
+  authorizedAt?: Date;
 }
 const ItemSchema = new Schema(
   {
@@ -29,11 +33,15 @@ const ItemSchema = new Schema(
     attachments: [{ documentId: String, _id: false }],
     status: {
       type: String,
-      enum: ["pending", "draft", "sent", "failed"],
+      enum: ["pending", "delivering", "uncertain", "draft", "sent", "failed"],
       default: "pending",
     },
     error: String,
     deliveryId: String,
+    deliveryThreadId: String,
+    claimedAt: Date,
+    deliveryClaimToken: String,
+    historyRecordedAt: Date,
   },
   { _id: false },
 );
@@ -59,6 +67,10 @@ const TrackerEmailCampaignSchema = new Schema<ITrackerEmailCampaign>(
     failed: { type: Number, default: 0 },
     items: { type: [ItemSchema], default: [] },
     createdBy: String,
+    batchHash: String,
+    approvalId: String,
+    authorizedBy: String,
+    authorizedAt: Date,
   },
   { timestamps: true },
 );

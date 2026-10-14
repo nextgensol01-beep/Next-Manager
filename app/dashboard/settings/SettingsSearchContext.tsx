@@ -36,6 +36,15 @@ export function useSettingsSearch() {
 
 // Static searchable sections per tab
 export const STATIC_SECTIONS: Omit<SearchResult, "id">[] = [
+  { type: "tab", label: "Email & Delivery", tabIndex: 3, icon: "✉️" },
+  ...[
+    ["Gmail", "section-gmail"], ["Delivery Security", "section-delivery-security"],
+    ["Approval Email", "section-approval-email"], ["Email OTP", "section-otp-security"],
+    ["Send PIN", "section-send-pin"], ["Draft Protection", "section-delivery-protection"],
+    ["Direct Send Protection", "section-delivery-protection"], ["Bulk Send Safety", "section-bulk-send"],
+    ["Restrict Duplicate Email Addresses", "section-delivery-protection"],
+    ["Delivery Activity", "section-delivery-activity"],
+  ].map(([label, sectionId]) => ({ type: "section" as const, label, tabIndex: 3, sectionId, sublabel: "Email & Delivery", icon: "✉️" })),
   // Tab 0 — General
   { type: "tab",     label: "General",            tabIndex: 0, icon: "📅" },
   { type: "section", label: "Financial Year",     tabIndex: 0, sectionId: "section-fy",       sublabel: "General", icon: "📅" },

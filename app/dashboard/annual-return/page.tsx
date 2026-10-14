@@ -1,5 +1,8 @@
 "use client";
-import React, { useState } from "react";
+import { useClientSearch } from "@/lib/search/use-client-search";
+
+import { readJsonResponse } from "@/lib/http-response";
+import React, { useState, useMemo } from "react";
 import { useCache, invalidate } from "@/lib/useCache";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
@@ -142,13 +145,19 @@ export default function AnnualReturnPage() {
 
   const arUrl = `/api/annual-return?${new URLSearchParams({
     fy,
-    ...(statusFilter !== "all" ? { status: statusFilter } : {}),
-    ...(search ? { search } : {}),
   })}`;
-  const { data: rawRecords, loading, refetch: refetchRecords } = useCache<AnnualReturn[]>(arUrl, { enabled: financialYearLoaded });
-  const records = Array.isArray(rawRecords) ? rawRecords : [];
-  const { data: rawClients } = useCache<Client[]>("/api/clients");
-  const clients = Array.isArray(rawClients) ? rawClients : [];
+  const { data: rawRecords, loading: recordsLoading, refetch: refetchRecords } = useCache<AnnualReturn[]>(arUrl, { enabled: financialYearLoaded });
+  const { data: rawClients, loading: clientsLoading } = useCache<Client[]>("/api/clients");
+  const clients = useMemo(() => Array.isArray(rawClients) ? rawClients : [], [rawClients]);
+  const matchedClientIds = useClientSearch(clients, search);
+  const loading = recordsLoading || clientsLoading;
+  const records = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return (rawRecords || []).filter(record => {
+      const statusMatches = statusFilter === "all" || record.status === statusFilter || (statusFilter === "Not Started" && record.status === "Pending");
+      return statusMatches && (!query || matchedClientIds.has(record.clientId) || Boolean(record.client?.companyName.toLowerCase().includes(query)));
+    });
+  }, [rawRecords, statusFilter, search, matchedClientIds]);
   const reconciledFinancialYearsRef = React.useRef(new Set<string>());
 
   const reconcileStatuses = React.useCallback(async (showToast = false) => {
@@ -165,7 +174,7 @@ export default function AnnualReturnPage() {
         return;
       }
 
-      const result = await response.json() as { changed?: number };
+      const result = await readJsonResponse(response) as { changed?: number };
       const changed = Number(result.changed) || 0;
       reconciledFinancialYearsRef.current.add(fy);
       setLastSyncResult({ fy, changed });
@@ -226,7 +235,7 @@ export default function AnnualReturnPage() {
         ? await fetch(`/api/annual-return/${editRecord._id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
         : await fetch("/api/annual-return", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!r.ok) { toast.error("Failed to save"); return; }
-      const saved = await r.json() as AnnualReturn;
+      const saved = await readJsonResponse(r) as AnnualReturn;
       toast.success(
         saved.status === form.status
           ? editRecord ? "Annual return updated." : "Annual return record saved."
@@ -252,7 +261,7 @@ export default function AnnualReturnPage() {
       toast.error("Failed to update status.");
       return;
     }
-    const saved = await response.json() as AnnualReturn;
+    const saved = await readJsonResponse(response) as AnnualReturn;
     toast.success(`Status updated to ${saved.status}.`);
     invalidate("/api/annual-return", "/api/dashboard");
     refetchRecords();
@@ -263,7 +272,7 @@ export default function AnnualReturnPage() {
     setInitLoading(true);
     try {
       const r = await fetch("/api/annual-return/bulk-init", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ financialYear: fy }) });
-      const d = await r.json();
+      const d = await readJsonResponse(r);
       toast.success(d.message || "Done"); invalidate("/api/annual-return", "/api/dashboard"); refetchRecords();
     } finally { setInitLoading(false); }
   };
@@ -293,7 +302,7 @@ export default function AnnualReturnPage() {
     // Build confirmation HTML
     try {
       const tmplRes = await fetch("/api/email/template?name=annual-return-confirmation");
-      const { html: template } = await tmplRes.json();
+      const { html: template } = await readJsonResponse(tmplRes);
       const html = template
         .replace(/{{clientName}}/g, cName)
         .replace(/{{financialYear}}/g, rec.financialYear)
@@ -343,7 +352,7 @@ export default function AnnualReturnPage() {
         }),
       });
 
-      const data = await res.json();
+      const data = await readJsonResponse(res);
 
       if (!res.ok) {
         if (data.code === "INVALID_GRANT") {

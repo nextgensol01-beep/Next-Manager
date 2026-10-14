@@ -1,3 +1,5 @@
+import { recordClientSearchStages } from "@/lib/server/client-search";
+import { MAX_SEARCH_LENGTH } from "@/lib/search/client-search";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -17,7 +19,8 @@ export async function GET(req: NextRequest) {
     const fy     = searchParams.get("fy");
     const clientId = searchParams.get("clientId");
     const status = searchParams.get("status");
-    const search = searchParams.get("search");
+    const search = searchParams.get("search")?.trim() || "";
+    if (search.length > MAX_SEARCH_LENGTH) return NextResponse.json({ error: "Search is too long" }, { status: 400 });
 
     // Client profiles self-heal legacy stale statuses when their FY is opened.
     if (clientId && fy) {
@@ -30,12 +33,8 @@ export async function GET(req: NextRequest) {
     if (status === "Not Started") query.status = { $in: ["Not Started", "Pending"] };
     else if (status && status !== "all") query.status = status;
 
-    if (search) {
-      const clients = await Client.find({ companyName: { $regex: search, $options: "i" } }).select("clientId");
-      query.clientId = { $in: clients.map((c) => c.clientId) };
-    }
-
-    const records = await AnnualReturn.find(query).sort({ updatedAt: -1 });
+    const stages = await recordClientSearchStages(search, ["clientId"]);
+    const records = await AnnualReturn.aggregate([{ $match: query }, ...stages, { $sort: { updatedAt: -1, _id: -1 } }]);
 
     const clientIds = [...new Set(records.map((r) => r.clientId))];
 
@@ -64,7 +63,7 @@ export async function GET(req: NextRequest) {
       }
 
       return {
-        ...r.toObject(),
+        ...r,
         client: client
           ? {
               companyName: client.companyName,

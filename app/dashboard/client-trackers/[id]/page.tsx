@@ -1,6 +1,9 @@
 "use client";
 
+import { readJsonResponse } from "@/lib/http-response";
+
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AnimatePresence,
@@ -10,6 +13,7 @@ import {
   useReducedMotion,
   useSpring,
   useTransform,
+  type MotionValue,
 } from "framer-motion";
 import { useSession } from "next-auth/react";
 import toast from "react-hot-toast";
@@ -17,14 +21,11 @@ import {
   Archive,
   ArrowLeft,
   ArrowRight,
-  CheckCircle2,
   ChevronDown,
   CircleAlert,
   Download,
   FileText,
   Filter,
-  GripVertical,
-  Info,
   List,
   Mail,
   MoreHorizontal,
@@ -36,46 +37,48 @@ import {
   Users,
 } from "lucide-react";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
+import EmailDeliveryReviewWorkspace from "@/components/client-trackers/EmailDeliveryReviewWorkspace";
+import EmailDeliveryAuthorizationModal from "@/components/client-trackers/EmailDeliveryAuthorizationModal";
+import { canonicalDeliveryBatch, type DeliveryBatch } from "@/lib/email-delivery-security";
+import { buildDeliveryMessages, validateRecipientDrafts, SecurityRequestError } from "@/lib/email-delivery-security-client";
+import { previewWithGmailSignature, type EmailPreview, type RecipientDraft, type EmailPreparationPhase } from "@/lib/tracker-email-delivery-review";
 import Modal from "@/components/client-trackers/TrackerModal";
 import { WorkflowStepNavigationDock, WorkflowStepContentStage, useWorkflowStepNavigation } from "@/components/client-trackers/WorkflowStepNavigation";
 import WorkflowSendRuleComposer from "@/components/client-trackers/WorkflowSendRuleComposer";
 import WorkflowEmailStyleChooser from "@/components/client-trackers/WorkflowEmailStyleChooser";
-import RichTextEditor from "@/components/client-trackers/TrackerRichTextEditor";
-import WorkflowMessagesWorkspace from "@/components/client-trackers/WorkflowMessagesWorkspace";
+import StyleToStepperHandoff from "@/components/client-trackers/StyleToStepperHandoff";
+import { handoffReceive } from "@/lib/workflow-style-handoff";
+import { emailOperatorsForField, emailWorkflowValidationIssues, validateEmailWorkflowDrafts, type EmailWorkflowIssue } from "@/lib/tracker-email-validation";
+import TrackerPageLoading from "@/components/client-trackers/TrackerPageLoading";
+import { useFreshTrackerData } from "@/lib/useFreshTrackerData";
+import { draftField, type TrackerDraftField } from "@/lib/tracker-create";
+import { configurationChanges, configurationFields, configurationSnapshot, configurationNeedsFinancialYear, type TrackerConfiguration } from "@/lib/tracker-configuration";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { GlassToggle } from "@/components/ui/liquid-glass";
 import { invalidate, useCache } from "@/lib/useCache";
-import { FINANCIAL_YEARS } from "@/lib/utils";
-import {
-  evaluateTrackerConditionGroup,
-  legacyWorkflowCondition,
-} from "@/lib/server/tracker-conditions";
+import { useTrackerQuery } from "@/lib/useTrackerQuery";
 import {
   CLIENT_TRACKER_CATEGORIES,
   CLIENT_TRACKER_DETAIL_OPTIONS,
-  DEFAULT_STATUS_FIELD,
-  TRACKER_EMAIL_PRESETS,
-  TRACKER_OPTION_COLORS,
   type ClientTrackerDetailKey,
-  type TrackerComputed,
-  type TrackerComputedKind,
   type TrackerConditionGroup,
-  type TrackerDataLink,
-  type TrackerDataLinkDisplay,
-  type TrackerDataLinkSource,
-  type TrackerEmailPoint,
   type TrackerEmailAttachment,
   type TrackerEmailContentRule,
-  type TrackerRecipientStrategy,
   type TrackerEmailWorkflow,
   type TrackerField,
-  type TrackerFieldType,
-  type TrackerOptionColor,
   type TrackerRuleOperator,
   type TrackerSavedView,
   type TrackerValue,
   type TrackerValues,
 } from "@/lib/clientTrackers";
+import { TRACKER_OPTION_PALETTE, trackerHasOptionColors, trackerOptionColor, trackerOptionTone } from "@/lib/tracker-option-colors";
+
+const ConfigureTrackerWorkspace = dynamic(() => import("@/components/client-trackers/configure/ConfigureTrackerWorkspace"), { loading: () => <LoadingSpinner /> });
+const WorkflowTemplateWorkspace = dynamic(() => import("@/components/client-trackers/WorkflowTemplateWorkspace"), { loading: () => <LoadingSpinner /> });
+const WorkflowDeliveryWorkspace = dynamic(() => import("@/components/client-trackers/WorkflowDeliveryWorkspace"), { loading: () => <LoadingSpinner /> });
+const WorkflowReviewWorkspace = dynamic(() => import("@/components/client-trackers/WorkflowReviewWorkspace"), { loading: () => <LoadingSpinner /> });
+const WorkflowMessagesWorkspace = dynamic(() => import("@/components/client-trackers/WorkflowMessagesWorkspace"), { loading: () => <LoadingSpinner /> });
+const WorkflowCombinationPreview = dynamic(() => import("@/components/client-trackers/WorkflowCombinationPreview"), { loading: () => <LoadingSpinner /> });
 
 type Client = {
   clientId: string;
@@ -113,6 +116,9 @@ type TrackerDetail = {
   clientColumns?: ClientTrackerDetailKey[];
   savedViews?: TrackerSavedView[];
   entries: Entry[];
+  clientIds: string[];
+  clientMembershipMode?: "snapshot" | "categorySync";
+  clientCategories?: string[];
   entryCount?: number;
   totalEntryCount?: number;
   offset?: number;
@@ -122,36 +128,6 @@ type TrackerDetail = {
   overviewCounts?: Array<{ key: string; value: TrackerValue; count: number }>;
   emailEnabled?: boolean;
   emailWorkflows?: TrackerEmailWorkflow[];
-};
-type EmailRecipient = {
-  email: string;
-  name: string;
-  designation: string;
-  isPrimary: boolean;
-};
-type EmailPreview = {
-  workflow: { id: string; name: string; signatureGap?: number };
-  messages: Array<{
-    entryId: string;
-    clientId: string;
-    companyName: string;
-    to: string;
-    suggestedTo?: string[];
-    recipients: EmailRecipient[];
-    subject: string;
-    body: string;
-    html: string;
-    points: string[];
-    statements?: string[];
-    combinationMessage?: string;
-    attachments: Array<{
-      documentId: string;
-      filename: string;
-      mimeType: string;
-      fileSize: number;
-    }>;
-  }>;
-  skipped: Array<{ clientId: string; companyName: string; reason: string }>;
 };
 type TrackerEmailActivity = {
   summary?: Record<string, number>;
@@ -190,138 +166,11 @@ type TrackerActivity = {
     occurredAt: string;
   }>;
 };
-type RecipientDraft = {
-  to: string[];
-  cc: string[];
-  additionalTo: string;
-  additionalCc: string;
-};
-
-const STATUS_TONES: Record<string, string> = {
-  "Not Started":
-    "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
-  "In Progress":
-    "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200",
-  Done: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200",
-  Blocked: "bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-200",
-  "Not Applicable":
-    "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200",
-};
-const COLOR_SWATCH: Record<TrackerOptionColor, string> = {
-  slate: "bg-slate-500",
-  blue: "bg-blue-500",
-  violet: "bg-violet-500",
-  amber: "bg-amber-500",
-  emerald: "bg-emerald-500",
-  rose: "bg-rose-500",
-};
 const ALL_FILTER = "__all_tracker_values__";
-const LIVE_DATA_SOURCES: Array<{
-  value: TrackerDataLinkSource;
-  label: string;
-}> = [
-  { value: "purchaseInvoices", label: "Purchase invoice collection" },
-  { value: "saleInvoices", label: "Sale invoice collection" },
-  { value: "annualReturn", label: "Annual return" },
-  { value: "purchaseUploads", label: "CPCB purchase uploads" },
-  { value: "saleUploads", label: "CPCB sale uploads" },
-];
-const LIVE_DATA_DISPLAYS: Record<
-  TrackerDataLinkSource,
-  Array<{ value: TrackerDataLinkDisplay; label: string }>
-> = {
-  purchaseInvoices: [
-    { value: "coverageStatus", label: "Coverage status" },
-    { value: "monthsCovered", label: "Months covered" },
-    { value: "requiredMonths", label: "Required months" },
-    { value: "missingMonths", label: "Missing months" },
-    { value: "yesNo", label: "Received / covered (legacy)" },
-    { value: "count", label: "Number of records" },
-    { value: "status", label: "Latest status" },
-    { value: "latestDate", label: "Latest period end" },
-  ],
-  saleInvoices: [
-    { value: "coverageStatus", label: "Coverage status" },
-    { value: "monthsCovered", label: "Months covered" },
-    { value: "requiredMonths", label: "Required months" },
-    { value: "missingMonths", label: "Missing months" },
-    { value: "yesNo", label: "Received / covered (legacy)" },
-    { value: "count", label: "Number of records" },
-    { value: "status", label: "Latest status" },
-    { value: "latestDate", label: "Latest period end" },
-  ],
-  annualReturn: [
-    { value: "yesNo", label: "Filed / verified" },
-    { value: "status", label: "Current status" },
-    { value: "latestDate", label: "Filing date" },
-  ],
-  purchaseUploads: [
-    { value: "uploadStatus", label: "Upload status" },
-    { value: "yesNo", label: "Has purchase upload" },
-    { value: "quantity", label: "Total quantity (MT)" },
-    { value: "invoiceCount", label: "Invoices uploaded" },
-    { value: "cat1", label: "CAT-I quantity (MT)" },
-    { value: "cat2", label: "CAT-II quantity (MT)" },
-    { value: "cat3", label: "CAT-III quantity (MT)" },
-    { value: "cat4", label: "CAT-IV quantity (MT)" },
-    { value: "count", label: "Upload records" },
-  ],
-  saleUploads: [
-    { value: "uploadStatus", label: "Upload status" },
-    { value: "yesNo", label: "Has sale upload" },
-    { value: "quantity", label: "Total quantity (MT)" },
-    { value: "invoiceCount", label: "Invoices uploaded" },
-    { value: "cat1", label: "CAT-I quantity (MT)" },
-    { value: "cat2", label: "CAT-II quantity (MT)" },
-    { value: "cat3", label: "CAT-III quantity (MT)" },
-    { value: "cat4", label: "CAT-IV quantity (MT)" },
-    { value: "count", label: "Upload records" },
-  ],
-  uploadedData: [
-    { value: "yesNo", label: "Has uploaded data" },
-    { value: "quantity", label: "Invoice quantity (MT)" },
-    { value: "invoiceCount", label: "Number of invoices" },
-    { value: "count", label: "Upload records" },
-  ],
-};
-function liveFieldType(display: TrackerDataLinkDisplay): TrackerFieldType {
-  if (display === "yesNo") return "toggle";
-  if (display === "latestDate") return "date";
-  if (
-    [
-      "count",
-      "quantity",
-      "invoiceCount",
-      "cat1",
-      "cat2",
-      "cat3",
-      "cat4",
-      "requiredMonths",
-    ].includes(display)
-  )
-    return "number";
-  return "text";
-}
 
 function valueText(value: TrackerValue | undefined) {
   if (Array.isArray(value)) return value.join(", ");
   return value === true ? "Yes" : value === false ? "No" : String(value ?? "");
-}
-function blankField(): TrackerField {
-  return { key: "", label: "", type: "toggle" };
-}
-function optionTone(color?: TrackerOptionColor) {
-  return {
-    slate: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
-    blue: "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200",
-    violet:
-      "bg-violet-100 text-violet-800 dark:bg-violet-950/50 dark:text-violet-200",
-    amber:
-      "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200",
-    emerald:
-      "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200",
-    rose: "bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-200",
-  }[color || "slate"];
 }
 function clientDetailValue(client: Client | null, key: ClientTrackerDetailKey) {
   return client?.[key] || "—";
@@ -331,148 +180,10 @@ function emailId() {
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
-function parseEmailList(value: string) {
-  return Array.from(
-    new Set(
-      value
-        .split(/[,;\n]/)
-        .map((email) => email.trim().toLowerCase())
-        .filter(Boolean),
-    ),
-  );
-}
-
-const EMAIL_CONDITION_OPERATORS: Array<{
-  value: TrackerRuleOperator;
-  label: string;
-}> = [
-  { value: "equals", label: "equals" },
-  { value: "not_equals", label: "does not equal" },
-  { value: "is_empty", label: "is empty" },
-  { value: "is_not_empty", label: "is not empty" },
-  { value: "contains", label: "contains" },
-  { value: "not_contains", label: "does not contain" },
-  { value: "greater_than", label: "greater than" },
-  { value: "greater_than_or_equal", label: "at least" },
-  { value: "less_than", label: "less than" },
-  { value: "less_than_or_equal", label: "at most" },
-];
-
-function emailOperatorsForField(field?: TrackerField) {
-  const equality = ["equals", "not_equals", "is_empty", "is_not_empty"];
-  const text = [...equality, "contains", "not_contains"];
-  const numeric = [
-    ...equality,
-    "greater_than",
-    "greater_than_or_equal",
-    "less_than",
-    "less_than_or_equal",
-  ];
-  const allowed =
-    field?.type === "number" || field?.type === "date"
-      ? numeric
-      : ["text", "longText", "tags", "multiSelect"].includes(
-            field?.type || "",
-          )
-        ? text
-        : equality;
-  return EMAIL_CONDITION_OPERATORS.filter((operator) =>
-    allowed.includes(operator.value),
-  );
-}
-
-function emailConfigSnapshot(
-  emailEnabled: boolean,
-  workflows: TrackerEmailWorkflow[],
-) {
+function emailConfigSnapshot(emailEnabled: boolean, workflows: TrackerEmailWorkflow[]) {
   return JSON.stringify({ emailEnabled, workflows });
 }
 
-function hasRichTextContent(value: string | undefined) {
-  return Boolean(
-    value
-      ?.replace(/<[^>]*>/g, " ")
-      .replace(/&nbsp;/gi, " ")
-      .trim(),
-  );
-}
-
-function validateEmailWorkflowDrafts(
-  workflows: TrackerEmailWorkflow[],
-  fields: TrackerField[],
-) {
-  const fieldByKey = new Map(fields.map((field) => [field.key, field]));
-  const validateConditions = (
-    conditions: TrackerConditionGroup | undefined,
-    location: string,
-  ) => {
-    if (!conditions?.conditions.length)
-      return `${location} needs at least one condition.`;
-    for (const condition of conditions.conditions) {
-      const field = fieldByKey.get(condition.fieldKey);
-      if (!field) return `${location} references a removed tracker column.`;
-      if (
-        !emailOperatorsForField(field).some(
-          (operator) => operator.value === condition.operator,
-        )
-      )
-        return `${location} uses an incompatible operator for ${field.label}.`;
-      if (
-        !["is_empty", "is_not_empty"].includes(condition.operator) &&
-        String(condition.value ?? "").trim() === ""
-      )
-        return `${location} needs a value for ${field.label}.`;
-    }
-    return null;
-  };
-
-  for (const [index, workflow] of workflows.entries()) {
-    const name = workflow.name.trim() || `Workflow ${index + 1}`;
-    if (!workflow.name.trim()) return `Workflow ${index + 1} needs a name.`;
-    if (!workflow.subject.trim()) return `${name} needs an email subject.`;
-    if (!hasRichTextContent(workflow.body)) return `${name} needs an email body.`;
-    const workflowConditions = validateConditions(
-      workflow.conditionGroup || {
-        mode: "ALL",
-        conditions: [
-          {
-            fieldKey: workflow.mainFieldKey,
-            operator: "equals",
-            value: workflow.mainValue,
-          },
-        ],
-      },
-      `${name} eligibility`,
-    );
-    if (workflowConditions) return workflowConditions;
-    for (const point of workflow.points) {
-      if (!fieldByKey.has(point.fieldKey))
-        return `${name} has a message for a removed tracker column.`;
-      if (!point.value.trim())
-        return `${name} needs a matching value for each message.`;
-      if (!hasRichTextContent(point.statement))
-        return `${name} needs text for each matching message.`;
-    }
-    for (const rule of workflow.contentRules || []) {
-      const ruleConditions = validateConditions(
-        rule.conditionGroup,
-        `${name} conditional content`,
-      );
-      if (ruleConditions) return ruleConditions;
-      if (rule.action !== "skip" && !hasRichTextContent(rule.content))
-        return `${name} has conditional content without message text.`;
-    }
-    for (const attachment of workflow.attachments || []) {
-      const attachmentConditions = validateConditions(
-        attachment.conditionGroup,
-        `${name} attachment rule`,
-      );
-      if (attachment.conditionGroup && attachmentConditions)
-        return attachmentConditions;
-    }
-  }
-  return null;
-}
 function newWorkflow(fields: TrackerField[]): TrackerEmailWorkflow {
   const main = fields[0];
   return {
@@ -549,7 +260,6 @@ export default function ClientTrackerDetailPage({
     session?.user && (session.user as { role?: string }).role === "admin";
   const resolved = React.use(params);
   const entryLimit = 100;
-  const [entryOffset, setEntryOffset] = useState(0);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState(ALL_FILTER);
   const [fieldFilter, setFieldFilter] = useState(ALL_FILTER);
@@ -561,54 +271,48 @@ export default function ClientTrackerDetailPage({
     null,
   );
   const [savingSavedView, setSavingSavedView] = useState(false);
-  const filterQuery = new URLSearchParams({
-    limit: String(entryLimit),
-    offset: String(entryOffset),
+  const { url, entryOffset, setEntryOffset, filtersPending } = useTrackerQuery({
+    trackerId: resolved.id, search, category: categoryFilter,
+    field: fieldFilter, value: valueFilter, view: savedViewId, limit: entryLimit,
   });
-  if (search.trim()) filterQuery.set("search", search.trim());
-  if (categoryFilter !== ALL_FILTER)
-    filterQuery.set("category", categoryFilter);
-  if (fieldFilter !== ALL_FILTER && valueFilter !== ALL_FILTER) {
-    filterQuery.set("field", fieldFilter);
-    filterQuery.set("value", valueFilter);
-  }
-  if (savedViewId) filterQuery.set("view", savedViewId);
-  if (entryOffset > 0) filterQuery.set("overview", "0");
-  const url = `/api/client-trackers/${resolved.id}?${filterQuery.toString()}`;
-  const { data, loading, error, refetch, mutate } =
-    useCache<TrackerDetail>(url);
+  const pendingCells = useRef(new Set<string>());
+  const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const writesPending = savingCells.size > 0 || bulkSaving;
+  const { data, loading, error, refetch: refetchCurrentPage, mutate } =
+    useFreshTrackerData<TrackerDetail>(url, resolved.id, { paused: writesPending });
+  const { data: overview, loading: overviewLoading, error: overviewError, refetch: refetchOverview } =
+    useFreshTrackerData<Pick<TrackerDetail, "overviewCounts">>(
+      `/api/client-trackers/${resolved.id}?overviewOnly=1`, resolved.id,
+      { enabled: Boolean(data), paused: writesPending },
+    );
+  const refetch = useCallback(() => {
+    invalidate(`/api/client-trackers/${resolved.id}`);
+    void refetchCurrentPage();
+    void refetchOverview();
+  }, [resolved.id, refetchCurrentPage, refetchOverview]);
   const { data: emailActivity, refetch: refetchEmailActivity } =
-    useCache<TrackerEmailActivity>(`/api/client-trackers/${resolved.id}/email`);
+    useCache<TrackerEmailActivity>(`/api/client-trackers/${resolved.id}/email`, { enabled: data?.emailEnabled === true });
   const { data: trackerActivity, refetch: refetchTrackerActivity } =
     useCache<TrackerActivity>(`/api/client-trackers/${resolved.id}/activity`);
-  const { data: rawClients } = useCache<Client[]>("/api/clients");
-  const { data: rawDocuments } = useCache<ManagedDocumentOption[]>(
-    "/api/documents",
-  );
   const tracker = data;
-  const [lastOverviewCounts, setLastOverviewCounts] =
-    useState<TrackerDetail["overviewCounts"]>();
-  React.useEffect(() => {
-    if (data?.overviewCounts) setLastOverviewCounts(data.overviewCounts);
-  }, [data?.overviewCounts]);
-  const overviewCounts = tracker?.overviewCounts || lastOverviewCounts;
-  const allClients = Array.isArray(rawClients) ? rawClients : [];
-  const managedDocuments = (rawDocuments || []).filter(
-    (document) =>
-      document.storageType === "google-drive" &&
-      Boolean(document.driveFileId) &&
-      Boolean(document.mimeType),
-  );
-  const [savingCell, setSavingCell] = useState<string | null>(null);
+  const overviewCounts = overview?.overviewCounts;
   const [archiving, setArchiving] = useState(false);
   const [selectedEntries, setSelectedEntries] = useState<Set<string>>(
     new Set(),
   );
   const [bulkField, setBulkField] = useState("status");
   const [bulkValue, setBulkValue] = useState("Done");
-  const [bulkSaving, setBulkSaving] = useState(false);
   const [configurationOpen, setConfigurationOpen] = useState(false);
-  const [fieldDraft, setFieldDraft] = useState<TrackerField[]>([]);
+  const [configurationBaseline, setConfigurationBaseline] = useState<TrackerConfiguration | null>(null);
+  const [configurationSession, setConfigurationSession] = useState(0);
+  const [configurationCompact, setConfigurationCompact] = useState(false);
+  const [configurationNestedDialog, setConfigurationNestedDialog] = useState(false);
+  const [configurationDiscardOpen, setConfigurationDiscardOpen] = useState(false);
+  const [configurationError, setConfigurationError] = useState<string | null>(null);
+  const [configurationSaved, setConfigurationSaved] = useState(false);
+  const configurationSaving = useRef(false);
+  const [fieldDraft, setFieldDraft] = useState<TrackerDraftField[]>([]);
   const [columnDraft, setColumnDraft] = useState<ClientTrackerDetailKey[]>([]);
   const [savingConfiguration, setSavingConfiguration] = useState(false);
   const [participantDraft, setParticipantDraft] = useState<string[]>([]);
@@ -617,6 +321,9 @@ export default function ClientTrackerDetailPage({
     description: "",
     financialYear: "",
   });
+  const configurationDiff = useMemo(() => configurationBaseline ? configurationChanges(configurationBaseline, {
+    fields: fieldDraft, clientColumns: columnDraft, clientIds: participantDraft, financialYear: basicDraft.financialYear,
+  }) : [], [configurationBaseline, fieldDraft, columnDraft, participantDraft, basicDraft.financialYear]);
   const [basicsOpen, setBasicsOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<
     "archive" | "delete" | "configuration" | "bulk" | null
@@ -648,8 +355,14 @@ export default function ClientTrackerDetailPage({
   const [emailPreview, setEmailPreview] = useState<EmailPreview | null>(null);
   const [emailKind, setEmailKind] = useState<"initial" | "reminder">("initial");
   const [emailLoading, setEmailLoading] = useState(false);
+  const [emailPreparationPhase, setEmailPreparationPhase] = useState<EmailPreparationPhase>(null);
+  const [emailPreparationError, setEmailPreparationError] = useState<string | null>(null);
+  const [emailDeliveryMode, setEmailDeliveryMode] = useState<"draft" | "send" | null>(null);
+  const emailExpandFocusRef = useRef<HTMLElement | null>(null);
   const [combinationPreviewOpen, setCombinationPreviewOpen] = useState(false);
-  const [sendConfirmation, setSendConfirmation] = useState(false);
+  const [authorizationBatch, setAuthorizationBatch] = useState<{ batch: DeliveryBatch; revision: string } | null>(null);
+  const emailOperationRef = useRef<{ batch: DeliveryBatch; revision: string; attempted: boolean; approvalId?: string } | null>(null);
+  const emailDeliveryInFlight = useRef(false);
   const [recipientDrafts, setRecipientDrafts] = useState<
     Record<string, RecipientDraft>
   >({});
@@ -660,10 +373,22 @@ export default function ClientTrackerDetailPage({
   const [gmailSignatureLoading, setGmailSignatureLoading] = useState(false);
   const [exportingTracker, setExportingTracker] = useState(false);
   const [exportingEmailHistory, setExportingEmailHistory] = useState(false);
-  const [campaignId, setCampaignId] = useState<string | null>(null);
+  const { data: rawClients, loading: clientsLoading, error: clientsError } =
+    useCache<Client[]>("/api/clients", { enabled: configurationOpen });
+  const { data: rawDocuments } = useCache<ManagedDocumentOption[]>(
+    "/api/documents", { enabled: emailConfigOpen },
+  );
+  const allClients = Array.isArray(rawClients) ? rawClients : [];
+  const managedDocuments = useMemo(() => (rawDocuments || []).filter(
+    document => document.storageType === "google-drive" && Boolean(document.driveFileId) && Boolean(document.mimeType),
+  ), [rawDocuments]);
+  const resultsUpdating = loading || filtersPending;
+  const resultsUnavailable = resultsUpdating || Boolean(error);
 
+  const signaturePreviewOpen = Boolean((emailComposeOpen && emailPreview) || previewMessage);
+  const emailClientCategories = useMemo(() => Object.fromEntries((tracker?.entries || []).map(entry => [entry.clientId, entry.client?.category || ""])), [tracker?.entries]);
   useEffect(() => {
-    if (!previewMessage) {
+    if (!signaturePreviewOpen) {
       setGmailSignature(null);
       setGmailSignatureLoading(false);
       return;
@@ -674,7 +399,7 @@ export default function ClientTrackerDetailPage({
     void fetch("/api/email/default-signature")
       .then(async (response) => {
         if (!response.ok) return { signature: "" };
-        return (await response.json()) as { signature?: string };
+        return (await readJsonResponse(response)) as { signature?: string };
       })
       .then((result) => {
         if (!cancelled) setGmailSignature(result.signature || "");
@@ -688,7 +413,7 @@ export default function ClientTrackerDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [previewMessage]);
+  }, [signaturePreviewOpen]);
 
   const filterField = tracker?.fields.find(
     (field) => field.key === fieldFilter,
@@ -698,66 +423,33 @@ export default function ClientTrackerDetailPage({
   const activeSavedView = tracker?.savedViews?.find(
     (view) => view.id === savedViewId,
   );
-  const visibleEntries = useMemo(
-    () =>
-      (tracker?.entries || []).filter((entry) => {
-        const term = search.toLowerCase().trim();
-        const matchesSearch =
-          !term ||
-          `${entry.client?.companyName || ""} ${entry.clientId} ${entry.client?.category || ""}`
-            .toLowerCase()
-            .includes(term);
-        const matchesCategory =
-          categoryFilter === ALL_FILTER ||
-          entry.client?.category === categoryFilter;
-        const rawValue = entry.values[fieldFilter];
-        const currentValue = valueText(rawValue);
-        const matchesValue =
-          fieldFilter === ALL_FILTER ||
-          valueFilter === ALL_FILTER ||
-          (["text", "longText"].includes(filterField?.type || "")
-            ? currentValue.toLowerCase().includes(valueFilter.toLowerCase())
-            : ["multiSelect", "tags"].includes(filterField?.type || "")
-              ? Array.isArray(rawValue) && rawValue.includes(valueFilter)
-              : currentValue === valueFilter);
-        const matchesView =
-          !activeSavedView ||
-          evaluateTrackerConditionGroup(
-            activeSavedView.conditionGroup,
-            entry.values,
-          );
-        return matchesSearch && matchesCategory && matchesValue && matchesView;
-      }),
-    [
-      tracker?.entries,
-      search,
-      categoryFilter,
-      fieldFilter,
-      valueFilter,
-      filterField?.type,
-      activeSavedView,
-    ],
-  );
+  // The API filters the complete tracker before pagination; do not re-filter a
+  // stale page locally while a new search is still loading.
+  const visibleEntries = tracker?.entries || [];
   const deleteActiveSavedView = async () => {
     if (!tracker || !activeSavedView) return;
-    const response = await fetch(url, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        savedViews: (tracker.savedViews || []).filter(
-          (view) => view.id !== activeSavedView.id,
-        ),
-      }),
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      toast.error(result.error || "Unable to delete view.");
-      return;
+    try {
+      const response = await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          savedViews: (tracker.savedViews || []).filter(
+            (view) => view.id !== activeSavedView.id,
+          ),
+        }),
+      });
+      const result = await readJsonResponse(response);
+      if (!response.ok) {
+        toast.error(result.error || "Unable to delete view.");
+        return;
+      }
+      setSavedViewId("");
+      await refetch();
+      void refetchTrackerActivity();
+      toast.success("Saved view deleted.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to delete view.");
     }
-    setSavedViewId("");
-    await refetch();
-    void refetchTrackerActivity();
-    toast.success("Saved view deleted.");
   };
   const overviewFields = (tracker?.fields || []).filter(
     (field) =>
@@ -849,18 +541,26 @@ export default function ClientTrackerDetailPage({
       </button>
     </div>
   );
+  const requestConfigurationClose = () => {
+    if (savingConfiguration || configurationNestedDialog || configurationDiscardOpen || confirmation !== null) return;
+    if (configurationDiff.length) setConfigurationDiscardOpen(true);
+    else setConfigurationOpen(false);
+  };
   const configurationFooter = (
-    <div className="tracker-modal-footer flex justify-end gap-3">
+    <div className="tracker-modal-footer configure-footer flex items-center gap-3">
+      <span className={"configure-unsaved " + (configurationDiff.length ? "has-changes" : "")} role="status">
+        {configurationSaved ? "Saved" : configurationDiff.length ? configurationDiff.length + " unsaved change" + (configurationDiff.length === 1 ? "" : "s") : "No unsaved changes"}
+      </span>
       <button
         type="button"
-        onClick={() => setConfigurationOpen(false)}
+        onClick={requestConfigurationClose}
         disabled={savingConfiguration}
         className="rounded-xl px-4 py-2.5 text-sm font-medium text-muted hover:bg-black/[0.04] disabled:opacity-60 dark:hover:bg-white/[0.06]"
       >
         Cancel
       </button>
       <button
-        disabled={savingConfiguration}
+        disabled={savingConfiguration || !configurationDiff.length}
         onClick={() => void saveConfiguration()}
         className="tracker-modal-primary rounded-xl px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
       >
@@ -868,40 +568,9 @@ export default function ClientTrackerDetailPage({
       </button>
     </div>
   );
-  const emailComposeFooter = (
-    <div className="tracker-modal-footer flex shrink-0 flex-wrap justify-end gap-2 border-t border-white/[0.45] bg-white/[0.82] px-4 py-3 shadow-[0_-12px_28px_rgba(0,0,0,0.08)] backdrop-blur-2xl sm:px-6 dark:border-white/[0.10] dark:bg-[#131315]/[0.92]">
-      <button
-        type="button"
-        onClick={() => setEmailComposeOpen(false)}
-        disabled={emailLoading}
-        className="rounded-full border border-white/70 bg-white px-5 py-2.5 text-sm font-semibold text-default shadow-sm transition hover:bg-[#f6f6f8] disabled:opacity-60 dark:border-white/[0.12] dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"
-      >
-        Cancel
-      </button>
-      {emailPreview && (
-        <>
-          <button
-            disabled={emailLoading || !emailPreview.messages.length}
-            onClick={() => void deliverEmails("draft")}
-            className="rounded-full border border-white/70 bg-white px-5 py-2.5 text-sm font-semibold text-default shadow-sm transition hover:bg-[#f6f6f8] disabled:opacity-60 dark:border-white/[0.12] dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"
-          >
-            Create Gmail drafts
-          </button>
-          <button
-            disabled={emailLoading || !emailPreview.messages.length}
-            onClick={() => setSendConfirmation(true)}
-            className="rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-600/20 transition active:scale-[0.98] disabled:opacity-60"
-          >
-            <Send className="mr-1 inline h-4 w-4" />
-            Send {emailPreview.messages.length} emails
-          </button>
-        </>
-      )}
-    </div>
-  );
-
   React.useEffect(() => {
     if (
+      tracker?.fields &&
       fieldFilter !== ALL_FILTER &&
       !tracker?.fields.some((field) => field.key === fieldFilter)
     ) {
@@ -911,7 +580,6 @@ export default function ClientTrackerDetailPage({
   }, [fieldFilter, tracker?.fields]);
 
   React.useEffect(() => {
-    setEntryOffset(0);
     setSelectedEntries(new Set());
   }, [search, categoryFilter, fieldFilter, valueFilter, savedViewId]);
 
@@ -925,18 +593,16 @@ export default function ClientTrackerDetailPage({
     value: TrackerValue,
   ) => {
     const cellId = `${entry._id}-${field.key}`;
-    setSavingCell(cellId);
-    const optimisticEntry = {
-      ...entry,
-      values: { ...entry.values, [field.key]: value },
-      updatedAt: new Date().toISOString(),
-    };
+    if (pendingCells.current.has(cellId)) return;
+    pendingCells.current.add(cellId);
+    setSavingCells(new Set(pendingCells.current));
     mutate((current) =>
       current
         ? {
             ...current,
             entries: current.entries.map((item) =>
-              item._id === entry._id ? optimisticEntry : item,
+              item._id === entry._id
+                ? { ...item, values: { ...item.values, [field.key]: value } } : item,
             ),
           }
         : (current as unknown as TrackerDetail),
@@ -950,7 +616,7 @@ export default function ClientTrackerDetailPage({
           body: JSON.stringify({ key: field.key, value }),
         },
       );
-      const saved = await response.json();
+      const saved = await readJsonResponse(response);
       if (!response.ok)
         throw new Error(saved.error || "Unable to save change.");
       mutate((current) =>
@@ -959,21 +625,26 @@ export default function ClientTrackerDetailPage({
               ...current,
               entries: current.entries.map((item) =>
                 item._id === entry._id
-                  ? { ...item, ...saved, client: item.client }
+                  ? { ...item, updatedAt: saved.updatedAt || item.updatedAt,
+                    values: { ...item.values, [field.key]: saved.values[field.key] } }
                   : item,
               ),
             }
           : (current as unknown as TrackerDetail),
       );
-      void refetch();
       void refetchTrackerActivity();
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Unable to save change.",
       );
-      refetch();
+      mutate(current => current ? { ...current, entries: current.entries.map(item =>
+        item._id === entry._id ? { ...item, values: { ...item.values, [field.key]: entry.values[field.key] } } : item,
+      ) } : current);
     } finally {
-      setSavingCell(null);
+      pendingCells.current.delete(cellId);
+      setSavingCells(new Set(pendingCells.current));
+      // The hooks resume with a fresh read only after all outstanding cell writes settle.
+      invalidate(`/api/client-trackers/${resolved.id}`);
     }
   };
   const archive = async () => {
@@ -1015,19 +686,19 @@ export default function ClientTrackerDetailPage({
       toast.error("Restore this tracker before changing its configuration.");
       return;
     }
-    setFieldDraft(
-      tracker.fields.map((field) => ({
-        ...field,
-        optionInput: field.options?.join(", ") || "",
-      })),
-    );
-    setColumnDraft(tracker.clientColumns || ["state"]);
-    setParticipantDraft(tracker.entries.map((entry) => entry.clientId));
+    const openingFields = tracker.fields.map((field) => draftField({ ...structuredClone(field), optionInput: field.options?.join(", ") || "" }));
+    setFieldDraft(openingFields);
+    setColumnDraft([...(tracker.clientColumns || ["state"])]);
+    setParticipantDraft([...tracker.clientIds]);
     setBasicDraft({
       name: tracker.name,
       description: tracker.description || "",
       financialYear: tracker.financialYear || "",
     });
+    setConfigurationBaseline(configurationSnapshot({ ...tracker, fields: openingFields }));
+    setConfigurationSession(session => session + 1);
+    setConfigurationError(null); setConfigurationSaved(false); setConfigurationCompact(false);
+    setConfigurationNestedDialog(false); setConfigurationDiscardOpen(false);
     setConfigurationOpen(true);
   };
   const openBasics = () => {
@@ -1116,7 +787,7 @@ export default function ClientTrackerDetailPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ savedViews }),
       });
-      const result = await response.json();
+      const result = await readJsonResponse(response);
       if (!response.ok) throw new Error(result.error || "Unable to save view.");
       setSavedViewId(draft.id);
       setSearch("");
@@ -1187,7 +858,7 @@ export default function ClientTrackerDetailPage({
           emailWorkflows: workflowDraft,
         }),
       });
-      const result = await response.json();
+      const result = await readJsonResponse(response);
       if (!response.ok)
         throw new Error(result.error || "Unable to save email settings.");
       await refetch();
@@ -1231,7 +902,7 @@ export default function ClientTrackerDetailPage({
     try {
       const response = await fetch(endpoint);
       if (!response.ok) {
-        const result = await response.json().catch(() => ({}));
+        const result = await readJsonResponse(response).catch(() => ({}));
         throw new Error(result.error || "Unable to prepare the Excel file.");
       }
       const blob = await response.blob();
@@ -1285,13 +956,19 @@ export default function ClientTrackerDetailPage({
     setEmailPreview(null);
     setPreviewMessage(null);
     setRecipientDrafts({});
-    setCampaignId(null);
+    emailOperationRef.current = null;
+    setAuthorizationBatch(null);
     setEmailKind("initial");
+    setEmailPreparationError(null);
+    setEmailPreparationPhase(null);
+    setEmailDeliveryMode(null);
     setEmailComposeOpen(true);
   };
   const previewEmails = async () => {
     if (!activeWorkflowId) return;
     setEmailLoading(true);
+    setEmailPreparationError(null);
+    setEmailPreparationPhase(emailKind === "reminder" ? "replies" : "recipients");
     try {
       if (emailKind === "reminder") {
         const replyResponse = await fetch(
@@ -1299,7 +976,7 @@ export default function ClientTrackerDetailPage({
           { method: "POST" },
         );
         if (!replyResponse.ok) {
-          const replyResult = await replyResponse.json();
+          const replyResult = await readJsonResponse(replyResponse);
           toast(
             replyResult.error ||
               "Could not refresh Gmail replies. Saved reply status will still be checked.",
@@ -1308,6 +985,7 @@ export default function ClientTrackerDetailPage({
         }
         void refetchEmailActivity();
       }
+      setEmailPreparationPhase("recipients");
       const response = await fetch(
         `/api/client-trackers/${resolved.id}/email`,
         {
@@ -1320,7 +998,7 @@ export default function ClientTrackerDetailPage({
           }),
         },
       );
-      const result = await response.json();
+      const result = await readJsonResponse(response);
       if (!response.ok)
         throw new Error(result.error || "Unable to prepare email preview.");
       setEmailPreview(result);
@@ -1342,6 +1020,7 @@ export default function ClientTrackerDetailPage({
         ),
       );
     } catch (error) {
+      setEmailPreparationError(error instanceof Error ? error.message : "Unable to prepare email preview.");
       toast.error(
         error instanceof Error
           ? error.message
@@ -1349,85 +1028,47 @@ export default function ClientTrackerDetailPage({
       );
     } finally {
       setEmailLoading(false);
+      setEmailPreparationPhase(null);
     }
   };
-  const deliverEmails = async (mode: "draft" | "send") => {
+  const prepareDeliveryBatch = (mode: "draft" | "send") => {
     if (!emailPreview) return;
-    const isEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-    const invalidRecipient = emailPreview.messages.find((message) => {
-      const draft = recipientDrafts[message.entryId] || {
-        to: message.suggestedTo?.length ? message.suggestedTo : [message.to],
-        cc: [],
-        additionalTo: "",
-        additionalCc: "",
-      };
-      const to = [...draft.to, ...parseEmailList(draft.additionalTo)];
-      const cc = [...draft.cc, ...parseEmailList(draft.additionalCc)];
-      return !to.length || [...to, ...cc].some((email) => !isEmail(email));
-    });
-    if (invalidRecipient) {
-      toast.error(
-        `Enter valid To and CC addresses for ${invalidRecipient.companyName}.`,
-      );
-      return;
-    }
-    setEmailLoading(true);
     try {
-      const messages = emailPreview.messages.map((message) => {
-        const recipients = recipientDrafts[message.entryId] || {
-          to: message.suggestedTo?.length ? message.suggestedTo : [message.to],
-          cc: [],
-          additionalTo: "",
-          additionalCc: "",
-        };
-        const to = Array.from(
-          new Set(
-            [...recipients.to, ...parseEmailList(recipients.additionalTo)].map(
-              (email) => email.trim().toLowerCase(),
-            ),
-          ),
-        );
-        const cc = Array.from(
-          new Set(
-            [...recipients.cc, ...parseEmailList(recipients.additionalCc)].map(
-              (email) => email.trim().toLowerCase(),
-            ),
-          ),
-        ).filter((email) => !to.includes(email));
-        return {
-          entryId: message.entryId,
-          clientId: message.clientId,
-          companyName: message.companyName,
-          to,
-          cc,
-          subject: message.subject,
-          html: message.html,
-          attachments: message.attachments.map(({ documentId }) => ({
-            documentId,
-          })),
-        };
-      });
-      const activeCampaignId = campaignId || emailId();
-      setCampaignId(activeCampaignId);
+      validateRecipientDrafts(emailPreview, recipientDrafts);
+      const payload = { workflowId: activeWorkflowId, kind: emailKind, mode, messages: buildDeliveryMessages(emailPreview, recipientDrafts) };
+      const revision = canonicalDeliveryBatch(resolved.id, { ...payload, campaignId: "client-batch-revision" });
+      if (emailOperationRef.current?.revision !== revision) emailOperationRef.current = { batch: { ...payload, campaignId: crypto.randomUUID() }, revision, attempted: false };
+      setAuthorizationBatch({ batch: emailOperationRef.current.batch, revision });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Check the recipients before continuing.");
+    }
+  };
+  const deliverPreparedBatch = async (batch: DeliveryBatch, approvalId?: string) => {
+    const operation = emailOperationRef.current;
+    if (!operation || operation.batch.campaignId !== batch.campaignId || emailDeliveryInFlight.current) throw new Error("This delivery changed or is already processing.");
+    emailDeliveryInFlight.current = true;
+    const resume = operation.attempted;
+    operation.attempted = true; operation.approvalId = approvalId;
+    const mode = batch.mode;
+    setEmailLoading(true);
+    setEmailDeliveryMode(mode);
+    try {
       const response = await fetch(
         `/api/client-trackers/${resolved.id}/email/deliver`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            campaignId: activeCampaignId,
-            workflowId: activeWorkflowId,
-            kind: emailKind,
-            mode,
-            messages,
-            resume: Boolean(campaignId),
-            ...(mode === "send" ? { confirmed: true } : {}),
+            ...batch,
+            approvalId,
+            resume,
+            confirmed: true,
           }),
         },
       );
-      const result = await response.json();
+      const result = await readJsonResponse(response);
       if (!response.ok)
-        throw new Error(result.error || "Unable to deliver tracker emails.");
+        throw new SecurityRequestError(result.error || "Unable to deliver tracker emails.", result.code);
       const deliveryMessage =
         mode === "draft"
           ? `${result.completed} Gmail drafts created.`
@@ -1439,26 +1080,44 @@ export default function ClientTrackerDetailPage({
         );
         void refetchEmailActivity();
         void refetchTrackerActivity();
+        setAuthorizationBatch(null);
         return;
       }
-      result.failed
-        ? toast.error(
+      if (result.status === "processing") throw new Error("This campaign is still processing. Retry the same action to resume pending recipients.");
+      if (result.failed) toast.error(
             `${deliveryMessage} ${result.failed} failed; they are recorded in email history.`,
-          )
-        : toast.success(deliveryMessage);
-      setEmailComposeOpen(false);
-      setSelectedEntries(new Set());
-      setCampaignId(null);
+          );
+      else toast.success(deliveryMessage);
+      emailOperationRef.current = null;
+      const dismissDelivery = () => {
+        setEmailComposeOpen(false);
+        setSelectedEntries(new Set());
+        setAuthorizationBatch(null);
+      };
+      if (result.uncertain) toast(`${result.uncertain} delivery outcome(s) need review in Gmail before those clients can be sent another email.`, { duration: 12000 });
       void refetchEmailActivity();
       void refetchTrackerActivity();
+      // Let the authorization control acknowledge a confirmed send before closing the sheets.
+      if (mode === "send" && !result.failed && !result.uncertain)
+        return { completed: result.completed, dismiss: dismissDelivery };
+      dismissDelivery();
     } catch (error) {
-      toast.error(
-        `${error instanceof Error ? error.message : "Email delivery was interrupted."} Use the same action again to resume unsent recipients.`,
-      );
+      throw error;
     } finally {
       setEmailLoading(false);
+      setEmailDeliveryMode(null);
+      emailDeliveryInFlight.current = false;
     }
   };
+  useEffect(() => {
+    const operation = emailOperationRef.current;
+    if (!operation) return;
+    const revision = emailPreview ? canonicalDeliveryBatch(resolved.id, { campaignId: "client-batch-revision", workflowId: activeWorkflowId, kind: emailKind, mode: operation.batch.mode, messages: buildDeliveryMessages(emailPreview, recipientDrafts) }) : null;
+    if (revision === operation.revision) return;
+    emailOperationRef.current = null;
+    if (authorizationBatch) toast("Delivery changed. Please verify the updated batch again.");
+    setAuthorizationBatch(null);
+  }, [emailPreview, recipientDrafts, activeWorkflowId, emailKind, resolved.id, authorizationBatch]);
   const saveBasics = async () => {
     if (!basicDraft.name.trim()) {
       toast.error("Tracker name is required.");
@@ -1471,7 +1130,7 @@ export default function ClientTrackerDetailPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(basicDraft),
       });
-      const result = await response.json();
+      const result = await readJsonResponse(response);
       if (!response.ok)
         throw new Error(result.error || "Unable to save tracker details.");
       await refetch();
@@ -1487,55 +1146,34 @@ export default function ClientTrackerDetailPage({
       setSavingConfiguration(false);
     }
   };
-  const updateDraft = (index: number, patch: Partial<TrackerField>) =>
-    setFieldDraft((current) =>
-      current.map((field, fieldIndex) =>
-        fieldIndex === index ? { ...field, ...patch } : field,
-      ),
-    );
-  const moveDraft = (from: number, to: number) =>
-    setFieldDraft((current) => {
-      if (
-        from === to ||
-        from < 0 ||
-        to < 0 ||
-        from >= current.length ||
-        to >= current.length
-      )
-        return current;
-      const next = [...current];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
   const saveConfiguration = async (confirmed = false) => {
+    if (configurationSaving.current) return;
+    setConfigurationError(null);
     if (!fieldDraft.length) {
+      setConfigurationError("Keep at least one tracker column.");
       toast.error("Keep at least one tracker column.");
       return;
     }
-    if (
-      fieldDraft.some((field) =>
-        ["purchaseUploads", "saleUploads"].includes(
-          field.dataLink?.source || "",
-        ),
-      ) &&
-      !basicDraft.financialYear
-    ) {
-      toast.error("Choose a financial year for CPCB upload data.");
-      return;
+    if (configurationNeedsFinancialYear(fieldDraft) && !basicDraft.financialYear) {
+      setConfigurationError("Choose a financial year for CPCB upload data.");
+      toast.error("Choose a financial year for CPCB upload data."); return;
+    }
+    if (!participantDraft.length) {
+      setConfigurationError("Keep at least one client in this tracker."); return;
     }
     const removedFields =
       tracker?.fields.filter(
         (field) => !fieldDraft.some((draft) => draft.key === field.key),
       ) || [];
     const removedClients =
-      tracker?.entries.filter(
-        (entry) => !participantDraft.includes(entry.clientId),
+      tracker?.clientIds.filter(
+        (clientId) => !participantDraft.includes(clientId),
       ) || [];
     if (!confirmed && (removedFields.length || removedClients.length)) {
       setConfirmation("configuration");
       return;
     }
+    configurationSaving.current = true;
     setSavingConfiguration(true);
     try {
       const response = await fetch(url, {
@@ -1543,23 +1181,27 @@ export default function ClientTrackerDetailPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...basicDraft,
-          fields: fieldDraft,
+          fields: configurationFields(fieldDraft),
           includeStatus: fieldDraft.some((field) => field.type === "status"),
           clientColumns: columnDraft,
           clientIds: participantDraft,
         }),
       });
-      const result = await response.json();
+      const result = await readJsonResponse(response);
       if (!response.ok)
         throw new Error(result.error || "Unable to update tracker.");
+      setConfigurationSaved(true);
+      setConfigurationBaseline({ financialYear: basicDraft.financialYear, fields: configurationFields(fieldDraft), clientColumns: [...columnDraft], clientIds: [...participantDraft] });
       setConfigurationOpen(false);
       await refetch();
       toast.success("Tracker columns updated.");
     } catch (error) {
+      setConfigurationError(error instanceof Error ? error.message : "Unable to update tracker.");
       toast.error(
         error instanceof Error ? error.message : "Unable to update tracker.",
       );
     } finally {
+      configurationSaving.current = false;
       setSavingConfiguration(false);
     }
   };
@@ -1585,6 +1227,7 @@ export default function ClientTrackerDetailPage({
     confirmed = false,
     replacement?: { ids: string[]; value: TrackerValue },
   ) => {
+    if (pendingCells.current.size > 0) return;
     if (!selectedBulkField || (!replacement && selectedEntries.size === 0))
       return;
     if (!confirmed) {
@@ -1605,7 +1248,7 @@ export default function ClientTrackerDetailPage({
           body: JSON.stringify({ entryIds, key: selectedBulkField.key, value }),
         },
       );
-      const result = await response.json();
+      const result = await readJsonResponse(response);
       if (!response.ok)
         throw new Error(result.error || "Unable to apply update.");
       mutate((current) =>
@@ -1686,7 +1329,7 @@ export default function ClientTrackerDetailPage({
     }
   };
 
-  if (loading) return <LoadingSpinner />;
+  if (loading && !tracker) return <TrackerPageLoading />;
   if (!tracker)
     return (
       <div className="rounded-2xl border border-base bg-card p-8 text-center">
@@ -1694,6 +1337,7 @@ export default function ClientTrackerDetailPage({
         <p className="font-semibold text-default">
           {error ? "Unable to load tracker" : "Tracker not found"}
         </p>
+        {error && <button onClick={() => void refetchCurrentPage()} className="mt-3 mr-4 text-sm text-blue-600">Retry</button>}
         <Link
           href="/dashboard/client-trackers"
           className="mt-3 inline-block text-sm text-blue-600"
@@ -1970,14 +1614,11 @@ export default function ClientTrackerDetailPage({
                 <div className="mt-3 flex flex-wrap gap-2">
                   {values.map((value) => {
                     const count =
-                      overviewCounts?.find(
+                      overviewLoading || overviewError || writesPending || !overviewCounts ? "—" : overviewCounts.find(
                         (item) =>
                           item.key === field.key &&
                           valueText(item.value) === value,
-                      )?.count ??
-                      tracker.entries.filter(
-                        (entry) => valueText(entry.values[field.key]) === value,
-                      ).length;
+                      )?.count ?? 0;
                     return (
                       <button
                         key={value}
@@ -1985,7 +1626,7 @@ export default function ClientTrackerDetailPage({
                           setFieldFilter(field.key);
                           setValueFilter(value);
                         }}
-                        className={`tracker-status-value ${field.type === "status" ? STATUS_TONES[value] || "bg-surface text-default" : field.type === "select" ? optionTone(field.optionColors?.[value]) : "bg-surface text-default"}`}
+                        className={`tracker-status-value ${trackerHasOptionColors(field) ? trackerOptionTone(field, value) : "bg-surface text-default"}`}
                       >
                         <span className="block text-lg font-bold">{count}</span>
                         <span className="text-xs">{value}</span>
@@ -1993,6 +1634,8 @@ export default function ClientTrackerDetailPage({
                     );
                   })}
                 </div>
+                {(overviewLoading || writesPending) && <p className="mt-2 text-xs text-muted" role="status">Updating totals…</p>}
+                {overviewError && <button className="mt-2 text-xs text-muted underline" onClick={() => void refetchOverview()}>Retry totals</button>}
               </article>
             );
           })}
@@ -2003,6 +1646,7 @@ export default function ClientTrackerDetailPage({
             <div>
               <h2 className="font-semibold text-default">Client marks</h2>
               <p className="text-sm text-muted">
+                {resultsUpdating ? "Updating results… " : ""}
                 {tracker.entryCount !== undefined
                   ? `Showing ${visibleEntries.length ? (tracker.offset || 0) + 1 : 0}–${(tracker.offset || 0) + visibleEntries.length} of ${tracker.entryCount} matching clients`
                   : `Showing ${visibleEntries.length} matching clients on this page`}
@@ -2073,7 +1717,7 @@ export default function ClientTrackerDetailPage({
               {isAdmin && (
                 <button
                   type="button"
-                  disabled={exportingTracker}
+                  disabled={exportingTracker || resultsUnavailable}
                   onClick={exportCurrentTracker}
                   className="tracker-table-control"
                 >
@@ -2085,7 +1729,7 @@ export default function ClientTrackerDetailPage({
                 <button
                   type="button"
                   disabled={
-                    tracker.status !== "active" || selectedEntries.size === 0
+                    tracker.status !== "active" || selectedEntries.size === 0 || resultsUnavailable
                   }
                   onClick={openEmailComposer}
                   className="tracker-table-primary"
@@ -2099,12 +1743,14 @@ export default function ClientTrackerDetailPage({
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
                 <input
                   value={search}
+                  aria-label="Find client"
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Find client"
                   className="w-44 rounded-lg border border-base bg-surface py-2 pl-8 pr-2 text-sm"
                 />
               </label>
               <select
+                aria-label="Client category"
                 value={categoryFilter}
                 onChange={(event) => setCategoryFilter(event.target.value)}
                 className="rounded-lg border border-base bg-surface px-2 py-2 text-sm"
@@ -2117,6 +1763,7 @@ export default function ClientTrackerDetailPage({
                 ))}
               </select>
               <select
+                aria-label="Tracker marker"
                 value={fieldFilter}
                 onChange={(event) => {
                   setFieldFilter(event.target.value);
@@ -2132,8 +1779,9 @@ export default function ClientTrackerDetailPage({
                 ))}
               </select>
               {fieldFilter !== ALL_FILTER &&
-                (["text", "longText"].includes(filterField?.type || "") ? (
+                (["text", "longText", "tags"].includes(filterField?.type || "") ? (
                   <input
+                    aria-label="Marker value"
                     value={valueFilter === ALL_FILTER ? "" : valueFilter}
                     onChange={(event) =>
                       setValueFilter(event.target.value || ALL_FILTER)
@@ -2143,6 +1791,7 @@ export default function ClientTrackerDetailPage({
                   />
                 ) : filterField?.type === "date" ? (
                   <input
+                    aria-label="Marker value"
                     type="date"
                     value={valueFilter === ALL_FILTER ? "" : valueFilter}
                     onChange={(event) =>
@@ -2158,6 +1807,7 @@ export default function ClientTrackerDetailPage({
                     "progress",
                   ].includes(filterField?.type || "") ? (
                   <input
+                    aria-label="Marker value"
                     type="number"
                     value={valueFilter === ALL_FILTER ? "" : valueFilter}
                     onChange={(event) =>
@@ -2168,13 +1818,15 @@ export default function ClientTrackerDetailPage({
                   />
                 ) : (
                   <select
+                    aria-label="Marker value"
                     value={valueFilter}
                     onChange={(event) => setValueFilter(event.target.value)}
-                    className="rounded-lg border border-base bg-surface px-2 py-2 text-sm"
+                    data-option-color={filterField && trackerHasOptionColors(filterField) && valueFilter !== ALL_FILTER ? trackerOptionColor(filterField, valueFilter) : undefined}
+                    className={`rounded-lg border border-base px-2 py-2 text-sm ${filterField && trackerHasOptionColors(filterField) && valueFilter !== ALL_FILTER ? trackerOptionTone(filterField, valueFilter) : "bg-surface"}`}
                   >
                     <option value={ALL_FILTER}>All results</option>
                     {filterOptions.map((value) => (
-                      <option key={value} value={value}>
+                      <option key={value} value={value} className={filterField && trackerHasOptionColors(filterField) ? trackerOptionTone(filterField, value) : undefined}>
                         {value}
                       </option>
                     ))}
@@ -2214,16 +1866,18 @@ export default function ClientTrackerDetailPage({
                 <select
                   value={bulkValue}
                   onChange={(event) => setBulkValue(event.target.value)}
-                  className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 dark:bg-slate-900"
+                  aria-label="Bulk marker value"
+                  data-option-color={selectedBulkField && trackerHasOptionColors(selectedBulkField) ? trackerOptionColor(selectedBulkField, bulkValue) : undefined}
+                  className={`rounded-lg border border-blue-200 px-2 py-1.5 ${selectedBulkField && trackerHasOptionColors(selectedBulkField) ? trackerOptionTone(selectedBulkField, bulkValue) : "bg-white dark:bg-slate-900"}`}
                 >
                   {bulkOptions.map((value) => (
-                    <option key={value} value={value}>
+                    <option key={value} value={value} className={selectedBulkField && trackerHasOptionColors(selectedBulkField) ? trackerOptionTone(selectedBulkField, value) : undefined}>
                       {value}
                     </option>
                   ))}
                 </select>
                 <button
-                  disabled={bulkSaving}
+                  disabled={bulkSaving || savingCells.size > 0 || resultsUnavailable}
                   onClick={() => void bulkUpdate()}
                   className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white disabled:opacity-60"
                 >
@@ -2237,6 +1891,13 @@ export default function ClientTrackerDetailPage({
                 </button>
               </div>
             )}
+          {error && !resultsUpdating && (
+            <div role="alert" className="flex items-center justify-between gap-3 border-b border-base px-4 py-3 text-sm text-rose-600">
+              <span>Unable to update results. {error}</span>
+              <button type="button" onClick={() => refetch()} className="font-semibold">Retry</button>
+            </div>
+          )}
+          <fieldset disabled={resultsUnavailable} aria-busy={resultsUpdating}>
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className="bg-surface text-xs uppercase tracking-wide text-muted">
@@ -2361,7 +2022,8 @@ export default function ClientTrackerDetailPage({
                         {renderEditor(
                           entry,
                           field,
-                          savingCell === `${entry._id}-${field.key}` ||
+                          savingCells.has(`${entry._id}-${field.key}`) ||
+                            bulkSaving ||
                             tracker.status !== "active",
                           saveValue,
                         )}
@@ -2387,7 +2049,7 @@ export default function ClientTrackerDetailPage({
                       className="px-4 py-12 text-center text-muted"
                     >
                       <Filter className="mx-auto mb-2 h-5 w-5 text-faint" />
-                      No clients match these filters.
+                      {resultsUpdating ? "Updating results…" : error ? "Results could not be updated." : "No clients match these filters."}
                     </td>
                   </tr>
                 )}
@@ -2397,7 +2059,7 @@ export default function ClientTrackerDetailPage({
           {((tracker.offset || 0) > 0 || tracker.hasMore) && (
             <div className="flex items-center justify-center gap-2 border-t border-base p-3 text-center">
               <button
-                disabled={(tracker.offset || 0) === 0}
+                disabled={(tracker.offset || 0) === 0 || resultsUnavailable}
                 onClick={() =>
                   setEntryOffset((current) => Math.max(0, current - entryLimit))
                 }
@@ -2409,7 +2071,7 @@ export default function ClientTrackerDetailPage({
                 Page {Math.floor((tracker.offset || 0) / entryLimit) + 1}
               </span>
               <button
-                disabled={!tracker.hasMore}
+                disabled={!tracker.hasMore || resultsUnavailable}
                 onClick={() =>
                   setEntryOffset(
                     tracker.nextOffset ?? (tracker.offset || 0) + entryLimit,
@@ -2421,6 +2083,7 @@ export default function ClientTrackerDetailPage({
               </button>
             </div>
           )}
+          </fieldset>
         </section>
         <Modal
           open={emailConfigOpen}
@@ -2641,6 +2304,12 @@ export default function ClientTrackerDetailPage({
               >
                 <TrackerEmailWorkflowEditor
                   workflow={activeWorkflow}
+                  reviewIssues={emailWorkflowValidationIssues(activeWorkflow, tracker.fields, workflowDraft.indexOf(activeWorkflow))}
+                  otherReviewWorkflows={workflowDraft.flatMap((item, index) => {
+                    if (item.id === activeWorkflow.id) return [];
+                    const count = emailWorkflowValidationIssues(item, tracker.fields, index).length;
+                    return count ? [{ name: item.name.trim() || `Workflow ${index + 1}`, issues: count }] : [];
+                  })}
                   fields={tracker.fields}
                   managedDocuments={managedDocuments}
                   startPage={builderStartPage}
@@ -2677,164 +2346,31 @@ export default function ClientTrackerDetailPage({
           confirmLabel="Discard changes"
           variant="warning"
         />
-        <Modal
+        <WorkflowCombinationPreview
           open={combinationPreviewOpen}
           onClose={() => setCombinationPreviewOpen(false)}
-          title="Email combinations"
-          subtitle="Synthetic rule examples only; client recipients and eligibility are not shown"
-          icon={FileText}
-          size="2xl"
-          fixedHeight
-          scrollable={false}
-        >
-          <div className="h-full min-h-0 overflow-y-auto p-5">
-            {activeWorkflow && (
-              <TrackerEmailCombinationPreview
-                workflow={activeWorkflow}
-                fields={tracker.fields}
-              />
-            )}
-          </div>
-        </Modal>
-        <Modal
+          workflow={activeWorkflow || null}
+          fields={tracker.fields}
+        />
+        <EmailDeliveryReviewWorkspace
           open={emailComposeOpen}
-          onClose={() => !emailLoading && setEmailComposeOpen(false)}
-          title="Email clients"
-          subtitle="Review the message and choose recipients before delivery"
-          icon={Send}
-          size="2xl"
-          fixedHeight
-          scrollable={false}
-          footer={emailComposeFooter}
-        >
-          <div className="min-h-0 h-full space-y-4 overflow-y-auto p-5">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label>
-                <span className="mb-1 block text-xs font-medium text-muted">
-                  Workflow
-                </span>
-                <select
-                  value={activeWorkflowId}
-                  onChange={(event) => {
-                    setActiveWorkflowId(event.target.value);
-                    setEmailPreview(null);
-                  }}
-                  className="w-full rounded-xl border border-base bg-surface px-3 py-2.5 text-sm"
-                >
-                  {tracker.emailWorkflows?.map((workflow) => (
-                    <option key={workflow.id} value={workflow.id}>
-                      {workflow.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span className="mb-1 block text-xs font-medium text-muted">
-                  Email type
-                </span>
-                <select
-                  value={emailKind}
-                  onChange={(event) => {
-                    setEmailKind(event.target.value as "initial" | "reminder");
-                    setEmailPreview(null);
-                  }}
-                  className="w-full rounded-xl border border-base bg-surface px-3 py-2.5 text-sm"
-                >
-                  <option value="initial">Initial email</option>
-                  <option value="reminder">Reminder</option>
-                </select>
-              </label>
-            </div>
-            <button
-              disabled={emailLoading}
-              onClick={() => void previewEmails()}
-              className="rounded-xl border border-base bg-card px-4 py-2.5 text-sm font-semibold text-blue-600 shadow-sm transition hover:border-blue-300 disabled:opacity-60"
-            >
-              <FileText className="mr-1 inline h-4 w-4" />
-              {emailLoading ? "Preparing…" : "Preview eligible clients"}
-            </button>
-            {emailPreview && (
-              <div className="space-y-3 border-t border-base pt-4">
-                <div className="flex flex-wrap gap-2 text-sm">
-                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-                    {emailPreview.messages.length} eligible
-                  </span>
-                  {emailPreview.skipped.length ? (
-                    <details className="rounded-full bg-surface px-3 py-1 text-muted">
-                      <summary className="cursor-pointer">
-                        {emailPreview.skipped.length} skipped
-                      </summary>
-                      <div className="absolute z-20 mt-2 max-h-64 w-[min(520px,85vw)] overflow-auto rounded-xl border border-base bg-card p-3 shadow-xl">
-                        <table className="w-full text-left text-xs">
-                          <thead className="text-muted">
-                            <tr>
-                              <th className="pb-2">Client</th>
-                              <th className="pb-2">Reason</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {emailPreview.skipped.map((item) => (
-                              <tr
-                                key={`${item.clientId}-${item.reason}`}
-                                className="border-t border-base"
-                              >
-                                <td className="py-2 pr-3 font-medium text-default">
-                                  {item.companyName}
-                                </td>
-                                <td className="py-2 text-muted">
-                                  {item.reason}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </details>
-                  ) : (
-                    <span className="rounded-full bg-surface px-3 py-1 text-muted">
-                      No clients skipped
-                    </span>
-                  )}
-                  {selectedEntries.size > 0 && (
-                    <span className="rounded-full bg-surface px-3 py-1 text-muted">
-                      Selected rows only
-                    </span>
-                  )}
-                </div>
-                <div className="space-y-3 rounded-2xl border border-base bg-surface p-3">
-                  {emailPreview.messages.map((message) => {
-                    const draft = recipientDrafts[message.entryId] || {
-                      to: message.suggestedTo?.length
-                        ? message.suggestedTo
-                        : [message.to],
-                      cc: [],
-                      additionalTo: "",
-                      additionalCc: "",
-                    };
-                    return (
-                      <TrackerEmailRecipientCard
-                        key={message.entryId}
-                        message={message}
-                        draft={draft}
-                        kind={emailKind}
-                        onChange={(next) =>
-                          setRecipientDrafts((current) => ({
-                            ...current,
-                            [message.entryId]: next,
-                          }))
-                        }
-                        onPreview={() => setPreviewMessage(message)}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        </Modal>
+          onClose={() => !emailLoading && !previewMessage && !authorizationBatch && setEmailComposeOpen(false)}
+          interactionLocked={Boolean(authorizationBatch)}
+          workflows={tracker.emailWorkflows || []} workflowId={activeWorkflowId} kind={emailKind}
+          onWorkflow={id => { setActiveWorkflowId(id); setEmailPreview(null); setEmailPreparationError(null); }}
+          onKind={kind => { setEmailKind(kind); setEmailPreview(null); setEmailPreparationError(null); }}
+          selectedCount={selectedEntries.size} clientCategories={emailClientCategories}
+          preview={emailPreview} drafts={recipientDrafts}
+          onDraft={(id, draft) => setRecipientDrafts(current => ({ ...current, [id]: draft }))}
+          busy={emailLoading} phase={emailPreparationPhase} deliveryMode={emailDeliveryMode}
+          error={emailPreparationError} onPrepare={() => void previewEmails()}
+          onDrafts={() => prepareDeliveryBatch("draft")} onSend={() => prepareDeliveryBatch("send")}
+          signature={gmailSignature} signatureLoading={gmailSignatureLoading}
+          onExpand={message => { emailExpandFocusRef.current = document.activeElement as HTMLElement; setPreviewMessage(message); }}
+        />
         <Modal
           open={Boolean(previewMessage)}
-          onClose={() => setPreviewMessage(null)}
+          onClose={() => { setPreviewMessage(null); requestAnimationFrame(() => emailExpandFocusRef.current?.focus({ preventScroll: true })); }}
           title="Email preview"
           subtitle={previewMessage?.subject || "Personalised client update"}
           icon={FileText}
@@ -2875,17 +2411,21 @@ export default function ClientTrackerDetailPage({
             <div className="mb-2 flex flex-wrap gap-2">
               <button
                 onClick={async () => {
-                  const response = await fetch(
-                    `/api/client-trackers/${resolved.id}/email/replies`,
-                    { method: "POST" },
-                  );
-                  const result = await response.json();
-                  response.ok
-                    ? toast.success(
-                        `Checked ${result.checked} emails; ${result.replied} replies found.`,
-                      )
-                    : toast.error(result.error || "Unable to check replies.");
-                  void refetchEmailActivity();
+                  try {
+                    const response = await fetch(
+                      `/api/client-trackers/${resolved.id}/email/replies`,
+                      { method: "POST" },
+                    );
+                    const result = await readJsonResponse(response);
+                    response.ok
+                      ? toast.success(
+                          `Checked ${result.checked} emails; ${result.replied} replies found.`,
+                        )
+                      : toast.error(result.error || "Unable to check replies.");
+                    void refetchEmailActivity();
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Unable to check replies.");
+                  }
                 }}
                 className="rounded-lg border border-base px-3 py-2 text-sm text-blue-600"
               >
@@ -2975,189 +2515,34 @@ export default function ClientTrackerDetailPage({
             )}
           </div>
         </Modal>
-        <ConfirmModal
-          open={sendConfirmation}
-          onClose={() => setSendConfirmation(false)}
-          onConfirm={async () => {
-            setSendConfirmation(false);
-            await deliverEmails("send");
-          }}
-          title="Send tracker emails?"
-          description={`This will immediately send ${emailPreview?.messages.length || 0} personalised ${emailKind === "reminder" ? "reminder " : ""}email(s). Review the preview and recipients carefully.`}
-          note="This action is logged for every client."
-          confirmLabel="Send emails"
-          variant="warning"
-        />
+        {authorizationBatch && <EmailDeliveryAuthorizationModal key={authorizationBatch.batch.campaignId} trackerId={resolved.id} batch={authorizationBatch.batch} workflowName={activeWorkflow?.name || "Workflow"} resuming={emailOperationRef.current?.attempted}
+          onClose={() => setAuthorizationBatch(null)} onCommit={deliverPreparedBatch} />}
         <Modal
           open={configurationOpen}
-          onClose={() => !savingConfiguration && setConfigurationOpen(false)}
+          onClose={requestConfigurationClose}
           title="Configure tracker"
-          subtitle="Change task columns and client information"
-          size="2xl"
-          fixedHeight
-          scrollable={false}
+          subtitle="Change structure, audience, and client information"
+          size="2xl" fixedHeight scrollable={false}
+          className="tracker-create-modal tracker-configure-modal"
+          compactHeader={configurationCompact}
           footer={configurationFooter}
         >
-          <div className="h-full min-h-0 space-y-4 overflow-y-auto p-5">
-            <section>
-              <label className="block">
-                <span className="mb-1 block text-sm font-medium text-default">
-                  Financial year{" "}
-                  <span className="font-normal text-faint">
-                    required for CPCB upload data
-                  </span>
-                </span>
-                <select
-                  value={basicDraft.financialYear}
-                  onChange={(event) =>
-                    setBasicDraft((current) => ({
-                      ...current,
-                      financialYear: event.target.value,
-                    }))
-                  }
-                  className="w-full rounded-xl border border-base bg-surface px-3 py-2 text-sm"
-                >
-                  <option value="">Not tied to a FY</option>
-                  {FINANCIAL_YEARS.map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </section>
-            <section>
-              <div className="mb-2 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-default">
-                    Clients in this tracker
-                  </p>
-                  <p className="text-xs text-muted">
-                    {participantDraft.length} selected. Removing a client
-                    removes only its mark from this tracker.
-                  </p>
-                </div>
-                <button
-                  onClick={() =>
-                    setParticipantDraft(
-                      allClients.map((client) => client.clientId),
-                    )
-                  }
-                  className="text-sm text-blue-600"
-                >
-                  Select all
-                </button>
-              </div>
-              <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-base p-2">
-                {allClients.map((client) => (
-                  <label
-                    key={client.clientId}
-                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-surface"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={participantDraft.includes(client.clientId)}
-                      onChange={() =>
-                        setParticipantDraft((current) =>
-                          current.includes(client.clientId)
-                            ? current.filter(
-                                (clientId) => clientId !== client.clientId,
-                              )
-                            : [...current, client.clientId],
-                        )
-                      }
-                    />
-                    {client.companyName}{" "}
-                    <span className="text-xs text-faint">
-                      · {client.clientId}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </section>
-            <section>
-              <p className="mb-2 text-sm font-medium text-default">
-                Client details in worklist
-              </p>
-              <div className="flex flex-wrap gap-x-4 gap-y-2">
-                {CLIENT_TRACKER_DETAIL_OPTIONS.map((option) => (
-                  <label
-                    key={option.key}
-                    className="inline-flex items-center gap-2 text-sm text-default"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={columnDraft.includes(option.key)}
-                      onChange={() =>
-                        setColumnDraft((current) =>
-                          current.includes(option.key)
-                            ? current.filter((key) => key !== option.key)
-                            : [...current, option.key],
-                        )
-                      }
-                    />
-                    {option.label}
-                  </label>
-                ))}
-              </div>
-            </section>
-            <section>
-              <div className="mb-2 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-default">
-                    Tracker columns
-                  </p>
-                  <p className="text-xs text-muted">
-                    Drag a column by its handle to choose the order shown in the
-                    worklist.
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  {!fieldDraft.some((field) => field.type === "status") && (
-                    <button
-                      onClick={() =>
-                        setFieldDraft((current) => [
-                          DEFAULT_STATUS_FIELD,
-                          ...current,
-                        ])
-                      }
-                      className="rounded-lg border border-base px-3 py-1.5 text-sm text-blue-600"
-                    >
-                      Add Status
-                    </button>
-                  )}
-                  <button
-                    onClick={() =>
-                      setFieldDraft((current) => [...current, blankField()])
-                    }
-                    className="rounded-lg border border-base px-3 py-1.5 text-sm text-blue-600"
-                  >
-                    <Plus className="mr-1 inline h-3.5 w-3.5" />
-                    Add
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-2">
-                {fieldDraft.map((field, index) => (
-                  <TrackerFieldDraftCard
-                    key={`${field.key}-${index}`}
-                    field={field}
-                    index={index}
-                    fieldCount={fieldDraft.length}
-                    availableFields={fieldDraft}
-                    updateDraft={updateDraft}
-                    remove={() =>
-                      setFieldDraft((current) =>
-                        current.filter((_, fieldIndex) => fieldIndex !== index),
-                      )
-                    }
-                    move={moveDraft}
-                  />
-                ))}
-              </div>
-            </section>
-          </div>
+          {configurationBaseline && <ConfigureTrackerWorkspace key={configurationSession}
+            baseline={configurationBaseline} fields={fieldDraft} clientColumns={columnDraft}
+            clientIds={participantDraft} financialYear={basicDraft.financialYear}
+            clients={allClients} entries={tracker.entries} saving={savingConfiguration}
+            saved={configurationSaved} serverError={configurationError}
+            clientsLoading={clientsLoading} clientsError={clientsError}
+            categorySync={tracker.clientMembershipMode === "categorySync" ? tracker.clientCategories?.join(", ") : undefined}
+            onFieldsChange={setFieldDraft} onColumnsChange={setColumnDraft} onClientsChange={setParticipantDraft}
+            onFinancialYearChange={financialYear => setBasicDraft(current => ({ ...current, financialYear }))}
+            onCompactChange={setConfigurationCompact} onNestedDialogChange={setConfigurationNestedDialog}
+          />}
         </Modal>
+        <ConfirmModal open={configurationDiscardOpen} title="Discard unsaved changes?"
+          description="Your tracker structure and client selections will stay as saved."
+          confirmLabel="Discard changes" variant="warning"
+          onClose={() => setConfigurationDiscardOpen(false)} onConfirm={() => { setConfigurationDiscardOpen(false); setConfigurationOpen(false); }} />
         <ConfirmModal
           open={confirmation !== null}
           onClose={() => setConfirmation(null)}
@@ -3173,7 +2558,7 @@ export default function ClientTrackerDetailPage({
             confirmation === "delete"
               ? "Delete tracker permanently?"
               : confirmation === "configuration"
-                ? "Remove tracker data?"
+                ? "Apply tracker removals?"
                 : confirmation === "bulk"
                   ? `Update ${selectedEntries.size} client marks?`
                   : tracker.status === "archived"
@@ -3184,7 +2569,7 @@ export default function ClientTrackerDetailPage({
             confirmation === "delete"
               ? `Delete “${tracker.name}” and all of its client marks permanently.`
               : confirmation === "configuration"
-                ? "Removing columns clears their values for every client. Removing clients clears only their marks in this tracker."
+                ? "Removed columns lose their saved values for clients currently in this tracker. Removed clients leave this worklist; their saved marks are kept for re-adding."
                 : confirmation === "bulk"
                   ? `Set ${selectedBulkField?.label || "this field"} to “${bulkValue}” for the selected clients. You can undo this after it is applied.`
                   : tracker.status === "archived"
@@ -3195,7 +2580,7 @@ export default function ClientTrackerDetailPage({
             confirmation === "delete"
               ? "This cannot be undone."
               : confirmation === "configuration"
-                ? "This action permanently removes the affected tracker data."
+                ? "Client Master and activity history are kept. Changes apply only to this tracker."
                 : undefined
           }
           confirmLabel={
@@ -3218,426 +2603,6 @@ export default function ClientTrackerDetailPage({
         />
       </div>
     </>
-  );
-}
-
-type EmailCombinationPreview = {
-  id: string;
-  conditions: string[];
-  points: TrackerEmailPoint[];
-  eligible: boolean;
-  subject: string;
-  body: string;
-};
-
-function previewPointMarkup(points: TrackerEmailPoint[]) {
-  return points
-    .map((point) =>
-      point.format === "statement" ? point.statement : `• ${point.statement}`,
-    )
-    .join("\n");
-}
-
-function previewTemplate(
-  template: string,
-  points: TrackerEmailPoint[],
-  statements: string[],
-  combinationMessage: string,
-  appendPoints: boolean,
-) {
-  const pointMarkup = previewPointMarkup(points);
-  const statementMarkup = statements.join("\n\n");
-  const includesPointsPlaceholder = template.includes("{{points}}");
-  const includesStatementsPlaceholder = template.includes("{{statements}}");
-  const includesCombinationPlaceholder = template.includes(
-    "{{combinationMessage}}",
-  );
-  const replaced = template
-    .replace(/{{points}}/g, pointMarkup)
-    .replace(/{{statements}}/g, statementMarkup)
-    .replace(/{{combinationMessage}}/g, combinationMessage);
-  if (!appendPoints) return replaced;
-  const additions = [
-    !includesCombinationPlaceholder && combinationMessage,
-    !includesStatementsPlaceholder && statementMarkup,
-    !includesPointsPlaceholder && pointMarkup,
-  ].filter(Boolean);
-  return additions.length ? `${replaced.trim()}\n\n${additions.join("\n\n")}` : replaced;
-}
-
-function buildEmailCombinationPreviews(
-  workflow: TrackerEmailWorkflow,
-  fields: TrackerField[],
-) {
-  const fieldLabels = new Map(fields.map((field) => [field.key, field.label]));
-  const eligibility =
-    workflow.conditionGroup ||
-    legacyWorkflowCondition(workflow.mainFieldKey, workflow.mainValue);
-  const allContentRules = [...(workflow.contentRules || [])].sort(
-    (left, right) => (left.order || 0) - (right.order || 0),
-  );
-  // Match delivery: inactive style drafts stay stored without appearing in previews.
-  // Legacy workflows without a canonical mode retain their mixed-rule behaviour.
-  const contentRules = workflow.contentMode
-    ? allContentRules.filter(rule => rule.type === (workflow.contentMode === "combinations" ? "combination" : workflow.contentMode === "statements" ? "statement" : "point"))
-    : allContentRules;
-  const choicesByField = new Map<string, string[]>();
-  [
-    ...workflow.points.map((point) => ({
-      fieldKey: point.fieldKey,
-      value: point.value,
-    })),
-    ...eligibility.conditions.map((condition) => ({
-      fieldKey: condition.fieldKey,
-      value: String(condition.value ?? ""),
-    })),
-    ...contentRules.flatMap((rule) =>
-      rule.conditionGroup.conditions.map((condition) => ({
-        fieldKey: condition.fieldKey,
-        value: String(condition.value ?? ""),
-      })),
-    ),
-  ]
-    .filter((item) => item.value)
-    .forEach((item) => {
-      const values = choicesByField.get(item.fieldKey) || [];
-      if (!values.includes(item.value)) values.push(item.value);
-      choicesByField.set(item.fieldKey, values);
-    });
-  const groups = [...choicesByField.entries()];
-  const possibleCount = groups.reduce(
-    (count, [, values]) => count * (values.length + 1),
-    1,
-  );
-  const maxPreviews = 32;
-  let valueSets: Array<Record<string, string>> = [{}];
-  groups.forEach(([fieldKey, values]) => {
-    const next: Array<Record<string, string>> = [];
-    valueSets.forEach((current) =>
-      ["", ...values].forEach((value) => {
-        if (next.length < maxPreviews)
-          next.push({ ...current, [fieldKey]: value });
-      }),
-    );
-    valueSets = next;
-  });
-  const previews: EmailCombinationPreview[] = valueSets.map((values, index) => {
-    const points = workflow.points.filter(
-      (point) => values[point.fieldKey] === point.value,
-    );
-    const combination = contentRules.find(
-      (rule) =>
-        rule.type === "combination" &&
-        evaluateTrackerConditionGroup(rule.conditionGroup, values),
-    );
-    const scenariosRequired = contentRules.some(
-      (rule) => rule.type === "combination",
-    );
-    const contentPoints = contentRules
-      .filter(
-        (rule) =>
-          rule.type === "point" &&
-          evaluateTrackerConditionGroup(rule.conditionGroup, values),
-      )
-      .map((rule) => ({
-        id: rule.id,
-        fieldKey: "",
-        value: "",
-        statement: rule.content || "",
-        format: "point" as const,
-      }));
-    const statements = contentRules
-      .filter(
-        (rule) =>
-          rule.type === "statement" &&
-          evaluateTrackerConditionGroup(rule.conditionGroup, values),
-      )
-      .map((rule) => rule.content || "")
-      .filter(Boolean);
-    const allPoints = [...points, ...contentPoints];
-    const conditions = groups.flatMap(([fieldKey]) => [
-      `${fieldLabels.get(fieldKey) || fieldKey}: ${values[fieldKey] || "—"}`,
-    ]);
-    return {
-      id: `${index}-${conditions.join("-") || "none"}`,
-      conditions,
-      points: allPoints,
-      eligible:
-        evaluateTrackerConditionGroup(eligibility, values) &&
-        (!scenariosRequired ||
-          Boolean(combination && combination.action !== "skip")),
-      subject: previewTemplate(
-        workflow.subject,
-        allPoints,
-        statements,
-        combination?.content || "",
-        false,
-      ),
-      body: previewTemplate(
-        workflow.body,
-        allPoints,
-        statements,
-        combination?.content || "",
-        true,
-      ),
-    };
-  });
-  return {
-    previews,
-    possibleCount,
-    limited: possibleCount > maxPreviews,
-    mode: eligibility.mode,
-  };
-}
-
-function previewEmailDocument(body: string) {
-  const content = body.replace(/\n/g, "<br />");
-  return `<!doctype html><html><body style="margin:0;padding:0;background:#ffffff;"><div style="max-width:760px;margin:0 auto;padding:18px 20px 24px;color:#222222;font-family:Arial,'Helvetica Neue',sans-serif;font-size:14px;line-height:1.65;">${content}<br /><br /><span style="color:#6b7280;">{{gmail.defaultSignature}}</span></div></body></html>`;
-}
-
-/** Gmail appends the configured signature after two line breaks. */
-function previewWithGmailSignature(
-  html: string,
-  signature: string | null,
-  signatureGap = 2,
-) {
-  if (!signature) return html;
-  const gap = "<br>".repeat(Math.max(0, Math.min(6, signatureGap)));
-  return html.replace(
-    /<\/body>\s*<\/html>\s*$/i,
-    `${gap}${signature}</body></html>`,
-  );
-}
-
-function TrackerEmailCombinationPreview({
-  workflow,
-  fields,
-}: {
-  workflow: TrackerEmailWorkflow;
-  fields: TrackerField[];
-}) {
-  const { previews, possibleCount, limited, mode } =
-    buildEmailCombinationPreviews(workflow, fields);
-  return (
-    <div className="space-y-4">
-      <section className="rounded-xl border border-base bg-surface p-3">
-        <p className="text-sm font-semibold text-default">
-          Eligibility preview · {mode}
-        </p>
-        <p className="mt-2 text-xs text-faint">
-          Variables remain unchanged. These previews do not use client records,
-          create drafts, or send email.
-        </p>
-      </section>
-      {limited && (
-        <section className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
-          This workflow has {possibleCount} possible combinations. Showing the
-          first 32.
-        </section>
-      )}
-      <div className="grid gap-4">
-        {previews.map((preview) => (
-          <article
-            key={preview.id}
-            className="overflow-hidden rounded-xl border border-base bg-card"
-          >
-            <div className="border-b border-base px-4 py-3">
-              <div className="flex flex-wrap items-center gap-2">
-                {preview.conditions.map((condition) => (
-                  <span
-                    key={condition}
-                    className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/30 dark:text-blue-200"
-                  >
-                    {condition}
-                  </span>
-                ))}
-                <span
-                  className={`rounded-full px-2.5 py-1 text-xs font-semibold ${preview.eligible ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
-                >
-                  Workflow match: {preview.eligible ? "YES" : "NO"}
-                </span>
-              </div>
-              <p className="mt-2 text-sm font-semibold text-default">
-                {preview.subject || "No email subject"}
-              </p>
-              <p className="mt-1 text-xs text-muted">
-                {preview.points.length} matching message
-                {preview.points.length === 1 ? "" : "s"}
-              </p>
-            </div>
-            <iframe
-              title={`Email combination ${preview.id}`}
-              srcDoc={previewEmailDocument(preview.body)}
-              sandbox=""
-              className="h-72 w-full border-0 bg-white"
-            />
-          </article>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TrackerEmailRecipientCard({
-  message,
-  draft,
-  kind,
-  onChange,
-  onPreview,
-}: {
-  message: EmailPreview["messages"][number];
-  draft: RecipientDraft;
-  kind: "initial" | "reminder";
-  onChange: (draft: RecipientDraft) => void;
-  onPreview: () => void;
-}) {
-  const toggleRecipient = (email: string, field: "to" | "cc") => {
-    const selected = draft[field];
-    const other = field === "to" ? "cc" : "to";
-    onChange({
-      ...draft,
-      [field]: selected.includes(email)
-        ? selected.filter((value) => value !== email)
-        : [...selected, email],
-      [other]: draft[other].filter((value) => value !== email),
-    });
-  };
-  return (
-    <article className="overflow-hidden rounded-[24px] border border-white/80 bg-white/[0.88] shadow-[0_12px_30px_rgba(0,0,0,0.08)] dark:border-white/[0.10] dark:bg-white/[0.07] dark:shadow-[0_12px_32px_rgba(0,0,0,0.36)]">
-      <div className="border-b border-black/[0.06] px-4 py-3.5 dark:border-white/[0.08]">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <strong className="text-sm text-default">
-              {message.companyName}
-            </strong>
-            <p className="mt-0.5 text-xs text-muted">
-              Choose recipients for this personalised update.
-            </p>
-          </div>
-          <span className="rounded-full bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-600">
-            {kind === "reminder" ? "Reminder" : "Email"}
-          </span>
-        </div>
-      </div>
-      <div className="space-y-4 p-4">
-        <section>
-          <p className="text-[11px] font-bold uppercase tracking-wide text-muted">
-            Recipients
-          </p>
-          <div className="mt-2 flex flex-wrap gap-3">
-            {message.recipients.map((recipient) => (
-              <div
-                key={recipient.email}
-                className="flex h-14 min-w-[230px] max-w-full items-center gap-2 rounded-full border border-white/80 bg-white/[0.92] px-2.5 py-2 shadow-[0_8px_22px_rgba(0,0,0,0.08)] dark:border-white/[0.10] dark:bg-white/[0.07] dark:shadow-[0_10px_28px_rgba(0,0,0,0.36)]"
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f1f1f3] text-[11px] font-semibold text-muted dark:bg-white/[0.08]">
-                  {recipient.name
-                    .split(/\s+/)
-                    .slice(0, 2)
-                    .map((part) => part[0])
-                    .join("")
-                    .toUpperCase() || "C"}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-semibold leading-4 text-default">
-                    {recipient.name}
-                  </p>
-                  <p className="mt-0.5 truncate text-[11px] leading-3 text-muted">
-                    {recipient.email}
-                  </p>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <button
-                    type="button"
-                    onClick={() => toggleRecipient(recipient.email, "to")}
-                    className={`rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition ${draft.to.includes(recipient.email) ? "bg-brand-600 text-white shadow-sm shadow-brand-600/20" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"}`}
-                  >
-                    To
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => toggleRecipient(recipient.email, "cc")}
-                    className={`rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition ${draft.cc.includes(recipient.email) ? "bg-muted text-white shadow-sm dark:bg-white/[0.22]" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"}`}
-                  >
-                    CC
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-        <section className="grid gap-3 sm:grid-cols-2">
-          <label>
-            <span className="text-[11px] font-bold uppercase tracking-wide text-muted">
-              Additional To
-            </span>
-            <input
-              value={draft.additionalTo}
-              onChange={(event) =>
-                onChange({ ...draft, additionalTo: event.target.value })
-              }
-              placeholder="client@example.com"
-              className="mt-1.5 h-11 w-full rounded-full border border-white/75 bg-white/[0.88] px-4 text-sm text-default shadow-[0_8px_24px_rgba(0,0,0,0.06)] outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-white/[0.10] dark:bg-white/[0.07]"
-            />
-            <span className="mt-1 block text-xs text-faint">
-              Separate multiple emails with commas.
-            </span>
-          </label>
-          <label>
-            <span className="text-[11px] font-bold uppercase tracking-wide text-muted">
-              Additional CC
-            </span>
-            <input
-              value={draft.additionalCc}
-              onChange={(event) =>
-                onChange({ ...draft, additionalCc: event.target.value })
-              }
-              placeholder="accounts@example.com, owner@example.com"
-              className="mt-1.5 h-11 w-full rounded-full border border-white/75 bg-white/[0.88] px-4 text-sm text-default shadow-[0_8px_24px_rgba(0,0,0,0.06)] outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-white/[0.10] dark:bg-white/[0.07]"
-            />
-            <span className="mt-1 block text-xs text-faint">
-              Separate multiple emails with commas.
-            </span>
-          </label>
-        </section>
-        <div className="rounded-[18px] border border-white/70 bg-white/[0.54] px-3 py-3 dark:border-white/[0.08] dark:bg-white/[0.04]">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-default">
-              {message.subject}
-            </p>
-            <button
-              type="button"
-              onClick={onPreview}
-              className="rounded-full border border-white/70 bg-white/[0.8] px-3 py-1.5 text-xs font-semibold text-brand-600 shadow-sm dark:border-white/[0.10] dark:bg-white/[0.08]"
-            >
-              View email preview
-            </button>
-          </div>
-          <p className="mt-1.5 whitespace-pre-line text-xs leading-5 text-muted">
-            {message.body}
-          </p>
-          {message.combinationMessage && (
-            <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-              Combination: {message.combinationMessage}
-            </p>
-          )}
-          {(message.statements || []).length > 0 && (
-            <p className="mt-2 text-xs text-muted">
-              {(message.statements || []).length} conditional statement
-              {(message.statements || []).length === 1 ? "" : "s"} included
-            </p>
-          )}
-          {message.attachments.length > 0 && (
-            <p className="mt-2 text-xs font-medium text-muted">
-              Attachments:{" "}
-              {message.attachments
-                .map((attachment) => attachment.filename)
-                .join(", ")}
-            </p>
-          )}
-        </div>
-      </div>
-    </article>
   );
 }
 
@@ -3868,10 +2833,14 @@ function FluidStepNavigation({
   pages,
   currentPage,
   onSelect,
+  activePillRef,
+  styleReceive,
 }: {
   pages: WorkflowSetupPage[];
   currentPage: number;
   onSelect: (page: number) => void;
+  activePillRef: React.RefObject<HTMLSpanElement | null>;
+  styleReceive: MotionValue<number>;
 }) {
   const [hoveredPage, setHoveredPage] = useState<number | null>(null);
   const reduceMotion = useReducedMotion();
@@ -3883,6 +2852,9 @@ function FluidStepNavigation({
   const outerX = useSpring(pointerX, { stiffness: 165, damping: 20, mass: 0.9 });
   const outerY = useSpring(pointerY, { stiffness: 165, damping: 20, mass: 0.9 });
   const outerScale = useSpring(pointerScale, { stiffness: 165, damping: 20, mass: 0.9 });
+  const receivedScale = useTransform(() => outerScale.get() * (1 + styleReceive.get() * .025));
+  const receivedBrightness = useTransform(styleReceive, value => `brightness(${1 + value * .14})`);
+  const receivedShadow = useTransform(styleReceive, value => `0 ${6 + value * 2}px ${18 + value * 4}px rgba(40,110,190,${value * .14})`);
   const titleX = useSpring(useTransform(pointerX, (value) => value * 0.42), { stiffness: 175, damping: 21, mass: 0.86 });
   const titleY = useSpring(useTransform(pointerY, (value) => value * 0.42), { stiffness: 175, damping: 21, mass: 0.86 });
   const highlightX = useSpring(useTransform(pointerX, (value) => value * 2.25), { stiffness: 125, damping: 19, mass: 1 });
@@ -3977,11 +2949,14 @@ function FluidStepNavigation({
                 >
                   {selected && (
                     <motion.span
+                      ref={activePillRef}
                       layoutId="fluid-selected-material"
                       transition={spring}
                       className="fluid-step-material"
-                      style={{ x: outerX, y: outerY, scale: outerScale }}
+                      style={{ x: outerX, y: outerY, scale: receivedScale, filter: receivedBrightness }}
                     >
+                      <motion.span aria-hidden="true" className="workflow-style-pill-receive"
+                        style={{ opacity: styleReceive, boxShadow: receivedShadow }} />
                       {!reduceMotion && (
                         <span key={currentPage} className="fluid-step-liquid" />
                       )}
@@ -4080,6 +3055,8 @@ function FluidStepNavigation({
 
 function TrackerEmailWorkflowEditor({
   workflow,
+  reviewIssues,
+  otherReviewWorkflows,
   fields,
   managedDocuments,
   startPage,
@@ -4089,6 +3066,8 @@ function TrackerEmailWorkflowEditor({
   onRemove,
 }: {
   workflow: TrackerEmailWorkflow;
+  reviewIssues: EmailWorkflowIssue[];
+  otherReviewWorkflows: { name: string; issues: number }[];
   fields: TrackerField[];
   managedDocuments: ManagedDocumentOption[];
   startPage: number;
@@ -4116,6 +3095,8 @@ function TrackerEmailWorkflowEditor({
   const contentMode = emailWorkflowContentMode(workflow);
   const reduceMotion = useReducedMotion();
   const editorRef = useRef<HTMLElement>(null);
+  const styleTileRef = useRef<HTMLButtonElement>(null);
+  const stylePillRef = useRef<HTMLSpanElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const [headerName, setHeaderName] = useState(workflow.name);
   // Form state stays live; only the title's visual presentation is debounced.
@@ -4217,12 +3198,13 @@ function TrackerEmailWorkflowEditor({
         attachment.id === id ? { ...attachment, ...patch } : attachment,
       ),
     });
-  const addAttachment = () =>
+  const addAttachment = () => {
+    const id = emailId();
     onChange({
       attachments: [
         ...attachments,
         {
-          id: emailId(),
+          id,
           source: "client_latest",
           category: "certificates",
           documentKind: "general",
@@ -4230,47 +3212,22 @@ function TrackerEmailWorkflowEditor({
         },
       ],
     });
-  const variables = [
-    "{{client.companyName}}",
-    "{{client.clientId}}",
-    "{{client.category}}",
-    "{{client.state}}",
-    "{{client.gstNumber}}",
-    "{{tracker.name}}",
-    "{{tracker.financialYear}}",
-    "{{workflow.name}}",
-    "{{combinationMessage}}",
-    "{{statements}}",
-    "{{points}}",
-    ...fields.map((field) => `{{column.${field.key}}}`),
-  ];
-  const VariableButtons = ({
-    onInsert,
-  }: {
-    onInsert: (variable: string) => void;
-  }) => (
-    <div className="flex flex-wrap gap-1">
-      <span className="mr-1 text-xs text-muted">Insert variable:</span>
-      {variables.map((variable) => (
-        <button
-          key={variable}
-          type="button"
-          onClick={() => onInsert(variable)}
-          className="rounded border border-base bg-card px-1.5 py-0.5 text-[11px] text-blue-600"
-        >
-          {variable}
-        </button>
-      ))}
-    </div>
-  );
-  const applyPreset = (presetId: string) => {
-    const preset = TRACKER_EMAIL_PRESETS.find((item) => item.id === presetId);
-    if (preset)
-      onChange({
-        subject: preset.subject,
-        body: preset.body,
-      });
+    return id;
   };
+  const editorVariables = [
+    { label: "Client company", token: "{{client.companyName}}" },
+    { label: "Client ID", token: "{{client.clientId}}" },
+    { label: "Category", token: "{{client.category}}" },
+    { label: "State", token: "{{client.state}}" },
+    { label: "GST number", token: "{{client.gstNumber}}" },
+    { label: "Tracker name", token: "{{tracker.name}}" },
+    { label: "Financial year", token: "{{tracker.financialYear}}" },
+    { label: "Workflow name", token: "{{workflow.name}}" },
+    { label: "Combination message", token: "{{combinationMessage}}" },
+    { label: "Matching statements", token: "{{statements}}" },
+    { label: "Matching points", token: "{{points}}" },
+    ...fields.map(field => ({ label: field.label, token: `{{column.${field.key}}}` })),
+  ];
   const setupPages = [
     { title: "About", description: "Name and describe this workflow." },
     { title: "Send rule", description: "Choose which clients should receive it." },
@@ -4280,8 +3237,10 @@ function TrackerEmailWorkflowEditor({
     { title: "Delivery", description: "Set recipients, reminders, and attachments." },
     { title: "Review", description: "Check the workflow before saving." },
   ];
-  const { setupPage, stepDirection, commit, navigateToStep, navigateStep } =
+  const { setupPage, stepDirection, commit, styleCommit, styleClock, selectStyleAndAdvance, navigateToStep, navigateStep } =
     useWorkflowStepNavigation(workflow.id, startPage, setupPages, Boolean(reduceMotion));
+  const styleReceive = useTransform(styleClock, elapsed => styleCommit && !reduceMotion
+    ? handoffReceive(elapsed - styleCommit.selectionDelay) : 0);
   useLayoutEffect(() => {
     const textarea = descriptionRef.current;
     if (!textarea || setupPage !== 0) return;
@@ -4353,11 +3312,15 @@ function TrackerEmailWorkflowEditor({
         </motion.div>
         <motion.div
           className="tracker-email-stepper-shell"
+          inert={styleCommit?.phase === "committing"}
+          aria-busy={styleCommit?.phase === "committing"}
           initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 5 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: reduceMotion ? 0.01 : 0.28, delay: reduceMotion ? 0 : 0.11, ease: [0.22, 1, 0.36, 1] }}
         >
           <FluidStepNavigation
+            activePillRef={stylePillRef}
+            styleReceive={styleReceive}
             pages={setupPages}
             currentPage={setupPage}
             onSelect={navigateToStep}
@@ -4366,12 +3329,15 @@ function TrackerEmailWorkflowEditor({
       </div>
       <WorkflowStepContentStage page={setupPage} direction={stepDirection}
         reduceMotion={Boolean(reduceMotion)} title={setupPages[setupPage].title}
-        focusOnEntry={Boolean(commit?.keyboard)} onCompactnessChange={updateEditorCompactness}
+        focusOnEntry={Boolean(commit?.keyboard || styleCommit?.keyboard)} onCompactnessChange={updateEditorCompactness}
+        styleHandoff={!!styleCommit}
         navigation={
           <WorkflowStepNavigationDock
             page={setupPage}
             pages={setupPages}
             commit={commit}
+            hideNext={setupPage === 2}
+            locked={styleCommit?.phase === "committing"}
             onNavigate={navigateStep}
             reduceMotion={Boolean(reduceMotion)}
           />
@@ -4428,851 +3394,35 @@ function TrackerEmailWorkflowEditor({
       )}
       {setupPage === 2 && (
         <WorkflowEmailStyleChooser workflow={workflow} fields={fields} value={contentMode}
+          commit={styleCommit}
+          onConfirm={(mode, keyboard, tile) => selectStyleAndAdvance(mode, contentMode, keyboard, () => {
+            styleTileRef.current = tile;
+            onChange({ contentMode: mode });
+          })}
           onChange={mode => onChange({ contentMode: mode })} reduced={Boolean(reduceMotion)} />
       )}
-      {setupPage === 4 && <>
-      <div className="rounded-lg border border-base bg-card p-3">
-        <p className="text-sm font-medium text-default">Common email template</p>
-        <p className="mt-0.5 text-xs text-muted">
-          This is the shared text every eligible client receives. Matching messages are added automatically.
-        </p>
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {TRACKER_EMAIL_PRESETS.map((preset) => (
-          <button
-            type="button"
-            key={preset.id}
-            onClick={() => applyPreset(preset.id)}
-            className="rounded-full border border-base bg-card px-2 py-1 text-xs text-muted hover:text-blue-600"
-          >
-            {preset.name}
-          </button>
-        ))}
-      </div>
-      <input
-        value={workflow.subject}
-        onChange={(event) => onChange({ subject: event.target.value })}
-        placeholder="Email subject"
-        className="w-full rounded-lg border border-base bg-card px-3 py-2 text-sm"
-      />
-      <VariableButtons
-        onInsert={(variable) =>
-          onChange({
-            subject: `${workflow.subject}${workflow.subject ? " " : ""}${variable}`,
-          })
-        }
-      />
-      <RichTextEditor
-        value={workflow.body}
-        onChange={(body) => onChange({ body })}
-        placeholder={`Write the shared email body. Use ${contentMode === "combinations" ? "{{combinationMessage}}" : contentMode === "statements" ? "{{statements}}" : "{{points}}"} for matching messages.`}
-      />
-      <VariableButtons
-        onInsert={(variable) =>
-          onChange({
-            body: `${workflow.body}${workflow.body ? " " : ""}${variable}`,
-          })
-        }
-      />
-      </div>
-      </>}
-      {setupPage === 5 && <>
-      <label className="block rounded-xl border border-base bg-card p-4">
-        <span className="flex items-center gap-1 text-sm font-medium text-default">
-          Who should receive it?
-          <span title="You can still review To and CC for every client before delivery.">
-            <Info className="h-3.5 w-3.5 text-muted" />
-          </span>
-        </span>
-        <select
-          value={workflow.recipientStrategy || "selected"}
-          onChange={(event) =>
-            onChange({
-              recipientStrategy: event.target.value as TrackerRecipientStrategy,
-            })
-          }
-          className="mt-3 w-full rounded-lg border border-base bg-surface px-3 py-2.5 text-sm"
-        >
-          <option value="selected">Client-profile selected email</option>
-          <option value="primary">Primary linked contact</option>
-          <option value="all">All linked contacts</option>
-          <option value="per_client">Review each client before delivery</option>
-        </select>
-      </label>
-      <label className="block rounded-xl border border-base bg-card p-4">
-        <span className="flex items-center gap-1 text-sm font-medium text-default">
-          Space before Gmail signature
-          <span title="This controls the blank lines between your email body and the Gmail signature. It does not change the signature itself.">
-            <Info className="h-3.5 w-3.5 text-muted" />
-          </span>
-        </span>
-        <select
-          value={workflow.signatureGap ?? 2}
-          onChange={(event) => onChange({ signatureGap: Number(event.target.value) })}
-          className="mt-3 w-full rounded-lg border border-base bg-surface px-3 py-2.5 text-sm"
-        >
-          <option value={0}>No blank line</option>
-          <option value={1}>1 blank line</option>
-          <option value={2}>2 blank lines</option>
-          <option value={3}>3 blank lines</option>
-          <option value={4}>4 blank lines</option>
-          <option value={5}>5 blank lines</option>
-          <option value={6}>6 blank lines</option>
-        </select>
-      </label>
-      <details className="rounded-lg border border-base bg-card p-3">
-        <summary className="cursor-pointer text-sm font-medium text-default">
-          Manual reminder email
-        </summary>
-        <div className="mt-3 space-y-2">
-          <p className="text-xs text-muted">
-            Reminders are never sent automatically. When you manually preview a reminder campaign, replied clients are excluded.
-          </p>
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() =>
-                onChange({
-                  reminderSubject: workflow.subject,
-                  reminderBody: workflow.body,
-                })
-              }
-              className="text-xs text-blue-600"
-            >
-              Copy initial email
-            </button>
-          </div>
-          <input
-            value={workflow.reminderSubject || ""}
-            onChange={(event) =>
-              onChange({ reminderSubject: event.target.value })
-            }
-            placeholder="Reminder subject (uses initial subject if empty)"
-            className="w-full rounded-lg border border-base bg-surface px-3 py-2 text-sm"
-          />
-          <RichTextEditor
-            value={workflow.reminderBody || ""}
-            onChange={(reminderBody) => onChange({ reminderBody })}
-            placeholder="Reminder email body (uses initial body if empty)"
-          />
-        </div>
-      </details>
-      <details
-        className="rounded-lg border border-base bg-card p-3"
-        open={workflow.followUp?.enabled === true}
-      >
-        <summary className="cursor-pointer text-sm font-medium text-default">
-          No-reply follow-up task
-        </summary>
-        <label className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-        <input
-          type="checkbox"
-          checked={workflow.followUp?.enabled === true}
-          onChange={(event) =>
-            onChange({
-              followUp: {
-                enabled: event.target.checked,
-                daysAfter: workflow.followUp?.daysAfter || 3,
-                ownerEmail: workflow.followUp?.ownerEmail,
-              },
-            })
-          }
-        />
-        <span>
-          <span className="block font-medium text-default">
-            Create a no-reply follow-up task
-          </span>
-          <span className="block text-xs text-muted">
-            Created after an initial email is sent and completed when a client
-            reply is synced. It creates a task only; it never sends an email automatically.
-          </span>
-        </span>
-        {workflow.followUp?.enabled && (
-          <>
-            <input
-              type="number"
-              min="1"
-              max="90"
-              value={workflow.followUp.daysAfter}
-              onChange={(event) =>
-                onChange({
-                  followUp: {
-                    ...workflow.followUp!,
-                    daysAfter: Number(event.target.value) || 1,
-                  },
-                })
-              }
-              className="w-16 rounded border border-base bg-surface px-2 py-1"
-            />
-            <span className="text-muted">days after sending</span>
-            <input
-              value={workflow.followUp.ownerEmail || ""}
-              onChange={(event) =>
-                onChange({
-                  followUp: {
-                    ...workflow.followUp!,
-                    ownerEmail: event.target.value,
-                  },
-                })
-              }
-              placeholder="Owner email (optional)"
-              className="min-w-48 flex-1 rounded border border-base bg-surface px-2 py-1"
-            />
-          </>
-        )}
-        </label>
-      </details>
-      </>}
-      {setupPage === 5 && <>
-      <details className="rounded-lg border border-base bg-card p-3">
-        <summary className="cursor-pointer text-sm font-medium text-default">
-          Attachments
-        </summary>
-        <div className="mt-2 flex items-start justify-between gap-3">
-          <p className="max-w-2xl text-xs text-muted">
-            Choose one exact shared document for every client, or the newest matching document for each client. Only managed Google Drive documents are attached. Up to four files, eight MB each, are allowed.
-          </p>
-          <button
-            type="button"
-            disabled={attachments.length >= 4}
-            onClick={addAttachment}
-            className="shrink-0 text-sm text-blue-600 disabled:opacity-50"
-          >
-            Add attachment
-          </button>
-        </div>
-        {attachments.length === 0 ? (
-          <p className="mt-3 text-xs text-faint">
-            No documents will be attached.
-          </p>
-        ) : (
-          <div className="mt-3 space-y-3">
-            {attachments.map((attachment) => {
-              const attachmentSource = attachment.source || "client_latest";
-              const attachmentCondition =
-                attachment.conditionGroup?.conditions[0];
-              const conditionField = fields.find(
-                (field) => field.key === attachmentCondition?.fieldKey,
-              );
-              const conditionValues = fieldValues(conditionField);
-              const needsValue = !["is_empty", "is_not_empty"].includes(
-                attachmentCondition?.operator || "equals",
-              );
-              return (
-                <div
-                  key={attachment.id}
-                  className="rounded-lg border border-base bg-surface p-3"
-                >
-                  <label className="block text-xs text-muted">
-                    Attachment type
-                    <select
-                      value={attachmentSource}
-                      onChange={(event) =>
-                        updateAttachment(attachment.id, {
-                          source: event.target.value as
-                            | "shared"
-                            | "client_latest",
-                          documentId: undefined,
-                        })
-                      }
-                      className="mt-1 w-full rounded border border-base bg-card px-2 py-2 text-sm text-default"
-                    >
-                      <option value="shared">One shared document for every client</option>
-                      <option value="client_latest">Newest matching document for each client</option>
-                    </select>
-                  </label>
-                  {attachmentSource === "shared" ? (
-                    <label className="mt-3 block text-xs text-muted">
-                      Shared managed Drive document
-                      <select
-                        value={attachment.documentId || ""}
-                        onChange={(event) =>
-                          updateAttachment(attachment.id, {
-                            documentId: event.target.value || undefined,
-                          })
-                        }
-                        className="mt-1 w-full rounded border border-base bg-card px-2 py-2 text-sm text-default"
-                      >
-                        <option value="">Choose a document</option>
-                        {managedDocuments.map((document) => (
-                          <option key={document._id} value={document._id}>
-                            {document.documentName} · {document.clientId}
-                          </option>
-                        ))}
-                      </select>
-                      {!managedDocuments.length && (
-                        <span className="mt-1 block text-xs text-amber-700">
-                          No managed Google Drive documents are available yet.
-                        </span>
-                      )}
-                    </label>
-                  ) : (
-                  <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                    <label className="text-xs text-muted">
-                      Document category
-                      <select
-                        value={attachment.category || ""}
-                        onChange={(event) =>
-                          updateAttachment(attachment.id, {
-                            category:
-                              (event.target
-                                .value as TrackerEmailAttachment["category"]) ||
-                              undefined,
-                          })
-                        }
-                        className="mt-1 w-full rounded border border-base bg-card px-2 py-2 text-sm text-default"
-                      >
-                        <option value="">Any category</option>
-                        <option value="compliance">Compliance</option>
-                        <option value="financial">Financial</option>
-                        <option value="invoices">Invoices</option>
-                        <option value="certificates">Certificates</option>
-                        <option value="other">Other</option>
-                      </select>
-                    </label>
-                    <label className="text-xs text-muted">
-                      Document type
-                      <select
-                        value={attachment.documentKind || ""}
-                        onChange={(event) =>
-                          updateAttachment(attachment.id, {
-                            documentKind:
-                              (event.target
-                                .value as TrackerEmailAttachment["documentKind"]) ||
-                              undefined,
-                          })
-                        }
-                        className="mt-1 w-full rounded border border-base bg-card px-2 py-2 text-sm text-default"
-                      >
-                        <option value="">Any type</option>
-                        <option value="general">General document</option>
-                        <option value="epr-certificate">EPR certificate</option>
-                      </select>
-                    </label>
-                    <label className="text-xs text-muted">
-                      Financial year
-                      <select
-                        value={attachment.financialYear || "tracker"}
-                        onChange={(event) =>
-                          updateAttachment(attachment.id, {
-                            financialYear: event.target.value as
-                              | "tracker"
-                              | "any",
-                          })
-                        }
-                        className="mt-1 w-full rounded border border-base bg-card px-2 py-2 text-sm text-default"
-                      >
-                        <option value="tracker">This tracker&apos;s FY</option>
-                        <option value="any">Any financial year</option>
-                      </select>
-                    </label>
-                  </div>
-                  )}
-                  <div className="mt-3 rounded border border-base bg-card p-2.5">
-                    <div className="flex items-center justify-between gap-3">
-                      <label className="flex items-center gap-2 text-xs font-medium text-default">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(attachment.conditionGroup)}
-                          onChange={(event) =>
-                            updateAttachment(attachment.id, {
-                              conditionGroup: event.target.checked
-                                ? {
-                                    mode: "ALL",
-                                    conditions: [
-                                      {
-                                        fieldKey:
-                                          fields[0]?.key ||
-                                          workflow.mainFieldKey,
-                                        operator: "equals",
-                                        value: "",
-                                      },
-                                    ],
-                                  }
-                                : undefined,
-                            })
-                          }
-                        />
-                        Attach only when a tracker condition matches
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onChange({
-                            attachments: attachments.filter(
-                              (item) => item.id !== attachment.id,
-                            ),
-                          })
-                        }
-                        className="text-xs text-rose-600"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                    {attachmentCondition && (
-                      <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                        <select
-                          value={attachmentCondition.fieldKey}
-                          onChange={(event) =>
-                            updateAttachment(attachment.id, {
-                              conditionGroup: {
-                                mode: "ALL",
-                                conditions: [
-                                  {
-                                    fieldKey: event.target.value,
-                                    operator: "equals",
-                                    value: "",
-                                  },
-                                ],
-                              },
-                            })
-                          }
-                          className="rounded border border-base bg-surface px-2 py-2 text-sm"
-                        >
-                          {fields.map((field) => (
-                            <option key={field.key} value={field.key}>
-                              {field.label}
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          value={attachmentCondition.operator}
-                          onChange={(event) =>
-                            updateAttachment(attachment.id, {
-                              conditionGroup: {
-                                mode: "ALL",
-                                conditions: [
-                                  {
-                                    ...attachmentCondition,
-                                    operator: event.target
-                                      .value as TrackerRuleOperator,
-                                  },
-                                ],
-                              },
-                            })
-                          }
-                          className="rounded border border-base bg-surface px-2 py-2 text-sm"
-                        >
-                          {emailOperatorsForField(conditionField).map((operator) => (
-                            <option key={operator.value} value={operator.value}>
-                              {operator.label}
-                            </option>
-                          ))}
-                        </select>
-                        {needsValue ? (
-                          conditionValues.length ? (
-                            <select
-                              value={String(attachmentCondition.value || "")}
-                              onChange={(event) =>
-                                updateAttachment(attachment.id, {
-                                  conditionGroup: {
-                                    mode: "ALL",
-                                    conditions: [
-                                      {
-                                        ...attachmentCondition,
-                                        value: event.target.value,
-                                      },
-                                    ],
-                                  },
-                                })
-                              }
-                              className="rounded border border-base bg-surface px-2 py-2 text-sm"
-                            >
-                              <option value="">Choose value</option>
-                              {conditionValues.map((value) => (
-                                <option key={value} value={value}>
-                                  {value}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <input
-                              value={String(attachmentCondition.value || "")}
-                              onChange={(event) =>
-                                updateAttachment(attachment.id, {
-                                  conditionGroup: {
-                                    mode: "ALL",
-                                    conditions: [
-                                      {
-                                        ...attachmentCondition,
-                                        value: event.target.value,
-                                      },
-                                    ],
-                                  },
-                                })
-                              }
-                              placeholder="Value"
-                              className="rounded border border-base bg-surface px-2 py-2 text-sm"
-                            />
-                          )
-                        ) : (
-                          <span className="rounded bg-surface px-2 py-2 text-xs text-faint">
-                            No value needed
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </details>
-      </>}
+      {setupPage === 4 && <WorkflowTemplateWorkspace subject={workflow.subject} body={workflow.body}
+        variables={editorVariables} onChange={onChange} />}
+      {setupPage === 5 && <WorkflowDeliveryWorkspace workflow={workflow} fields={fields} managedDocuments={managedDocuments}
+        variables={editorVariables} onChange={onChange} onAddAttachment={addAttachment} onUpdateAttachment={updateAttachment}
+        onRemoveAttachment={id => onChange({ attachments: attachments.filter(item => item.id !== id) })}
+        valuesForField={fieldValues} operatorsForField={emailOperatorsForField} />}
       {setupPage === 3 && <WorkflowMessagesWorkspace key={workflow.id} mode={contentMode}
+        resolveFromStyle={!!styleCommit}
         rules={contentMode === "combinations" ? scenarioRules : visibleContentRules} fields={fields}
-        variables={[
-          { label: "Client company", token: "{{client.companyName}}" },
-          { label: "Client ID", token: "{{client.clientId}}" },
-          { label: "Category", token: "{{client.category}}" },
-          { label: "State", token: "{{client.state}}" },
-          { label: "GST number", token: "{{client.gstNumber}}" },
-          { label: "Tracker name", token: "{{tracker.name}}" },
-          { label: "Financial year", token: "{{tracker.financialYear}}" },
-          { label: "Workflow name", token: "{{workflow.name}}" },
-          { label: "Combination message", token: "{{combinationMessage}}" },
-          { label: "Matching statements", token: "{{statements}}" },
-          { label: "Matching points", token: "{{points}}" },
-          ...fields.map(field => ({ label: field.label, token: `{{column.${field.key}}}` })),
-        ]}
+        variables={editorVariables}
         onAdd={addContentRule} onUpdate={updateContentRule}
         onRemove={id => onChange({ contentRules: contentRules.filter(rule => rule.id !== id) })}
         onMove={moveScenario} onPreview={onPreviewCombinations}
         valuesForField={fieldValues} operatorsForField={emailOperatorsForField} reduced={Boolean(reduceMotion)} />}
-      {setupPage === 6 && (
-        <div className="space-y-3 rounded-xl border border-base bg-card p-4">
-          <div>
-            <p className="text-sm font-semibold text-default">Workflow review</p>
-            <p className="mt-1 text-xs text-muted">
-              Save these settings, then use Email clients to preview every eligible
-              client and review recipients before delivery.
-            </p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="rounded-lg bg-surface p-3 text-sm">
-              <span className="block text-xs text-muted">Audience</span>
-              <span className="mt-1 block font-medium text-default">
-                {conditionGroup.conditions.length} eligibility condition{conditionGroup.conditions.length === 1 ? "" : "s"} · {workflow.recipientStrategy === "all" ? "All linked contacts" : workflow.recipientStrategy === "primary" ? "Primary contact" : workflow.recipientStrategy === "per_client" ? "Review per client" : "Client-profile email"}
-              </span>
-            </div>
-            <div className="rounded-lg bg-surface p-3 text-sm">
-              <span className="block text-xs text-muted">Message style</span>
-              <span className="mt-1 block font-medium text-default">
-                {visibleContentRules.length} {contentMode === "combinations" ? "scenario" : contentMode === "statements" ? "statement" : "bullet-point"} rule{visibleContentRules.length === 1 ? "" : "s"}
-              </span>
-            </div>
-            <div className="rounded-lg bg-surface p-3 text-sm">
-              <span className="block text-xs text-muted">Manual reminder</span>
-              <span className="mt-1 block font-medium text-default">
-                {workflow.reminderSubject || workflow.reminderBody ? "Prepared — never sends automatically" : "Not prepared"}
-              </span>
-            </div>
-            <div className="rounded-lg bg-surface p-3 text-sm">
-              <span className="block text-xs text-muted">Attachments & follow-up</span>
-              <span className="mt-1 block font-medium text-default">
-                {attachments.length} attachment{attachments.length === 1 ? "" : "s"} · {workflow.followUp?.enabled ? `Task after ${workflow.followUp.daysAfter} days if no reply` : "No follow-up task"}
-              </span>
-            </div>
-          </div>
-          {contentMode === "combinations" && (
-            <button
-              type="button"
-              onClick={onPreviewCombinations}
-              className="inline-flex items-center gap-1 text-sm font-medium text-blue-600"
-            >
-              <FileText className="h-4 w-4" /> Preview rule combinations
-            </button>
-          )}
-        </div>
-      )}
+      {setupPage === 6 && <WorkflowReviewWorkspace workflow={workflow} fields={fields} variables={editorVariables}
+        mode={contentMode} issues={reviewIssues} otherWorkflows={otherReviewWorkflows}
+        onEdit={navigateToStep} onPreview={onPreviewCombinations} onBack={onBack} />}
       </WorkflowStepContentStage>
+      {styleCommit && !reduceMotion && <StyleToStepperHandoff
+        tileRef={styleTileRef} pillRef={stylePillRef} editorRef={editorRef}
+        clock={styleClock} selectionDelay={styleCommit.selectionDelay} />}
     </motion.section>
-  );
-}
-
-function TrackerFieldDraftCard({
-  field,
-  index,
-  fieldCount,
-  availableFields,
-  updateDraft,
-  remove,
-  move,
-}: {
-  field: TrackerField;
-  index: number;
-  fieldCount: number;
-  availableFields: TrackerField[];
-  updateDraft: (index: number, patch: Partial<TrackerField>) => void;
-  remove: () => void;
-  move: (from: number, to: number) => void;
-}) {
-  return (
-    <div
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => {
-        event.preventDefault();
-        const from = Number(event.dataTransfer.getData("text/tracker-field"));
-        if (Number.isInteger(from)) move(from, index);
-      }}
-      className="rounded-xl border border-base bg-surface p-3"
-    >
-      <div className="grid gap-2 sm:grid-cols-[auto_1fr_170px_1fr_auto]">
-        <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            draggable
-            onDragStart={(event) => {
-              event.dataTransfer.effectAllowed = "move";
-              event.dataTransfer.setData("text/tracker-field", String(index));
-            }}
-            className="cursor-grab rounded p-1 text-faint hover:bg-card active:cursor-grabbing"
-            aria-label={`Drag ${field.label || "column"} to change its position`}
-            title="Drag to reorder"
-          >
-            <GripVertical className="h-4 w-4" />
-          </button>
-          <div className="hidden flex-col sm:flex">
-            <button
-              type="button"
-              disabled={index === 0}
-              onClick={() => move(index, index - 1)}
-              className="text-[10px] leading-3 text-muted disabled:opacity-30"
-              aria-label={`Move ${field.label || "column"} up`}
-            >
-              ▲
-            </button>
-            <button
-              type="button"
-              disabled={index === fieldCount - 1}
-              onClick={() => move(index, index + 1)}
-              className="text-[10px] leading-3 text-muted disabled:opacity-30"
-              aria-label={`Move ${field.label || "column"} down`}
-            >
-              ▼
-            </button>
-          </div>
-        </div>
-        <input
-          disabled={field.type === "status"}
-          value={field.label}
-          onChange={(event) =>
-            updateDraft(index, { label: event.target.value })
-          }
-          placeholder="Column name"
-          className="rounded-lg border border-base bg-card px-2.5 py-2 text-sm disabled:opacity-60"
-        />
-        <select
-          disabled={field.type === "status"}
-          value={field.type}
-          onChange={(event) =>
-            updateDraft(index, {
-              type: event.target.value as TrackerFieldType,
-              options: ["select", "multiSelect", "tags"].includes(
-                event.target.value,
-              )
-                ? ["Option 1", "Option 2"]
-                : undefined,
-              optionInput: ["select", "multiSelect", "tags"].includes(
-                event.target.value,
-              )
-                ? "Option 1, Option 2"
-                : undefined,
-            })
-          }
-          className="rounded-lg border border-base bg-card px-2.5 py-2 text-sm disabled:opacity-60"
-        >
-          <option value="toggle">Yes / No toggle</option>
-          <option value="select">Dropdown</option>
-          <option value="text">Short text</option>
-          <option value="longText">Long text</option>
-          <option value="multiSelect">Multi-select</option>
-          <option value="tags">Tags</option>
-          <option value="number">Number</option>
-          <option value="percentage">Percentage</option>
-          <option value="quantity">Quantity</option>
-          <option value="currency">Currency</option>
-          <option value="progress">Progress</option>
-          <option value="date">Date</option>
-          {field.type === "status" && <option value="status">Status</option>}
-        </select>
-        {["select", "multiSelect", "tags"].includes(field.type) ? (
-          <input
-            value={field.optionInput ?? (field.options || []).join(", ")}
-            onChange={(event) =>
-              updateDraft(index, {
-                optionInput: event.target.value,
-                options: event.target.value
-                  .split(",")
-                  .map((option) => option.trim())
-                  .filter(Boolean),
-              })
-            }
-            placeholder="Options, separated by commas"
-            className="rounded-lg border border-base bg-card px-2.5 py-2 text-sm"
-          />
-        ) : (
-          <span />
-        )}
-        {field.type !== "status" || fieldCount > 1 ? (
-          <button
-            type="button"
-            onClick={remove}
-            className="rounded-lg px-2 text-sm text-rose-600"
-          >
-            Remove
-          </button>
-        ) : (
-          <span />
-        )}
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-base pt-2">
-        <span className="text-xs text-muted">Data source</span>
-        <select
-          value={
-            field.computed ? "computed" : field.dataLink ? "live" : "manual"
-          }
-          onChange={(event) => {
-            const source = event.target.value;
-            if (source === "manual") {
-              updateDraft(index, { dataLink: undefined, computed: undefined });
-              return;
-            }
-            if (source === "computed") {
-              const options = availableFields.filter(
-                (item) => item.key && item.key !== field.key && !item.computed,
-              );
-              updateDraft(index, {
-                dataLink: undefined,
-                computed: {
-                  kind: "percentage",
-                  primaryFieldKey: options[0]?.key || "",
-                  secondaryFieldKey: options[1]?.key || options[0]?.key || "",
-                },
-                type: "number",
-                options: undefined,
-                optionInput: undefined,
-              });
-              return;
-            }
-            updateDraft(index, { computed: undefined });
-          }}
-          className="rounded-lg border border-base bg-card px-2 py-1 text-xs"
-        >
-          <option value="manual">Manual value</option>
-          <option value="live">Live client data</option>
-          <option value="computed">Computed</option>
-        </select>
-        {!field.computed && (
-          <select
-            value={field.dataLink?.source || ""}
-            onChange={(event) => {
-              const source = event.target.value as TrackerDataLinkSource;
-              const display = source
-                ? LIVE_DATA_DISPLAYS[source][0].value
-                : undefined;
-              updateDraft(index, {
-                dataLink: source && display ? { source, display } : undefined,
-                computed: undefined,
-                ...(display
-                  ? {
-                      type: liveFieldType(display),
-                      options: undefined,
-                      optionInput: undefined,
-                    }
-                  : {}),
-              });
-            }}
-            className="rounded-lg border border-base bg-card px-2 py-1 text-xs"
-          >
-            <option value="">Manual value</option>
-            {LIVE_DATA_SOURCES.map((source) => (
-              <option key={source.value} value={source.value}>
-                {source.label}
-              </option>
-            ))}
-          </select>
-        )}
-        {field.dataLink && (
-          <select
-            value={field.dataLink.display}
-            onChange={(event) => {
-              const display = event.target.value as TrackerDataLinkDisplay;
-              updateDraft(index, {
-                dataLink: { ...field.dataLink!, display },
-                type: liveFieldType(display),
-                options: undefined,
-                optionInput: undefined,
-              });
-            }}
-            className="rounded-lg border border-base bg-card px-2 py-1 text-xs"
-          >
-            {LIVE_DATA_DISPLAYS[field.dataLink.source].map((display) => (
-              <option key={display.value} value={display.value}>
-                {display.label}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-      {field.computed && (
-        <ComputedFieldSettings
-          field={field}
-          availableFields={availableFields}
-          onChange={(patch) => updateDraft(index, patch)}
-        />
-      )}
-      {field.type === "quantity" && !field.dataLink && !field.computed && (
-        <label className="mt-2 flex items-center gap-2 text-xs text-muted">
-          Unit
-          <input
-            value={field.unit || ""}
-            onChange={(event) =>
-              updateDraft(index, { unit: event.target.value })
-            }
-            placeholder="MT"
-            className="w-24 rounded-lg border border-base bg-card px-2 py-1 text-xs text-default"
-          />
-        </label>
-      )}
-      {["select", "multiSelect", "tags"].includes(field.type) && (
-        <div className="mt-2 flex flex-wrap gap-2">
-          {(field.options || []).map((option, optionIndex) => {
-            const selectedColor =
-              field.optionColors?.[option] ||
-              TRACKER_OPTION_COLORS[optionIndex % TRACKER_OPTION_COLORS.length];
-            return (
-              <div
-                key={option}
-                className="inline-flex items-center gap-2 rounded-lg bg-card px-2 py-1 text-xs text-muted"
-              >
-                <span>{option}</span>
-                <span className="flex gap-1" aria-label={`Color for ${option}`}>
-                  {TRACKER_OPTION_COLORS.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      title={color}
-                      aria-label={`Set ${option} color to ${color}`}
-                      aria-pressed={selectedColor === color}
-                      onClick={() =>
-                        updateDraft(index, {
-                          optionColors: {
-                            ...field.optionColors,
-                            [option]: color,
-                          },
-                        })
-                      }
-                      className={`h-4 w-4 rounded-full ${COLOR_SWATCH[color]} ${selectedColor === color ? "ring-2 ring-offset-1 ring-blue-500" : "opacity-45 hover:opacity-100"}`}
-                    />
-                  ))}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -5293,7 +3443,8 @@ function TrackerEditor({
   if (field.dataLink || field.computed)
     return (
       <span
-        className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium ${field.computed ? "bg-violet-50 text-violet-800 dark:bg-violet-950/30 dark:text-violet-200" : "bg-blue-50 text-blue-800 dark:bg-blue-950/30 dark:text-blue-200"}`}
+        data-option-color={trackerHasOptionColors(field) ? trackerOptionColor(field, valueText(value)) : undefined}
+        className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium ${trackerHasOptionColors(field) ? trackerOptionTone(field, valueText(value)) : field.computed ? "bg-violet-50 text-violet-800 dark:bg-violet-950/30 dark:text-violet-200" : "bg-blue-50 text-blue-800 dark:bg-blue-950/30 dark:text-blue-200"}`}
       >
         <span>
           {field.computed?.kind === "percentage" && value !== ""
@@ -5327,10 +3478,14 @@ function TrackerEditor({
         disabled={saving}
         value={String(value ?? "")}
         onChange={(event) => onSave(entry, field, event.target.value)}
-        className={`rounded-lg border border-transparent px-2 py-1.5 text-sm outline-none focus:border-blue-500 ${field.type === "status" ? STATUS_TONES[String(value)] || "bg-surface text-default" : optionTone(field.optionColors?.[String(value)])}`}
+        aria-label={field.label}
+        data-option-color={trackerOptionColor(field, String(value ?? ""))}
+        className={`rounded-lg border border-transparent px-2 py-1.5 text-sm outline-none focus:border-blue-500 ${value === "" || value == null ? "bg-surface text-default" : trackerOptionTone(field, String(value))}`}
       >
+        {(value === "" || value == null) && <option value="" disabled>Choose…</option>}
+        {value != null && value !== "" && !field.options?.includes(String(value)) && <option value={String(value)} disabled>{String(value)}</option>}
         {(field.options || []).map((option) => (
-          <option key={option} value={option}>
+          <option key={option} value={option} className={trackerOptionTone(field, option)}>
             {option}
           </option>
         ))}
@@ -5339,28 +3494,17 @@ function TrackerEditor({
   if (field.type === "multiSelect" || field.type === "tags") {
     const selected = Array.isArray(value) ? value : [];
     return (
-      <select
-        multiple
-        disabled={saving}
-        value={selected}
-        onChange={(event) =>
-          onSave(
-            entry,
-            field,
-            Array.from(event.currentTarget.selectedOptions).map(
-              (option) => option.value,
-            ),
-          )
-        }
-        className="min-h-9 min-w-32 rounded-lg border border-base bg-surface px-2 py-1.5 text-sm outline-none focus:border-blue-500"
-        aria-label={field.label}
-      >
-        {(field.options || []).map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+      <div role="group" aria-label={field.label} className="flex min-w-32 max-w-64 flex-wrap gap-1">
+        {[...new Set([...(field.options || []), ...selected])].map(option => {
+          const checked = selected.includes(option), color = trackerOptionColor(field, option);
+          return <label key={option} data-option-color={color} className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs ${checked ? trackerOptionTone(field, option) : "bg-surface text-muted"} ${saving ? "opacity-60" : ""}`}>
+            <input type="checkbox" aria-label={option} disabled={saving} checked={checked}
+              style={{ accentColor: TRACKER_OPTION_PALETTE[color].swatch }}
+              onChange={event => onSave(entry, field, event.target.checked ? [...selected, option] : selected.filter(value => value !== option))} />
+            <span>{option}</span>
+          </label>;
+        })}
+      </div>
     );
   }
   if (field.type === "longText")
@@ -5660,331 +3804,6 @@ function SavedViewEditor({
           + Add condition
         </button>
       </div>
-    </div>
-  );
-}
-
-function ComputedFieldSettings({
-  field,
-  availableFields,
-  onChange,
-}: {
-  field: TrackerField;
-  availableFields: TrackerField[];
-  onChange: (patch: Partial<TrackerField>) => void;
-}) {
-  const computed = field.computed!;
-  const sourceFields = availableFields.filter(
-    (item) => item.key && item.key !== field.key && !item.computed,
-  );
-  const typeFor = (kind: TrackerComputedKind): TrackerFieldType =>
-    kind === "percentage" || kind === "difference"
-      ? "number"
-      : kind === "combinedStatus"
-        ? "select"
-        : "text";
-  const defaultGroup: TrackerConditionGroup = {
-    mode: "ALL",
-    conditions: [
-      { fieldKey: sourceFields[0]?.key || "", operator: "equals", value: "" },
-    ],
-  };
-  const conditionGroup = computed.conditionGroup || defaultGroup;
-  const patchComputed = (next: TrackerComputed) =>
-    onChange({
-      computed: next,
-      type: typeFor(next.kind),
-      options:
-        next.kind === "combinedStatus"
-          ? [next.matchedLabel || "Ready", next.fallbackLabel || "Pending"]
-          : undefined,
-      optionInput: undefined,
-    });
-  const selectOptions = (candidate?: TrackerField) =>
-    candidate?.type === "toggle" ? ["Yes", "No"] : candidate?.options || [];
-  const operators: Array<{ value: TrackerRuleOperator; label: string }> = [
-    { value: "equals", label: "equals" },
-    { value: "not_equals", label: "does not equal" },
-    { value: "is_empty", label: "is empty" },
-    { value: "is_not_empty", label: "is not empty" },
-    { value: "contains", label: "contains" },
-    { value: "not_contains", label: "does not contain" },
-    { value: "greater_than", label: "greater than" },
-    { value: "greater_than_or_equal", label: "at least" },
-    { value: "less_than", label: "less than" },
-    { value: "less_than_or_equal", label: "at most" },
-  ];
-  const updateConditions = (patch: Partial<TrackerConditionGroup>) =>
-    patchComputed({
-      ...computed,
-      kind: "combinedStatus",
-      conditionGroup: { ...conditionGroup, ...patch },
-    });
-
-  return (
-    <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/50 p-3 dark:border-violet-900/50 dark:bg-violet-950/20">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-violet-800 dark:text-violet-200">
-          COMPUTED
-        </span>
-        <select
-          value={computed.kind}
-          onChange={(event) => {
-            const kind = event.target.value as TrackerComputedKind;
-            const primary = sourceFields[0]?.key || "";
-            const secondary =
-              sourceFields[1]?.key || sourceFields[0]?.key || "";
-            patchComputed(
-              kind === "combinedStatus"
-                ? {
-                    kind,
-                    conditionGroup: defaultGroup,
-                    matchedLabel: "Ready",
-                    fallbackLabel: "Pending",
-                  }
-                : {
-                    kind,
-                    primaryFieldKey: primary,
-                    secondaryFieldKey: secondary,
-                  },
-            );
-          }}
-          className="rounded-lg border border-base bg-card px-2 py-1 text-xs"
-        >
-          <option value="percentage">Coverage percentage</option>
-          <option value="difference">Upload difference</option>
-          <option value="progress">Progress</option>
-          <option value="combinedStatus">Combined status</option>
-        </select>
-      </div>
-
-      {computed.kind !== "combinedStatus" ? (
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          <label className="text-xs text-muted">
-            {computed.kind === "difference"
-              ? "Expected quantity"
-              : computed.kind === "progress"
-                ? "Completed"
-                : "Covered"}
-            <select
-              value={computed.primaryFieldKey || ""}
-              onChange={(event) =>
-                patchComputed({
-                  ...computed,
-                  primaryFieldKey: event.target.value,
-                })
-              }
-              className="mt-1 w-full rounded-lg border border-base bg-card px-2 py-1.5 text-sm text-default"
-            >
-              <option value="">Choose column</option>
-              {sourceFields.map((item) => (
-                <option key={item.key} value={item.key}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs text-muted">
-            {computed.kind === "difference"
-              ? "Uploaded quantity"
-              : computed.kind === "progress"
-                ? "Total steps"
-                : "Required"}
-            <select
-              value={computed.secondaryFieldKey || ""}
-              onChange={(event) =>
-                patchComputed({
-                  ...computed,
-                  secondaryFieldKey: event.target.value,
-                })
-              }
-              className="mt-1 w-full rounded-lg border border-base bg-card px-2 py-1.5 text-sm text-default"
-            >
-              <option value="">Choose column</option>
-              {sourceFields.map((item) => (
-                <option key={item.key} value={item.key}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      ) : (
-        <div className="mt-3 space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs text-muted">
-              Return the matched label when these conditions are true.
-            </span>
-            <select
-              value={conditionGroup.mode}
-              onChange={(event) =>
-                updateConditions({ mode: event.target.value as "ALL" | "ANY" })
-              }
-              className="rounded-lg border border-base bg-card px-2 py-1 text-xs"
-            >
-              <option value="ALL">ALL conditions</option>
-              <option value="ANY">ANY condition</option>
-            </select>
-          </div>
-          {conditionGroup.conditions.map((condition, index) => {
-            const source = sourceFields.find(
-              (item) => item.key === condition.fieldKey,
-            );
-            const values = selectOptions(source);
-            const needsValue = !["is_empty", "is_not_empty"].includes(
-              condition.operator,
-            );
-            return (
-              <div
-                key={index}
-                className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_145px_minmax(0,1fr)_auto]"
-              >
-                <select
-                  value={condition.fieldKey}
-                  onChange={(event) => {
-                    const conditions = [...conditionGroup.conditions];
-                    conditions[index] = {
-                      fieldKey: event.target.value,
-                      operator: "equals",
-                      value: "",
-                    };
-                    updateConditions({ conditions });
-                  }}
-                  className="rounded-lg border border-base bg-card px-2 py-1.5 text-xs"
-                >
-                  {sourceFields.map((item) => (
-                    <option key={item.key} value={item.key}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={condition.operator}
-                  onChange={(event) => {
-                    const conditions = [...conditionGroup.conditions];
-                    conditions[index] = {
-                      ...condition,
-                      operator: event.target.value as TrackerRuleOperator,
-                    };
-                    updateConditions({ conditions });
-                  }}
-                  className="rounded-lg border border-base bg-card px-2 py-1.5 text-xs"
-                >
-                  {operators.map((operator) => (
-                    <option key={operator.value} value={operator.value}>
-                      {operator.label}
-                    </option>
-                  ))}
-                </select>
-                {needsValue ? (
-                  values.length ? (
-                    <select
-                      value={String(condition.value ?? "")}
-                      onChange={(event) => {
-                        const conditions = [...conditionGroup.conditions];
-                        conditions[index] = {
-                          ...condition,
-                          value: event.target.value,
-                        };
-                        updateConditions({ conditions });
-                      }}
-                      className="rounded-lg border border-base bg-card px-2 py-1.5 text-xs"
-                    >
-                      <option value="">Choose value</option>
-                      {values.map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type={
-                        source?.type === "number"
-                          ? "number"
-                          : source?.type === "date"
-                            ? "date"
-                            : "text"
-                      }
-                      value={String(condition.value ?? "")}
-                      onChange={(event) => {
-                        const conditions = [...conditionGroup.conditions];
-                        conditions[index] = {
-                          ...condition,
-                          value: event.target.value,
-                        };
-                        updateConditions({ conditions });
-                      }}
-                      placeholder="Value"
-                      className="rounded-lg border border-base bg-card px-2 py-1.5 text-xs"
-                    />
-                  )
-                ) : (
-                  <span className="rounded-lg bg-card px-2 py-1.5 text-xs text-faint">
-                    No value needed
-                  </span>
-                )}
-                <button
-                  type="button"
-                  disabled={conditionGroup.conditions.length === 1}
-                  onClick={() =>
-                    updateConditions({
-                      conditions: conditionGroup.conditions.filter(
-                        (_, itemIndex) => itemIndex !== index,
-                      ),
-                    })
-                  }
-                  className="text-sm text-rose-600 disabled:opacity-30"
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
-          <button
-            type="button"
-            disabled={
-              conditionGroup.conditions.length >= 12 || !sourceFields.length
-            }
-            onClick={() =>
-              updateConditions({
-                conditions: [
-                  ...conditionGroup.conditions,
-                  {
-                    fieldKey: sourceFields[0]?.key || "",
-                    operator: "equals",
-                    value: "",
-                  },
-                ],
-              })
-            }
-            className="text-xs font-medium text-blue-600 disabled:opacity-50"
-          >
-            + Add condition
-          </button>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <input
-              value={computed.matchedLabel || "Ready"}
-              onChange={(event) =>
-                patchComputed({ ...computed, matchedLabel: event.target.value })
-              }
-              placeholder="Matched label"
-              className="rounded-lg border border-base bg-card px-2 py-1.5 text-xs"
-            />
-            <input
-              value={computed.fallbackLabel || "Pending"}
-              onChange={(event) =>
-                patchComputed({
-                  ...computed,
-                  fallbackLabel: event.target.value,
-                })
-              }
-              placeholder="Fallback label"
-              className="rounded-lg border border-base bg-card px-2 py-1.5 text-xs"
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

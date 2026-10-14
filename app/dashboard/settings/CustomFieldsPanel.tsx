@@ -1,4 +1,6 @@
 "use client";
+
+import { readJsonResponse } from "@/lib/http-response";
 import { useState, useEffect, useRef, useCallback, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -1128,7 +1130,7 @@ function FieldSheet({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      const body = await res.json().catch(() => null);
+      const body = await readJsonResponse(res).catch(() => null);
       if (!res.ok) { toast.error(body?.error || "Failed to save field"); return; }
       toast.success(isEdit ? "Field updated" : "Field added");
       invalidate("/api/client-custom-fields", "/api/client-custom-fields?includeInactive=1", "/api/clients");
@@ -1651,7 +1653,7 @@ function FieldGroupSheet({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      const body = await response.json().catch(() => null);
+      const body = await readJsonResponse(response).catch(() => null);
       if (!response.ok) { toast.error(body?.error || "Failed to create group"); return; }
       invalidate("/api/client-custom-field-groups", "/api/client-custom-fields", "/api/clients");
       toast.success("Field group added");
@@ -1842,7 +1844,7 @@ export default function CustomFieldsPanel() {
     setPermDeleteLoading(true);
     try {
       const res = await fetch(`/api/client-custom-fields/${f._id}?affectedCount=1`);
-      const data = res.ok ? await res.json() : { count: 0 };
+      const data = res.ok ? await readJsonResponse(res) : { count: 0 };
       const count: number = data.count ?? 0;
       setConfirmState({
         open: true,

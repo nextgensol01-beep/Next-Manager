@@ -1,12 +1,16 @@
 "use client";
 
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { AnimatePresence, motion, useIsPresent, useMotionValue, useSpring, useTransform, type Variants } from "framer-motion";
+import { animate, AnimatePresence, motion, useIsPresent, useMotionValue, useSpring, useTransform, type Variants } from "framer-motion";
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import type { TrackerEmailWorkflow } from "@/lib/clientTrackers";
+import { STYLE_HANDOFF, styleTransitionDuration } from "@/lib/workflow-style-handoff";
 
 type Direction = "previous" | "next";
 type Page = { title: string; description: string };
 type Commit = { source: number; destination: number; title: string; direction: Direction; keyboard: boolean };
+type EmailStyle = NonNullable<TrackerEmailWorkflow["contentMode"]>;
+export type StyleCommit = { style: EmailStyle; keyboard: boolean; selectionDelay: number; phase: "committing" | "handoff" };
 const ease = [0.22, 1, 0.36, 1] as const;
 
 /** Editor-owned state. The dock only receives destinations and an immutable visual commit. */
@@ -15,11 +19,19 @@ export function useWorkflowStepNavigation(workflowId: string, startPage: number,
   const [stepDirection, setStepDirection] = useState<1 | -1>(1);
   const [commit, setCommit] = useState<Commit | null>(null);
   const pending = useRef<Commit | null>(null);
+  const [styleCommit, setStyleCommit] = useState<StyleCommit | null>(null);
+  const stylePending = useRef<StyleCommit | null>(null);
+  const styleAnimation = useRef<{ stop: () => void } | null>(null);
+  const styleClock = useMotionValue(0);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const cancel = useCallback(() => {
     timers.current.forEach(clearTimeout);
     timers.current = [];
     pending.current = null;
+    styleAnimation.current?.stop();
+    styleAnimation.current = null;
+    stylePending.current = null;
+    setStyleCommit(null);
     setCommit(null);
   }, []);
 
@@ -30,10 +42,13 @@ export function useWorkflowStepNavigation(workflowId: string, startPage: number,
     return () => {
       timers.current.forEach(clearTimeout);
       pending.current = null;
+      styleAnimation.current?.stop();
+      stylePending.current = null;
     };
   }, [workflowId, startPage, cancel]);
 
   const navigateToStep = (target: number) => {
+    if (stylePending.current?.phase === "committing") return;
     if (target < 0 || target >= pages.length) return;
     // Direct stepper selection supersedes any delayed arrow handoff.
     cancel();
@@ -41,9 +56,10 @@ export function useWorkflowStepNavigation(workflowId: string, startPage: number,
     setSetupPage(target);
   };
   const navigateStep = (direction: Direction, keyboard = false) => {
-    if (pending.current) return;
+    if (pending.current || stylePending.current?.phase === "committing") return;
     const destination = setupPage + (direction === "next" ? 1 : -1);
     if (destination < 0 || destination >= pages.length) return;
+    cancel();
     // Existing validation belongs to Save; moving between steps has no validation gate.
     const snapshot: Commit = { source: setupPage, destination, title: pages[destination].title, direction, keyboard };
     pending.current = snapshot;
@@ -62,21 +78,57 @@ export function useWorkflowStepNavigation(workflowId: string, startPage: number,
       timers.current = [setTimeout(handoff, 140), setTimeout(cancel, 440)];
     }
   };
-  return { setupPage, stepDirection, commit, navigateToStep, navigateStep };
+  const selectStyleAndAdvance = (style: EmailStyle, currentStyle: EmailStyle, keyboard: boolean, applyStyle: () => void) => {
+    if (pending.current || stylePending.current || pages[setupPage]?.title !== "Email style") return;
+    const destination = setupPage + 1;
+    if (pages[destination]?.title !== "Messages") return;
+    const snapshot: StyleCommit = { style, keyboard, selectionDelay: !reduceMotion && style !== currentStyle ? .1 : 0, phase: "committing" };
+    // Acquire synchronously, before React renders, so rapid activations cannot change the committed mode.
+    stylePending.current = snapshot;
+    try {
+      applyStyle();
+      styleClock.set(0);
+      setStyleCommit({ ...snapshot });
+      const handoffAt = reduceMotion ? .08 : STYLE_HANDOFF.advance + snapshot.selectionDelay;
+      const duration = reduceMotion ? .2 : STYLE_HANDOFF.finish + snapshot.selectionDelay;
+      // One animation clock owns handoff and release; cancellation never leaves a pending timer.
+      styleAnimation.current = animate(0, duration, {
+        duration: reduceMotion ? duration : styleTransitionDuration(duration), ease: "linear",
+        onUpdate: elapsed => {
+          if (stylePending.current !== snapshot) return;
+          // The overlay and receiving material consume this exact clock. Navigation
+          // cannot get ahead of the visible droplet's arrival and absorption.
+          styleClock.set(elapsed);
+          if (stylePending.current !== snapshot || snapshot.phase === "handoff" || elapsed < handoffAt) return;
+          snapshot.phase = "handoff";
+          setStyleCommit({ ...snapshot });
+          setStepDirection(1);
+          setSetupPage(destination);
+        },
+        onComplete: () => { if (stylePending.current === snapshot) cancel(); },
+      });
+    } catch (error) {
+      cancel();
+      throw error;
+    }
+  };
+  return { setupPage, stepDirection, commit, styleCommit, styleClock, selectStyleAndAdvance, navigateToStep, navigateStep };
 }
 
-export function WorkflowStepNavigationDock({ page, pages, commit, onNavigate, reduceMotion }: {
+export function WorkflowStepNavigationDock({ page, pages, commit, onNavigate, reduceMotion, hideNext = false, locked = false }: {
   page: number; pages: Page[]; commit: Commit | null;
   onNavigate: (direction: Direction, keyboard: boolean) => void; reduceMotion: boolean;
+  hideNext?: boolean; locked?: boolean;
 }) {
   const destinations = commit
     ? [{ direction: commit.direction, page: commit.destination, title: commit.title }]
     : (["previous", "next"] as const).flatMap(direction => {
+        if (direction === "next" && hideNext) return [];
         const target = page + (direction === "next" ? 1 : -1);
         return target >= 0 && target < pages.length ? [{ direction, page: target, title: pages[target].title }] : [];
       });
   return (
-    <nav className="workflow-nav-dock" aria-label="Workflow steps" aria-busy={!!commit}>
+    <nav className="workflow-nav-dock" aria-label="Workflow steps" aria-busy={!!commit || locked} inert={locked}>
       {destinations.map(destination => (
         <LiquidNavControl key={`${commit?.source ?? page}-${destination.direction}`}
           direction={destination.direction} title={destination.title} committing={!!commit}
@@ -198,19 +250,39 @@ const emailStyleContentVariants: Variants = {
   leave: aboutContentVariants.leave,
 };
 
+const styleHandoffVariants: Variants = {
+  enter: ({ reduced }) => ({ opacity: 0, y: reduced ? 0 : 8, scale: reduced ? 1 : .985, filter: reduced ? "blur(0px)" : "blur(4px)" }),
+  visible: ({ reduced }) => ({ opacity: 1, y: 0, scale: 1, filter: "blur(0px)", transition: { duration: reduced ? .12 : styleTransitionDuration(.28), delay: reduced ? 0 : styleTransitionDuration(.01), ease } }),
+  leave: aboutContentVariants.leave,
+};
+const styleChooserExitVariants: Variants = {
+  enter: { opacity: 1 },
+  visible: { opacity: 1 },
+  // The chooser's individual tiles own the exit; keep its parent fully visible.
+  leave: ({ reduced }) => ({ opacity: 1, transition: { duration: reduced ? .12 : styleTransitionDuration(.3) } }),
+};
+
 // popLayout needs the DOM ref; presence also removes departing form fields from tab order.
 const AnimatedStep = React.forwardRef<HTMLDivElement, {
-  custom: { direction: 1 | -1; reduced: boolean }; title: string; children: React.ReactNode;
+  custom: { direction: 1 | -1; reduced: boolean; styleHandoff: boolean }; title: string; children: React.ReactNode;
 }>(function AnimatedStep({ custom, title, children }, ref) {
   const present = useIsPresent();
-  return <motion.div ref={ref} custom={custom} variants={title === "Email style" || title === "Messages" ? emailStyleContentVariants : title === "About" || title === "Send rule" ? aboutContentVariants : contentVariants}
-    initial="enter" animate="visible" exit="leave" tabIndex={-1}
+  // Capture Messages entry so releasing the lock doesn't restart its animation.
+  const handoffEntry = useRef(custom.styleHandoff);
+  const special = title === "Email style" ? custom.styleHandoff : handoffEntry.current && title === "Messages";
+  return <motion.div ref={ref} custom={custom} variants={special ? title === "Email style" ? styleChooserExitVariants : styleHandoffVariants : title === "Email style" || title === "Messages" || title === "Review" ? emailStyleContentVariants : title === "About" || title === "Send rule" ? aboutContentVariants : contentVariants}
+    initial="enter" animate="visible" exit="leave"
+    onBlur={event => {
+      // Keyboard entry needs a focus destination, but blank-space clicks must not
+      // focus the entire form and invoke the browser's automatic scrolling.
+      if (event.target === event.currentTarget) event.currentTarget.removeAttribute("tabindex");
+    }}
     inert={!present} aria-hidden={!present} aria-label={title}
     className="tracker-email-editor-step">{children}</motion.div>;
 });
 
 /** Native scrolling with a small, draggable overlay thumb and no reserved gutter. */
-function WorkflowOverlayScrollbar({ scrollRef, scrollId }: { scrollRef: React.RefObject<HTMLDivElement | null>; scrollId: string }) {
+export function WorkflowOverlayScrollbar({ scrollRef, scrollId, label = "Scroll workflow editor" }: { scrollRef: React.RefObject<HTMLDivElement | null>; scrollId: string; label?: string }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ y: number; scroll: number; ratio: number } | null>(null);
@@ -253,7 +325,7 @@ function WorkflowOverlayScrollbar({ scrollRef, scrollId }: { scrollRef: React.Re
     };
   }, [scrollRef, show]);
   return <div ref={trackRef} className="workflow-overlay-scrollbar" role="scrollbar"
-    aria-label="Scroll workflow editor" aria-controls={scrollId} aria-orientation="vertical" aria-valuemin={0}
+    aria-label={label} aria-controls={scrollId} aria-orientation="vertical" aria-valuemin={0}
     aria-valuemax={0} aria-valuenow={0} tabIndex={0}
     onPointerEnter={() => { hovered.current = true; show(); }}
     onPointerLeave={() => { hovered.current = false; show(); }}
@@ -287,14 +359,17 @@ function WorkflowOverlayScrollbar({ scrollRef, scrollId }: { scrollRef: React.Re
   </div>;
 }
 
-export function WorkflowStepContentStage({ page, direction, reduceMotion, title, focusOnEntry, navigation, onCompactnessChange, children }: {
+export function WorkflowStepContentStage({ page, direction, reduceMotion, title, focusOnEntry, navigation, onCompactnessChange, children, styleHandoff = false }: {
   page: number; direction: 1 | -1; reduceMotion: boolean; title: string; focusOnEntry: boolean;
   navigation: React.ReactNode; onCompactnessChange?: (compactness: number) => void; children: React.ReactNode;
+  styleHandoff?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
   const frame = useRef<number | null>(null);
+  const compactnessCallback = useRef(onCompactnessChange);
+  useLayoutEffect(() => { compactnessCallback.current = onCompactnessChange; }, [onCompactnessChange]);
   useLayoutEffect(() => {
     const editor = scrollRef.current?.closest<HTMLElement>(".tracker-email-editor");
     const header = editor?.querySelector<HTMLElement>(".tracker-email-sticky-header");
@@ -319,9 +394,9 @@ export function WorkflowStepContentStage({ page, direction, reduceMotion, title,
     // Keep the reversible collapse continuous, including with reduced motion.
     // Scroll updates are batched into one DOM write per frame, without React state.
     const compactness = Math.min(1, Math.max(0, (scrollTop - 40) / 80));
-    onCompactnessChange?.(compactness);
+    compactnessCallback.current?.(compactness);
     frame.current = null;
-  }, [onCompactnessChange]);
+  }, []);
   const handleScroll = useCallback(() => {
     if (frame.current !== null) return;
     frame.current = window.requestAnimationFrame(updateCompactness);
@@ -331,14 +406,17 @@ export function WorkflowStepContentStage({ page, direction, reduceMotion, title,
     if (!content) return;
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
     updateCompactness();
-    if (focusOnEntry) content.focus({ preventScroll: true });
+    if (focusOnEntry) {
+      content.setAttribute("tabindex", "-1");
+      content.focus({ preventScroll: true });
+    }
     // Entry focus is captured at handoff; clearing the visual commit must not refocus the form.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, updateCompactness]);
   useEffect(() => () => {
     if (frame.current !== null) window.cancelAnimationFrame(frame.current);
   }, []);
-  const custom = { direction, reduced: reduceMotion };
+  const custom = { direction, reduced: reduceMotion, styleHandoff };
   return (
     <motion.div className="tracker-email-editor-stage tracker-email-content-stage" data-workflow-step={title} initial={false}>
       <div id={scrollId} className="tracker-email-content-scroll" ref={scrollRef} onScroll={handleScroll}

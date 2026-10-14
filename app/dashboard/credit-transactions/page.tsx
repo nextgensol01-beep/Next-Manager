@@ -1,4 +1,7 @@
 "use client";
+import { useClientSearch } from "@/lib/search/use-client-search";
+
+import { readJsonResponse } from "@/lib/http-response";
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useCache, invalidate } from "@/lib/useCache";
 import CreditInsightsPanel, { InsightsData } from "@/components/ui/CreditInsightsPanel";
@@ -90,7 +93,7 @@ export default function CreditTransactionsPage() {
         if (fromClientId) params.set("fromClientId", fromClientId);
         if (toClientId) params.set("toClientId", toClientId);
         const response = await fetch(`/api/credit-transactions/insights?${params}`);
-        if (response.ok) setInsights(await response.json());
+        if (response.ok) setInsights(await readJsonResponse(response));
       } finally {
         setInsightsLoading(false);
       }
@@ -124,25 +127,30 @@ export default function CreditTransactionsPage() {
     );
   })();
 
-  const { data: rawClients } = useCache<Client[]>("/api/clients");
+  const { data: rawClients, loading: clientsLoading } = useCache<Client[]>("/api/clients");
   const clients = useMemo(() => (Array.isArray(rawClients) ? rawClients : []), [rawClients]);
+
+  const matchedClientIds = useClientSearch(clients, search);
 
   const txUrl = `/api/credit-transactions?${new URLSearchParams({
     fy,
-    ...(creditTypeFilter !== "all" ? { creditType: creditTypeFilter } : {}),
   })}`;
-  const { data: rawTx, loading: txLoading, refetch: refetchTransactions } = useCache<Transaction[]>(txUrl, { enabled: financialYearLoaded });
-  const transactions = useMemo(() => (Array.isArray(rawTx) ? rawTx : []), [rawTx]);
+  const { data: rawTx, loading: recordsLoading, refetch: refetchTransactions } = useCache<Transaction[]>(txUrl, { enabled: financialYearLoaded });
+  const txLoading = recordsLoading || clientsLoading;
+  const transactions = useMemo(() => (Array.isArray(rawTx) ? rawTx : []).filter(transaction => creditTypeFilter === "all" || transaction.creditType === creditTypeFilter), [rawTx, creditTypeFilter]);
+  const clientMap = useMemo(() => new Map(clients.map(client => [client.clientId, client])), [clients]);
 
   const clientName = useCallback((id?: string) => {
     if (!id) return "External";
-    return clients.find((client) => client.clientId === id)?.companyName || id;
-  }, [clients]);
+    return clientMap.get(id)?.companyName || id;
+  }, [clientMap]);
 
   const filteredTransactions = useMemo(() => {
     if (!search.trim()) return transactions;
     const query = search.toLowerCase();
     return transactions.filter((tx) =>
+      matchedClientIds.has(tx.fromClientId || "") ||
+      matchedClientIds.has(tx.toClientId || "") ||
       clientName(tx.fromClientId).toLowerCase().includes(query) ||
       clientName(tx.toClientId).toLowerCase().includes(query) ||
       (tx.fromClientId || "").toLowerCase().includes(query) ||
@@ -151,7 +159,7 @@ export default function CreditTransactionsPage() {
       (tx.creditType || "").toLowerCase().includes(query) ||
       formatDate(tx.date).toLowerCase().includes(query)
     );
-  }, [transactions, search, clientName]);
+  }, [transactions, search, clientName, matchedClientIds]);
 
   const pwpClients = clients.filter((client) => client.category === "PWP");
   const nonPwpClients = clients.filter((client) => client.category !== "PWP");

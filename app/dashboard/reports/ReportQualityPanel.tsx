@@ -1,4 +1,6 @@
 "use client";
+
+import { readJsonResponse } from "@/lib/http-response";
 import { useEffect, useState } from "react";
 import { ArrowUpRight, Loader2 } from "lucide-react";
 import Modal from "@/components/ui/Modal";
@@ -12,7 +14,7 @@ export default function ReportQualityPanel({ open, financialYear, onClose }: { o
     const controller = new AbortController();
     setError("");
     fetch(`/api/reports/studio/quality?fy=${encodeURIComponent(financialYear)}`, { signal: controller.signal, cache: "no-store" })
-      .then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body.error || "Could not load records"); setRecords(body.records); })
+      .then(async (response) => { const body = await readJsonResponse(response); if (!response.ok) throw new Error(body.error || "Could not load records"); setRecords(body.records); })
       .catch((err) => { if (!controller.signal.aborted) setError(err.message); });
     return () => controller.abort();
   }, [financialYear, attempt, open]);

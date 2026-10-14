@@ -1,3 +1,4 @@
+import { withTrackerApiErrors, readTrackerRequestBody } from "@/lib/server/tracker-api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -8,12 +9,12 @@ import type { TrackerField, TrackerValue } from "@/lib/clientTrackers";
 import { recordActivityEvent } from "@/lib/server/activity-events";
 import { normalizeTrackerValue } from "@/lib/server/tracker-values";
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const PATCH = withTrackerApiErrors(async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await connectDB();
   const { id } = await params;
-  const body = await req.json();
+  const body = await readTrackerRequestBody(req);
   const entryIds = Array.isArray(body.entryIds) ? body.entryIds.filter((entryId: unknown): entryId is string => typeof entryId === "string") : [];
   const key = typeof body.key === "string" ? body.key : "";
   if (!entryIds.length || entryIds.length > 1000) return NextResponse.json({ error: "Choose between 1 and 1,000 clients." }, { status: 400 });
@@ -47,4 +48,4 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     updated: result.modifiedCount,
     previous: previous.map((entry) => ({ id: String(entry._id), value: (entry.values as Record<string, TrackerValue>)[key] })),
   });
-}
+});

@@ -1,5 +1,7 @@
 "use client";
 
+import { readJsonResponse } from "@/lib/http-response";
+
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -1259,7 +1261,7 @@ export default function ClientsPage() {
 
   const readErrorMessage = useCallback(async (response: Response, fallback: string) => {
     try {
-      const payload = await response.json();
+      const payload = await readJsonResponse(response);
       if (payload && typeof payload.error === "string" && payload.error.trim()) {
         return payload.error.trim();
       }
@@ -1510,7 +1512,7 @@ export default function ClientsPage() {
         toast.error(await readErrorMessage(response, "Something went wrong"));
         return;
       }
-      const savedClient = await response.json() as Client;
+      const savedClient = await readJsonResponse(response) as Client;
       await mutateClientPages((pages) => {
         if (!pages?.length) return pages;
         const exists = pages.some((page) => (

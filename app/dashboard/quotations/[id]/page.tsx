@@ -1,4 +1,6 @@
 "use client";
+
+import { readJsonResponse } from "@/lib/http-response";
 import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, animate, motion, useDragControls, useMotionTemplate, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform, useVelocity, type MotionStyle } from "framer-motion";
@@ -1632,7 +1634,7 @@ export default function QuotationDetailPage() {
         router.push(returnTo?.startsWith("/dashboard/quotations") ? returnTo : "/dashboard/quotations");
         return;
       }
-      const data: Quotation = await res.json();
+      const data: Quotation = await readJsonResponse(res);
       if (!isMounted.current) return;
       setQuotation(data);
 
@@ -1676,7 +1678,7 @@ export default function QuotationDetailPage() {
     let cancelled = false;
     fetch(`/api/quotations/${id}/billing`, { cache: "no-store" })
       .then(async (response) => {
-        const body = await response.json().catch(() => null);
+        const body = await readJsonResponse(response).catch(() => null);
         if (!response.ok) throw new Error(body?.error || "Unable to check billing");
         if (!cancelled) setBillingEligibility(body);
       })
@@ -1698,8 +1700,8 @@ export default function QuotationDetailPage() {
       setLinkClientLoading(true);
       try {
         const query = linkClientSearch.trim();
-        const response = await fetch(`/api/clients${query ? `?search=${encodeURIComponent(query)}` : ""}`, { cache: "no-store" });
-        const body = await response.json().catch(() => null);
+        const response = await fetch(`/api/clients?summary=1&limit=12${query ? `&search=${encodeURIComponent(query)}` : ""}`, { cache: "no-store" });
+        const body = await readJsonResponse(response).catch(() => null);
         if (!response.ok) throw new Error(body?.error || "Unable to load clients");
         if (!cancelled) setLinkClientOptions(Array.isArray(body) ? body.slice(0, 12) : []);
       } catch (error) {
@@ -1719,22 +1721,23 @@ export default function QuotationDetailPage() {
 
   // Client suggestions fetch for autocomplete
   useEffect(() => {
+    const controller = new AbortController();
     if (!clientName.trim() || loading || !quotation || !canEditQuotation(quotation.status)) {
       setClientSuggestions([]);
       return;
     }
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/clients?summary=1&search=${encodeURIComponent(clientName)}`);
+        const res = await fetch(`/api/clients?summary=1&search=${encodeURIComponent(clientName)}`, { signal: controller.signal });
         if (res.ok) {
-          const data = await res.json();
-          setClientSuggestions(data);
+          const data = await readJsonResponse(res);
+          if (!controller.signal.aborted) setClientSuggestions(data);
         }
       } catch (err) {
-        console.error("Failed to fetch suggestions", err);
+        if (!controller.signal.aborted) console.error("Failed to fetch suggestions", err);
       }
     }, 200);
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [clientName, loading, quotation]);
 
   // Click outside to close client suggestions
@@ -1827,7 +1830,7 @@ export default function QuotationDetailPage() {
     fetch("/api/quotation/template", { cache: "no-store" })
       .then(async res => {
         if (!res.ok) throw new Error("Quotation template not found");
-        return res.json() as Promise<{ html: string }>;
+        return readJsonResponse(res) as Promise<{ html: string }>;
       })
       .then(data => {
         if (!cancelled) setQuotationTemplate(data.html);
@@ -2000,7 +2003,7 @@ export default function QuotationDetailPage() {
       }),
     });
     if (!res.ok) {
-      const data = await res.json().catch(() => null);
+      const data = await readJsonResponse(res).catch(() => null);
       throw new Error(data?.error || "Failed to save quotation");
     }
 
@@ -2112,11 +2115,11 @@ export default function QuotationDetailPage() {
       await saveCurrentDraft();
       const res = await fetch(`/api/quotations/${id}/finalize`, { method: "POST" });
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
+        const data = await readJsonResponse(res).catch(() => null);
         toast.error(data?.error || "Failed to finalise");
         return;
       }
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       toast.success(`Finalised as ${data.quotationNumber}`);
       loadQuotation();
     } catch (error) {
@@ -2131,11 +2134,11 @@ export default function QuotationDetailPage() {
     try {
       const res = await fetch(`/api/quotations/${id}/create-revision`, { method: "POST" });
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
+        const data = await readJsonResponse(res).catch(() => null);
         toast.error(data?.error || "Failed to create revision");
         return;
       }
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       toast.success(`Rev ${data.revisionNumber} created`);
       loadQuotation();
     } finally { setCreatingRevision(false); }
@@ -2148,11 +2151,11 @@ export default function QuotationDetailPage() {
     try {
       const res = await fetch(`/api/quotations/${id}/duplicate`, { method: "POST" });
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
+        const data = await readJsonResponse(res).catch(() => null);
         toast.error(data?.error || "Failed to duplicate quotation");
         return;
       }
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       toast.success("Quotation duplicated");
       const params = new URLSearchParams();
       if (listReturnToRef.current?.startsWith("/dashboard/quotations")) {
@@ -2177,7 +2180,7 @@ export default function QuotationDetailPage() {
       body: JSON.stringify({ status: newStatus }),
     });
     if (!res.ok) {
-      const data = await res.json().catch(() => null);
+      const data = await readJsonResponse(res).catch(() => null);
       toast.error(data?.error || "Failed to update status");
       return;
     }
@@ -2208,7 +2211,7 @@ export default function QuotationDetailPage() {
       if (!target) return;
       const tmplRes = await fetch("/api/quotation/template");
       if (!tmplRes.ok) throw new Error("Quotation template not found");
-      const { html: template } = await tmplRes.json();
+      const { html: template } = await readJsonResponse(tmplRes);
       const html = buildQuotationHTML(template, target.quotation, target.revision);
       const documentTitle = getQuotationDocumentTitle(target.quotation, target.revision);
       const win = window.open("", "_blank");
@@ -2254,7 +2257,7 @@ export default function QuotationDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dueDate: billingDueDate || null }),
       });
-      const body = await response.json().catch(() => null);
+      const body = await readJsonResponse(response).catch(() => null);
       if (!response.ok) {
         if (body?.billingId) {
           setBillingEligibility((current) => current ? { ...current, eligible: false, alreadyConverted: true, billingId: body.billingId } : current);
@@ -2288,7 +2291,7 @@ export default function QuotationDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientId: selectedLinkClient.clientId }),
       });
-      const body = await response.json().catch(() => null);
+      const body = await readJsonResponse(response).catch(() => null);
       if (!response.ok) throw new Error(body?.error || "Failed to link client");
       setLinkClientModalOpen(false);
       setSelectedLinkClient(null);
@@ -2306,7 +2309,7 @@ export default function QuotationDetailPage() {
     try {
       const response = await fetch("/api/email-message-templates", { cache: "no-store" });
       if (!response.ok) throw new Error("Failed to load saved messages");
-      const data = await response.json() as { templates?: EmailMessageTemplate[] };
+      const data = await readJsonResponse(response) as { templates?: EmailMessageTemplate[] };
       setEmailMessageTemplates(Array.isArray(data.templates) ? data.templates : []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load saved messages");
@@ -2400,7 +2403,7 @@ export default function QuotationDetailPage() {
           body: JSON.stringify({ name, bodyHtml: cleanHtml, bodyText }),
         }
       );
-      const data = await response.json().catch(() => null) as { template?: EmailMessageTemplate; error?: string } | null;
+      const data = await readJsonResponse(response).catch(() => null) as { template?: EmailMessageTemplate; error?: string } | null;
       if (!response.ok || !data?.template) {
         throw new Error(data?.error || "Failed to save message");
       }
@@ -2426,7 +2429,7 @@ export default function QuotationDetailPage() {
     setEmailTemplateLoading(true);
     try {
       const response = await fetch(`/api/email-message-templates/${selectedTemplate._id}`, { method: "DELETE" });
-      const data = await response.json().catch(() => null) as { error?: string } | null;
+      const data = await readJsonResponse(response).catch(() => null) as { error?: string } | null;
       if (!response.ok) throw new Error(data?.error || "Failed to delete message");
       setSelectedEmailTemplateId("");
       setEmailTemplateName("");
@@ -2445,7 +2448,7 @@ export default function QuotationDetailPage() {
       quotationTemplatePromiseRef.current = fetch("/api/quotation/template")
         .then(async response => {
           if (!response.ok) throw new Error("Quotation template not found");
-          const data = await response.json() as { html: string };
+          const data = await readJsonResponse(response) as { html: string };
           setQuotationTemplate(data.html);
           return data.html;
         })
@@ -2468,10 +2471,10 @@ export default function QuotationDetailPage() {
     })
       .then(async response => {
         if (!response.ok) {
-          const data = await response.json().catch(() => null);
+          const data = await readJsonResponse(response).catch(() => null);
           throw new Error(data?.error || "Failed to generate quotation PDF");
         }
-        const data = await response.json() as { contentBase64: string };
+        const data = await readJsonResponse(response) as { contentBase64: string };
         return data.contentBase64;
       })
       .catch(error => {
@@ -2517,7 +2520,7 @@ export default function QuotationDetailPage() {
     try {
       const res = await fetch(`/api/client-contacts?clientId=${encodeURIComponent(quotation.clientId)}`);
       if (!res.ok) return;
-      const contacts = await res.json() as Array<{
+      const contacts = await readJsonResponse(res) as Array<{
         personId?: string;
         name?: string;
         designation?: string;
@@ -2592,7 +2595,7 @@ export default function QuotationDetailPage() {
         body: JSON.stringify(payload),
       });
       if (res.ok) {
-        const data = await res.json();
+        const data = await readJsonResponse(res);
         toast.success("Email draft created in Gmail");
         setEmailModalOpen(false);
         setEmailRecipient("");
@@ -2606,7 +2609,7 @@ export default function QuotationDetailPage() {
         if (data.draftUrl) window.open(data.draftUrl, "_blank");
         if (target.quotation.status === "Finalized") setMarkSentPrompt("email");
       } else {
-        const data = await res.json().catch(() => null);
+        const data = await readJsonResponse(res).catch(() => null);
         toast.error(data?.error || "Failed to create email draft");
       }
     } catch (error) {

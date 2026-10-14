@@ -1,4 +1,8 @@
 "use client";
+import { useNetworkSearch } from "@/lib/search/use-network-search";
+import { usePagedSearch } from "@/lib/search/use-paged-search";
+
+import { readJsonResponse } from "@/lib/http-response";
 import { useState, useMemo, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import PageHeader from "@/components/ui/PageHeader";
@@ -6,7 +10,7 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import EmptyState from "@/components/ui/EmptyState";
 import { Trash2, RotateCcw, AlertTriangle, Search, Clock } from "lucide-react";
 import toast from "react-hot-toast";
-import { useCache, invalidate } from "@/lib/useCache";
+import { invalidate } from "@/lib/useCache";
 
 interface TrashItem {
   _id: string;
@@ -103,20 +107,17 @@ export default function TrashPage() {
     setSearch(nextSearch);
   }, [searchParams]);
 
-  const { data: rawItems, loading, refetch } = useCache<TrashItem[]>(`/api/trash?type=${typeFilter}`);
+  const appliedSearch = useNetworkSearch(search);
+  const trashParams = new URLSearchParams({ type: typeFilter });
+  if (appliedSearch) trashParams.set("search", appliedSearch);
+  const { data: rawItems, loading, refetch, collectionRef } = usePagedSearch<TrashItem>("/api/trash?" + trashParams);
   const items = useMemo(() => (Array.isArray(rawItems) ? rawItems : []), [rawItems]);
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return items;
-    const q = search.toLowerCase();
-    return items.filter(
-      (i) => i.label.toLowerCase().includes(q) || (i.subLabel || "").toLowerCase().includes(q)
-    );
-  }, [items, search]);
+  const filtered = items;
 
   const restore = async (item: TrashItem) => {
     const r = await fetch(`/api/trash/${item._id}`, { method: "POST" });
-    if (!r.ok) { const d = await r.json(); toast.error(d.error || "Restore failed"); return; }
+    if (!r.ok) { const d = await readJsonResponse(r); toast.error(d.error || "Restore failed"); return; }
     toast.success(`"${item.label}" restored!`);
     invalidate("/api/trash", ...(TYPE_API_MAP[item.recordType] || []));
     refetch();
@@ -175,7 +176,7 @@ export default function TrashPage() {
   );
 
   return (
-    <div>
+    <div ref={collectionRef}>
       <PageHeader title="Recycle Bin" description="Deleted records — auto-purged after 90 days">
         {items.length > 0 && (
           confirmEmpty ? (

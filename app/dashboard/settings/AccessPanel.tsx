@@ -1,4 +1,6 @@
 "use client";
+
+import { readJsonResponse } from "@/lib/http-response";
 import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useSettingsSearch } from "./SettingsSearchContext";
@@ -633,7 +635,7 @@ export default function AccessPanel() {
     try {
       await fetch("/api/sessions", { method: "PATCH" }).catch(() => {});
       const response = await fetch("/api/sessions", { cache: "no-store" });
-      const body = await response.json().catch(() => null);
+      const body = await readJsonResponse(response).catch(() => null);
       if (!response.ok) { toast.error(body?.error || "Failed to load sessions"); return; }
       setSessions(Array.isArray(body) ? body : []);
     } finally {
@@ -659,7 +661,7 @@ export default function AccessPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(userForm),
       });
-      const body = await response.json().catch(() => null);
+      const body = await readJsonResponse(response).catch(() => null);
       if (!response.ok) { toast.error(body?.error || "Failed to create user"); return; }
       toast.success("User created");
       setUserForm(emptyUserForm);
@@ -689,7 +691,7 @@ export default function AccessPanel() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status }),
           });
-          const body = await response.json().catch(() => null);
+          const body = await readJsonResponse(response).catch(() => null);
           if (!response.ok) { toast.error(body?.error || "Failed to update user"); return; }
           toast.success("User updated");
           refreshAll();
@@ -718,7 +720,7 @@ export default function AccessPanel() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ googleStatus }),
           });
-          const body = await response.json().catch(() => null);
+          const body = await readJsonResponse(response).catch(() => null);
           if (!response.ok) { toast.error(body?.error || "Failed to update Google access"); return; }
           toast.success("Google access updated");
           refreshAll();
@@ -745,7 +747,7 @@ export default function AccessPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: passwordInput }),
       });
-      const body = await response.json().catch(() => null);
+      const body = await readJsonResponse(response).catch(() => null);
       if (!response.ok) { toast.error(body?.error || "Failed to reset password"); return; }
       toast.success("Password updated");
       setPasswordModal({ open: false, user: null });
@@ -765,7 +767,7 @@ export default function AccessPanel() {
         setUpdatingUserId(user.id);
         try {
           const response = await fetch(`/api/users?id=${user.id}`, { method: "DELETE" });
-          const body = await response.json().catch(() => null);
+          const body = await readJsonResponse(response).catch(() => null);
           if (!response.ok) { toast.error(body?.error || "Failed to delete user"); return; }
           toast.success("User deleted");
           refreshAll();
@@ -790,7 +792,7 @@ export default function AccessPanel() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: sessionId }),
           });
-          const body = await response.json().catch(() => null);
+          const body = await readJsonResponse(response).catch(() => null);
           if (!response.ok) { toast.error(body?.error || "Failed to revoke session"); return; }
           toast.success("Session revoked");
           loadSessions();

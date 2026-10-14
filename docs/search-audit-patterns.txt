@@ -1,0 +1,861 @@
+app/dashboard\annual-return\page.tsx:13:import { Plus, Search, Pencil, Trash2, CheckCircle2, Clock, AlertCircle, ShieldCheck, Sparkles, Mail, FileEdit, ExternalLink, ChevronDown, RefreshCw } from "lucide-react";
+app/dashboard\annual-return\page.tsx:115:  const [search, setSearch]     = useState("");
+app/dashboard\annual-return\page.tsx:145:  const arUrl = `/api/annual-return?${new URLSearchParams({
+app/dashboard\annual-return\page.tsx:148:    ...(search ? { search } : {}),
+app/dashboard\annual-return\page.tsx:359:          const gmailParams = new URLSearchParams({ view: "cm", fs: "1", to: primaryTo, su: draftSubject, body: plainBody });
+app/dashboard\annual-return\page.tsx:466:          {/* Search + filter */}
+app/dashboard\annual-return\page.tsx:469:              <Search className="w-4 h-4 text-faint flex-shrink-0" />
+app/dashboard\annual-return\page.tsx:471:                placeholder="Search company name…" value={search} onChange={(e) => setSearch(e.target.value)} />
+components\clients\ClientFormModal.tsx:339:  /** undefined = still searching, [] = no match found, 1+ = candidates */
+components\clients\ClientFormModal.tsx:382:    // Initialise rows with candidates=undefined (searching)
+components\clients\ClientFormModal.tsx:385:    // Fire one search per unique name
+components\clients\ClientFormModal.tsx:394:            `/api/contacts?search=${encodeURIComponent(name)}&withCompanies=true`
+components\clients\ClientFormModal.tsx:436:  const searching   = validRows.some((r) => r.candidates === undefined);
+components\clients\ClientFormModal.tsx:497:          <RefreshCw className="w-3 h-3 animate-spin" /> Searching…
+components\clients\ClientFormModal.tsx:574:          const newPhone = pastedPhone && !c.phoneNumbers.includes(pastedPhone);
+components\clients\ClientFormModal.tsx:575:          const newEmail = pastedEmail && !c.emails.map((e) => e.toLowerCase()).includes(pastedEmail);
+components\clients\ClientFormModal.tsx:790:            {allResolved && !searching && (
+components\clients\ClientFormModal.tsx:797:            {searching && (
+components\clients\ClientFormModal.tsx:799:                <RefreshCw className="w-3 h-3 animate-spin" /> Searching contacts…
+components\clients\ClientFormModal.tsx:803:              disabled={!allResolved || searching}
+components\clients\ClientFormModal.tsx:809:                boxShadow: (!allResolved || searching) ? "none" : "0 1px 4px rgba(0,113,227,0.30)",
+components\clients\ClientFormModal.tsx:812:              onMouseEnter={(e) => { if (allResolved && !searching) (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#0077ed"; }}
+components\clients\ClientFormModal.tsx:813:              onMouseLeave={(e) => { if (allResolved && !searching) (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#0071e3"; }}>
+components\clients\ClientFormModal.tsx:815:              {searching
+components\clients\ClientFormModal.tsx:816:                ? "Searching…"
+components\clients\ClientFormModal.tsx:913:    (!field.applicableCategories?.length || field.applicableCategories.includes(form.category)) &&
+components\clients\ClientFormModal.tsx:917:    group.active && (!group.applicableCategories?.length || group.applicableCategories.includes(form.category))
+components\clients\ClientFormModal.tsx:1073:      const el = document.querySelector<HTMLElement>("[data-autofocus=\"true\"]");
+components\clients\ClientFormModal.tsx:1117:        const cards = form.querySelectorAll<HTMLInputElement>(".cfm-contact-inset input[placeholder='Type name to search or create...']");
+components\clients\ClientFormModal.tsx:1129:        prev.includes(entry.personId!) ? prev : [...prev, entry.personId!]
+app/dashboard\client-trackers\page.tsx:8:import { Archive, CheckCircle2, ClipboardList, Plus, Search, Users } from "lucide-react";
+app/dashboard\client-trackers\page.tsx:37:  const [query, setQuery] = useState("");
+app/dashboard\client-trackers\page.tsx:59:      .includes(query.toLowerCase().trim()),
+app/dashboard\client-trackers\page.tsx:80:          : form.scope === "selected" ? ".create-client-search input" : '.create-chips[aria-label="Client categories"] button';
+app/dashboard\client-trackers\page.tsx:81:        document.querySelector<HTMLElement>(target)?.focus();
+app/dashboard\client-trackers\page.tsx:157:            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+app/dashboard\client-trackers\page.tsx:159:              value={query}
+app/dashboard\client-trackers\page.tsx:160:              onChange={(event) => setQuery(event.target.value)}
+app/dashboard\client-trackers\page.tsx:161:              placeholder="Search trackers"
+components\ui\BillingSkeleton.tsx:8: *   - Search + filter bar
+components\ui\BillingSkeleton.tsx:156:      {/* ── Search + filter bar ── */}
+components\ui\BillingSkeleton.tsx:158:        {/* Search row */}
+components\layout\Sidebar.tsx:595:    const el = nav.querySelector<HTMLElement>(`[data-nav="${activeHref}"]`);
+components\layout\Sidebar.tsx:602:      const parent = nav.querySelector<HTMLElement>(`[data-nav="cpcb-parent"]`);
+app/dashboard\client-trackers\[id]\page.tsx:33:  Search,
+app/dashboard\client-trackers\[id]\page.tsx:54:import { useTrackerQuery } from "@/lib/useTrackerQuery";
+app/dashboard\client-trackers\[id]\page.tsx:306:  const [search, setSearch] = useState("");
+app/dashboard\client-trackers\[id]\page.tsx:317:  const { url, entryOffset, setEntryOffset, filtersPending } = useTrackerQuery({
+app/dashboard\client-trackers\[id]\page.tsx:318:    trackerId: resolved.id, search, category: categoryFilter,
+app/dashboard\client-trackers\[id]\page.tsx:463:  // stale page locally while a new search is still loading.
+app/dashboard\client-trackers\[id]\page.tsx:652:  }, [search, categoryFilter, fieldFilter, valueFilter, savedViewId]);
+app/dashboard\client-trackers\[id]\page.tsx:830:      !["is_empty", "is_not_empty"].includes(operator);
+app/dashboard\client-trackers\[id]\page.tsx:861:      setSearch("");
+app/dashboard\client-trackers\[id]\page.tsx:997:    const query = new URLSearchParams();
+app/dashboard\client-trackers\[id]\page.tsx:998:    if (search.trim()) query.set("search", search.trim());
+app/dashboard\client-trackers\[id]\page.tsx:999:    if (categoryFilter !== ALL_FILTER) query.set("category", categoryFilter);
+app/dashboard\client-trackers\[id]\page.tsx:1001:      query.set("field", fieldFilter);
+app/dashboard\client-trackers\[id]\page.tsx:1002:      query.set("value", valueFilter);
+app/dashboard\client-trackers\[id]\page.tsx:1004:    if (savedViewId) query.set("view", savedViewId);
+app/dashboard\client-trackers\[id]\page.tsx:1005:    const suffix = query.size ? `?${query.toString()}` : "";
+app/dashboard\client-trackers\[id]\page.tsx:1135:        ).filter((email) => !to.includes(email));
+app/dashboard\client-trackers\[id]\page.tsx:1250:        (clientId) => !participantDraft.includes(clientId),
+app/dashboard\client-trackers\[id]\page.tsx:1339:                entryIds.includes(entry._id)
+app/dashboard\client-trackers\[id]\page.tsx:1752:                        setSearch("");
+app/dashboard\client-trackers\[id]\page.tsx:1823:                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+app/dashboard\client-trackers\[id]\page.tsx:1825:                  value={search}
+app/dashboard\client-trackers\[id]\page.tsx:1827:                  onChange={(event) => setSearch(event.target.value)}
+app/dashboard\client-trackers\[id]\page.tsx:1862:                (["text", "longText", "tags"].includes(filterField?.type || "") ? (
+app/dashboard\client-trackers\[id]\page.tsx:1888:                  ].includes(filterField?.type || "") ? (
+app/dashboard\client-trackers\[id]\page.tsx:2852:      [field]: selected.includes(email)
+app/dashboard\client-trackers\[id]\page.tsx:2906:                    className={`rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition ${draft.to.includes(recipient.email) ? "bg-brand-600 text-white shadow-sm shadow-brand-600/20" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"}`}
+app/dashboard\client-trackers\[id]\page.tsx:2913:                    className={`rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition ${draft.cc.includes(recipient.email) ? "bg-muted text-white shadow-sm dark:bg-white/[0.22]" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"}`}
+app/dashboard\client-trackers\[id]\page.tsx:3874:        {value != null && value !== "" && !field.options?.includes(String(value)) && <option value={String(value)} disabled>{String(value)}</option>}
+app/dashboard\client-trackers\[id]\page.tsx:3887:          const checked = selected.includes(option), color = trackerOptionColor(field, option);
+app/dashboard\client-trackers\[id]\page.tsx:3917:  ].includes(field.type);
+app/dashboard\client-trackers\[id]\page.tsx:3953:  if (["percentage", "quantity", "currency"].includes(field.type)) {
+app/dashboard\client-trackers\[id]\page.tsx:4061:            const needsValue = !["is_empty", "is_not_empty"].includes(
+app/dashboard\billing\AdvancePaymentsSection.tsx:2:import { ArrowLeftRight, BookOpen, ChevronDown, ChevronUp, Plus, Search, Trash2, Wallet, X } from "lucide-react";
+app/dashboard\billing\AdvancePaymentsSection.tsx:14:  search: string;
+app/dashboard\billing\AdvancePaymentsSection.tsx:15:  onSearchChange: (value: string) => void;
+app/dashboard\billing\AdvancePaymentsSection.tsx:29:  search,
+app/dashboard\billing\AdvancePaymentsSection.tsx:30:  onSearchChange,
+app/dashboard\billing\AdvancePaymentsSection.tsx:68:        {/* Search + action */}
+app/dashboard\billing\AdvancePaymentsSection.tsx:71:            <Search className="w-4 h-4 text-faint flex-shrink-0" />
+app/dashboard\billing\AdvancePaymentsSection.tsx:74:              placeholder="Search advances..."
+app/dashboard\billing\AdvancePaymentsSection.tsx:75:              value={search}
+app/dashboard\billing\AdvancePaymentsSection.tsx:76:              onChange={(e) => onSearchChange(e.target.value)}
+app/dashboard\billing\AdvancePaymentsSection.tsx:78:            {search && <button type="button" onClick={() => onSearchChange("")} className="p-1 text-faint hover:text-default rounded transition-colors"><X className="w-3.5 h-3.5" /></button>}
+app/dashboard\billing\AdvancePaymentsSection.tsx:90:          <EmptyState message="No advance payments found" description={search ? "Try a different search" : "Record an advance payment to track available client funds"} />
+app/dashboard\billing\BillingControlBar.tsx:4: * Replaces BillingTopControls + BillingSearchFilters with a single component
+app/dashboard\billing\BillingControlBar.tsx:21:  Search,
+app/dashboard\billing\BillingControlBar.tsx:36:  // ── Search + Filters (was BillingSearchFilters) ──────────────────────────
+app/dashboard\billing\BillingControlBar.tsx:37:  search: string;
+app/dashboard\billing\BillingControlBar.tsx:38:  onSearchChange: (value: string) => void;
+app/dashboard\billing\BillingControlBar.tsx:60:  search, onSearchChange,
+app/dashboard\billing\BillingControlBar.tsx:68:  const showSearchFilters = activeTab === "billing";
+app/dashboard\billing\BillingControlBar.tsx:113:        {/* ── Search + Filters block (was BillingSearchFilters) — billing tab only ── */}
+app/dashboard\billing\BillingControlBar.tsx:114:        {showSearchFilters && (
+app/dashboard\billing\BillingControlBar.tsx:117:              <Search className="w-4 h-4 flex-shrink-0 text-faint" />
+app/dashboard\billing\BillingControlBar.tsx:120:                placeholder="Search by client name, ID, or status..."
+app/dashboard\billing\BillingControlBar.tsx:121:                value={search}
+app/dashboard\billing\BillingControlBar.tsx:122:                onChange={(e) => onSearchChange(e.target.value)}
+app/dashboard\billing\BillingControlBar.tsx:124:              {search && (
+app/dashboard\billing\BillingControlBar.tsx:125:                <button onClick={() => onSearchChange("")} className="rounded p-1 text-faint transition-colors hover:text-default">
+app/dashboard\billing\BillingControlBar.tsx:229:          {/* Search — grows to fill */}
+app/dashboard\billing\BillingControlBar.tsx:230:          {showSearchFilters && (
+app/dashboard\billing\BillingControlBar.tsx:232:              <Search className="w-3.5 h-3.5 flex-shrink-0 text-faint" />
+app/dashboard\billing\BillingControlBar.tsx:235:                placeholder="Search clients..."
+app/dashboard\billing\BillingControlBar.tsx:236:                value={search}
+app/dashboard\billing\BillingControlBar.tsx:237:                onChange={(e) => onSearchChange(e.target.value)}
+app/dashboard\billing\BillingControlBar.tsx:239:              {search && (
+app/dashboard\billing\BillingControlBar.tsx:240:                <button onClick={() => onSearchChange("")} className="rounded p-0.5 text-faint hover:text-default transition-colors">
+app/dashboard\billing\BillingControlBar.tsx:248:          {showSearchFilters && (
+app/dashboard\billing\BillingControlBar.tsx:276:            {showSearchFilters && (
+app/dashboard\billing\BillingControlBar.tsx:348:          {/* Row 2: Search + view toggle (billing tab only) */}
+app/dashboard\billing\BillingControlBar.tsx:349:          {showSearchFilters && (
+app/dashboard\billing\BillingControlBar.tsx:351:              <Search className="w-3.5 h-3.5 flex-shrink-0 text-faint" />
+app/dashboard\billing\BillingControlBar.tsx:354:                placeholder="Search clients..."
+app/dashboard\billing\BillingControlBar.tsx:355:                value={search}
+app/dashboard\billing\BillingControlBar.tsx:356:                onChange={(e) => onSearchChange(e.target.value)}
+app/dashboard\billing\BillingControlBar.tsx:358:              {search && (
+app/dashboard\billing\BillingControlBar.tsx:359:                <button onClick={() => onSearchChange("")} className="rounded p-0.5 text-faint hover:text-default">
+app/dashboard\billing\BillingControlBar.tsx:380:          {showSearchFilters && (
+app/dashboard\billing\BillingList.tsx:79:        <EmptyState message="No matching billing records" description="Try a different search or filter" />
+app/dashboard\trash\page.tsx:5:import { useSearchParams } from "next/navigation";
+app/dashboard\trash\page.tsx:9:import { Trash2, RotateCcw, AlertTriangle, Search, Clock } from "lucide-react";
+app/dashboard\trash\page.tsx:96:  const searchParams = useSearchParams();
+app/dashboard\trash\page.tsx:97:  const [typeFilter, setTypeFilter]   = useState(() => searchParams.get("type") || "all");
+app/dashboard\trash\page.tsx:98:  const [search, setSearch]           = useState(() => searchParams.get("search") || "");
+app/dashboard\trash\page.tsx:102:    const nextType = searchParams.get("type") || "all";
+app/dashboard\trash\page.tsx:103:    const nextSearch = searchParams.get("search") || "";
+app/dashboard\trash\page.tsx:105:    setSearch(nextSearch);
+app/dashboard\trash\page.tsx:106:  }, [searchParams]);
+app/dashboard\trash\page.tsx:112:    if (!search.trim()) return items;
+app/dashboard\trash\page.tsx:113:    const q = search.toLowerCase();
+app/dashboard\trash\page.tsx:115:      (i) => i.label.toLowerCase().includes(q) || (i.subLabel || "").toLowerCase().includes(q)
+app/dashboard\trash\page.tsx:117:  }, [items, search]);
+app/dashboard\trash\page.tsx:197:      {/* Search + filter bar */}
+app/dashboard\trash\page.tsx:200:          <Search className="w-4 h-4 text-faint flex-shrink-0" />
+app/dashboard\trash\page.tsx:203:            placeholder="Search deleted records…"
+app/dashboard\trash\page.tsx:204:            value={search}
+app/dashboard\trash\page.tsx:205:            onChange={(e) => setSearch(e.target.value)}
+app/dashboard\trash\page.tsx:226:            message={search ? `No results for "${search}"` : typeFilter === "all" ? "Trash is empty" : `No deleted ${TYPE_LABELS[typeFilter] || typeFilter} records`}
+app/dashboard\trash\page.tsx:227:            description={search ? "Try a different search term" : undefined}
+components\financial-year\useFinancialYearForm.ts:182:        .querySelector<HTMLButtonElement>(`[data-fy-row="${row.id}"] button`)
+app/dashboard\billing\BillingScrollHeader.tsx:10:  Search,
+app/dashboard\billing\BillingScrollHeader.tsx:29:  search: string;
+app/dashboard\billing\BillingScrollHeader.tsx:30:  onSearchChange: (value: string) => void;
+app/dashboard\billing\BillingScrollHeader.tsx:48:  search,
+app/dashboard\billing\BillingScrollHeader.tsx:49:  onSearchChange,
+app/dashboard\billing\BillingScrollHeader.tsx:245:              <Search className="h-4 w-4 flex-shrink-0 text-faint" />
+app/dashboard\billing\BillingScrollHeader.tsx:248:                placeholder="Search by client name, ID, or status..."
+app/dashboard\billing\BillingScrollHeader.tsx:249:                value={search}
+app/dashboard\billing\BillingScrollHeader.tsx:250:                onChange={(e) => onSearchChange(e.target.value)}
+app/dashboard\billing\BillingScrollHeader.tsx:252:              {search && (
+app/dashboard\billing\BillingScrollHeader.tsx:253:                <button onClick={() => onSearchChange("")} className="rounded p-1 text-faint transition-colors hover:text-default">
+app/dashboard\billing\BillingStickyBar.tsx:4:import BillingSearchFilters from "./BillingSearchFilters";
+app/dashboard\billing\BillingStickyBar.tsx:21:  search: string;
+app/dashboard\billing\BillingStickyBar.tsx:22:  onSearchChange: (value: string) => void;
+app/dashboard\billing\BillingStickyBar.tsx:51:  search, onSearchChange,
+app/dashboard\billing\BillingStickyBar.tsx:141:        {/* Row 3: Search + filters (billing tab only) */}
+app/dashboard\billing\BillingStickyBar.tsx:143:          <BillingSearchFilters
+app/dashboard\billing\BillingStickyBar.tsx:144:            search={search}
+app/dashboard\billing\BillingStickyBar.tsx:145:            onSearchChange={onSearchChange}
+app/dashboard\billing\BillingSearchFilters.tsx:5:import { LayoutGrid, LayoutList, Search, X } from "lucide-react";
+app/dashboard\billing\BillingSearchFilters.tsx:8:interface BillingSearchFiltersProps {
+app/dashboard\billing\BillingSearchFilters.tsx:9:  search: string;
+app/dashboard\billing\BillingSearchFilters.tsx:10:  onSearchChange: (value: string) => void;
+app/dashboard\billing\BillingSearchFilters.tsx:34:   * rendered height of BillingSummaryStats. The search bar sticks at
+app/dashboard\billing\BillingSearchFilters.tsx:41: * Search + filter chips.
+app/dashboard\billing\BillingSearchFilters.tsx:45:export default function BillingSearchFilters({
+app/dashboard\billing\BillingSearchFilters.tsx:46:  search,
+app/dashboard\billing\BillingSearchFilters.tsx:47:  onSearchChange,
+app/dashboard\billing\BillingSearchFilters.tsx:64:}: BillingSearchFiltersProps) {
+app/dashboard\billing\BillingSearchFilters.tsx:116:      {/* Search row */}
+app/dashboard\billing\BillingSearchFilters.tsx:118:        <Search className="w-4 h-4 flex-shrink-0 text-faint" />
+app/dashboard\billing\BillingSearchFilters.tsx:121:          placeholder="Search clients..."
+app/dashboard\billing\BillingSearchFilters.tsx:122:          value={search}
+app/dashboard\billing\BillingSearchFilters.tsx:123:          onChange={(e) => onSearchChange(e.target.value)}
+app/dashboard\billing\BillingSearchFilters.tsx:125:        {search && (
+app/dashboard\billing\BillingSearchFilters.tsx:127:            onClick={() => onSearchChange("")}
+components\financial-year\FinancialYearTargetRows.tsx:100:                          if (!["ArrowLeft", "ArrowRight"].includes(event.key))
+components\financial-year\FinancialYearTargetRows.tsx:107:                            event.currentTarget.parentElement?.querySelectorAll(
+app/dashboard\billing\BillingStickyHeader.tsx:10: *   Row 4 — Search + filter chips  (always visible)
+app/dashboard\billing\BillingStickyHeader.tsx:12: * Because everything lives inside one card the search bar can never
+app/dashboard\billing\BillingStickyHeader.tsx:37:  Search,
+app/dashboard\billing\BillingStickyHeader.tsx:69:  // ── Search + filters ───────────────────────────────────────
+app/dashboard\billing\BillingStickyHeader.tsx:70:  search: string;
+app/dashboard\billing\BillingStickyHeader.tsx:71:  onSearchChange: (value: string) => void;
+app/dashboard\billing\BillingStickyHeader.tsx:90:  search,
+app/dashboard\billing\BillingStickyHeader.tsx:91:  onSearchChange,
+app/dashboard\billing\BillingStickyHeader.tsx:252:      {/* ── Row 4: Search + filter chips ─────────────────────────────────── */}
+app/dashboard\billing\BillingStickyHeader.tsx:255:          {/* Search row */}
+app/dashboard\billing\BillingStickyHeader.tsx:257:            <Search className="w-4 h-4 flex-shrink-0 text-faint" />
+app/dashboard\billing\BillingStickyHeader.tsx:260:              placeholder="Search by client name, ID, or status..."
+app/dashboard\billing\BillingStickyHeader.tsx:261:              value={search}
+app/dashboard\billing\BillingStickyHeader.tsx:262:              onChange={(e) => onSearchChange(e.target.value)}
+app/dashboard\billing\BillingStickyHeader.tsx:264:            {search && (
+app/dashboard\billing\BillingStickyHeader.tsx:266:                onClick={() => onSearchChange("")}
+app/dashboard\credit-transactions\page.tsx:14:import { Plus, Trash2, Recycle, Leaf, ChevronDown, Search, X } from "lucide-react";
+app/dashboard\credit-transactions\page.tsx:55:  const [search, setSearch] = useState("");
+app/dashboard\credit-transactions\page.tsx:91:        const params = new URLSearchParams({ financialYear, creditType });
+app/dashboard\credit-transactions\page.tsx:132:  const txUrl = `/api/credit-transactions?${new URLSearchParams({
+app/dashboard\credit-transactions\page.tsx:145:    if (!search.trim()) return transactions;
+app/dashboard\credit-transactions\page.tsx:146:    const query = search.toLowerCase();
+app/dashboard\credit-transactions\page.tsx:148:      clientName(tx.fromClientId).toLowerCase().includes(query) ||
+app/dashboard\credit-transactions\page.tsx:149:      clientName(tx.toClientId).toLowerCase().includes(query) ||
+app/dashboard\credit-transactions\page.tsx:150:      (tx.fromClientId || "").toLowerCase().includes(query) ||
+app/dashboard\credit-transactions\page.tsx:151:      (tx.toClientId || "").toLowerCase().includes(query) ||
+app/dashboard\credit-transactions\page.tsx:152:      (tx.notes || "").toLowerCase().includes(query) ||
+app/dashboard\credit-transactions\page.tsx:153:      (tx.creditType || "").toLowerCase().includes(query) ||
+app/dashboard\credit-transactions\page.tsx:154:      formatDate(tx.date).toLowerCase().includes(query)
+app/dashboard\credit-transactions\page.tsx:156:  }, [transactions, search, clientName]);
+app/dashboard\credit-transactions\page.tsx:303:        <Search className="w-4 h-4 text-faint flex-shrink-0 ml-1" />
+app/dashboard\credit-transactions\page.tsx:306:          placeholder="Search by client name, ID, type, or date…"
+app/dashboard\credit-transactions\page.tsx:307:          value={search}
+app/dashboard\credit-transactions\page.tsx:308:          onChange={(e) => setSearch(e.target.value)}
+app/dashboard\credit-transactions\page.tsx:310:        {search && (
+app/dashboard\credit-transactions\page.tsx:311:          <button onClick={() => setSearch("")} className="p-1 text-faint hover:text-default rounded transition-colors">
+app/dashboard\credit-transactions\page.tsx:335:          <EmptyState message={`No results for "${search}"`} description="Try a different search term" />
+app/dashboard\credit-transactions\page.tsx:401:          <EmptyState message={`No results for "${search}"`} description="Try a different search term" />
+app/dashboard\clients\page.tsx:7:import { usePathname, useRouter, useSearchParams } from "next/navigation";
+app/dashboard\clients\page.tsx:31:  Search,
+app/dashboard\clients\page.tsx:252:function SearchField({
+app/dashboard\clients\page.tsx:257:  placeholder = "Search clients, contacts, GST or ID",
+app/dashboard\clients\page.tsx:271:      className="clients-premium-search"
+app/dashboard\clients\page.tsx:276:      <Search className="h-[17px] w-[17px] shrink-0" />
+app/dashboard\clients\page.tsx:287:          className="clients-search-clear"
+app/dashboard\clients\page.tsx:289:          aria-label="Clear search"
+app/dashboard\clients\page.tsx:529:  clearSearch,
+app/dashboard\clients\page.tsx:544:  onSearchInputChange,
+app/dashboard\clients\page.tsx:546:  searchInput,
+app/dashboard\clients\page.tsx:556:  clearSearch: () => void;
+app/dashboard\clients\page.tsx:571:  onSearchInputChange: (value: string) => void;
+app/dashboard\clients\page.tsx:573:  searchInput: string;
+app/dashboard\clients\page.tsx:595:  const expandedSearchWidth = Math.min(680, Math.max(360, headerWidth * 0.5));
+app/dashboard\clients\page.tsx:596:  const compactSearchWidth = Math.min(
+app/dashboard\clients\page.tsx:600:  const compactSearchLeft = narrowDesktop ? 160 : 182;
+app/dashboard\clients\page.tsx:608:  const searchTop = useInterpolatedPx(morphProgress, narrowDesktop ? 86 : 92, 13);
+app/dashboard\clients\page.tsx:609:  const searchWidth = useInterpolatedPx(morphProgress, expandedSearchWidth, compactSearchWidth);
+app/dashboard\clients\page.tsx:610:  const searchTranslateX = useInterpolatedPx(morphProgress, -expandedSearchWidth / 2, compactSearchLeft - compactHeaderWidth / 2);
+app/dashboard\clients\page.tsx:611:  const searchHeight = useInterpolatedPx(morphProgress, 52, 44);
+app/dashboard\clients\page.tsx:612:  const searchRadius = useInterpolatedPx(morphProgress, 20, 24);
+app/dashboard\clients\page.tsx:626:    "--clients-morph-search-top": searchTop,
+app/dashboard\clients\page.tsx:627:    "--clients-morph-search-width": searchWidth,
+app/dashboard\clients\page.tsx:628:    "--clients-morph-search-x": searchTranslateX,
+app/dashboard\clients\page.tsx:629:    "--clients-morph-search-height": searchHeight,
+app/dashboard\clients\page.tsx:630:    "--clients-morph-search-radius": searchRadius,
+app/dashboard\clients\page.tsx:685:        <div className="clients-header-search-slot">
+app/dashboard\clients\page.tsx:686:          <SearchField
+app/dashboard\clients\page.tsx:688:            id="clients-header-search"
+app/dashboard\clients\page.tsx:689:            value={searchInput}
+app/dashboard\clients\page.tsx:690:            onChange={onSearchInputChange}
+app/dashboard\clients\page.tsx:691:            onClear={clearSearch}
+app/dashboard\clients\page.tsx:731:        <SearchField
+app/dashboard\clients\page.tsx:732:          id="clients-dock-search"
+app/dashboard\clients\page.tsx:733:          value={searchInput}
+app/dashboard\clients\page.tsx:734:          onChange={onSearchInputChange}
+app/dashboard\clients\page.tsx:735:          onClear={clearSearch}
+app/dashboard\clients\page.tsx:736:          placeholder="Search"
+app/dashboard\clients\page.tsx:1026:  const searchParams = useSearchParams();
+app/dashboard\clients\page.tsx:1027:  const initialSearch = searchParams.get("search") || "";
+app/dashboard\clients\page.tsx:1028:  const initialCategory = searchParams.get("category") || "all";
+app/dashboard\clients\page.tsx:1029:  const initialState = searchParams.get("state") || "all";
+app/dashboard\clients\page.tsx:1030:  const initialRegisteredThisFy = searchParams.get("registeredThisFy") === "1";
+app/dashboard\clients\page.tsx:1035:  const [searchInput, setSearchInput] = useState(initialSearch);
+app/dashboard\clients\page.tsx:1036:  const [search, setSearch] = useState(initialSearch);
+app/dashboard\clients\page.tsx:1038:    const t = setTimeout(() => setSearch(searchInput), 300);
+app/dashboard\clients\page.tsx:1040:  }, [searchInput]);
+app/dashboard\clients\page.tsx:1235:  const queryParams = useMemo(() => {
+app/dashboard\clients\page.tsx:1236:    const params = new URLSearchParams();
+app/dashboard\clients\page.tsx:1237:    if (search) params.set("search", search);
+app/dashboard\clients\page.tsx:1245:  }, [categoryFilter, financialYear, registeredThisFyFilter, search, stateFilter]);
+app/dashboard\clients\page.tsx:1248:    const params = new URLSearchParams(searchParams.toString());
+app/dashboard\clients\page.tsx:1249:    if (search) params.set("search", search); else params.delete("search");
+app/dashboard\clients\page.tsx:1255:    const nextQuery = params.toString();
+app/dashboard\clients\page.tsx:1256:    const currentQuery = searchParams.toString();
+app/dashboard\clients\page.tsx:1257:    if (nextQuery !== currentQuery) {
+app/dashboard\clients\page.tsx:1258:      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+app/dashboard\clients\page.tsx:1260:  }, [categoryFilter, pathname, registeredThisFyFilter, router, search, searchParams, stateFilter]);
+app/dashboard\clients\page.tsx:1286:    const params = new URLSearchParams(queryParams);
+app/dashboard\clients\page.tsx:1293:  }, [directorySessionScope, queryParams, sessionStatus]);
+app/dashboard\clients\page.tsx:1465:  const clearSearch = useCallback(() => {
+app/dashboard\clients\page.tsx:1466:    setSearchInput("");
+app/dashboard\clients\page.tsx:1467:    setSearch("");
+app/dashboard\clients\page.tsx:1522:          !search &&
+app/dashboard\clients\page.tsx:1592:    setSearchInput("");
+app/dashboard\clients\page.tsx:1593:    setSearch("");
+app/dashboard\clients\page.tsx:1624:  const isFiltered = Boolean(search || searchInput || categoryFilter !== "all" || stateFilter !== "all" || registeredThisFyFilter);
+app/dashboard\clients\page.tsx:1680:          clearSearch={clearSearch}
+app/dashboard\clients\page.tsx:1695:          onSearchInputChange={setSearchInput}
+app/dashboard\clients\page.tsx:1697:          searchInput={searchInput}
+app/dashboard\clients\page.tsx:1748:              <span>{isFiltered ? "Try adjusting your search or filters." : "Add your first client to begin."}</span>
+components\financial-year\FinancialYearModal.tsx:79:          ?.querySelector<HTMLButtonElement>("[data-fy-keep]")
+components\financial-year\FinancialYearModal.tsx:83:          ?.querySelector<HTMLButtonElement>("[data-fy-import-merge]")
+components\financial-year\FinancialYearModal.tsx:97:        ?.querySelector<HTMLButtonElement>("[data-fy-import]")
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:31:  Search,
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:116:    const mobileQuery = window.matchMedia("(max-width: 767px)");
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:119:      if (!mobileQuery.matches) {
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:177:    mobileQuery.addEventListener("change", measure);
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:181:      mobileQuery.removeEventListener("change", measure);
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:562:    const mediaQuery = window.matchMedia("(max-width: 767px)");
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:563:    const syncBreakpoint = () => setIsMobileHeader(mediaQuery.matches);
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:566:    mediaQuery.addEventListener("change", syncBreakpoint);
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:567:    return () => mediaQuery.removeEventListener("change", syncBreakpoint);
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:759:    const mediaQuery = window.matchMedia("(max-width: 767px)");
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:764:      setIsMobile(mediaQuery.matches);
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:769:    mediaQuery.addEventListener("change", syncBreakpoint);
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:772:      mediaQuery.removeEventListener("change", syncBreakpoint);
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1623:  const [search, setSearch] = useState("");
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1625:    const query = search.trim().toLowerCase();
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1626:    if (!query) return documents;
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1627:    return documents.filter((document) => document.documentName.toLowerCase().includes(query));
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1628:  }, [documents, search]);
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1696:              <div className="client-profile-search">
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1697:                <Search className="h-4 w-4" />
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1699:                  value={search}
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1700:                  onChange={(event) => setSearch(event.target.value)}
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1701:                  placeholder="Search documents"
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1747:                  <p className="col-span-full py-6 text-center text-sm text-faint">No documents match this search.</p>
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1825:      if (availableUploadYears.includes(current)) return current;
+app/dashboard\clients\[clientId]\ClientProfilePremiumSections.tsx:1826:      if (availableUploadYears.includes(selectedFy)) return selectedFy;
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:195:  actionSearch?: string;
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:380:    const suggestedEmails = allEmails.filter((email) => !selectedEmails.includes(email));
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:578:    const btn = el.querySelector<HTMLElement>(`[data-filter-option="${String(optionId)}"]`);
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:741:export function PersonSearch({
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:771:    const query = value.trim();
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:774:        const response = await fetch(`/api/persons?search=${encodeURIComponent(query)}`);
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:794:        placeholder="Type name to search or create..."
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:870:      ? normalizedSelected.includes(previousNormalized)
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:928:      selectedPhones: entry.selectedPhones.includes(normalizedValue)
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:940:      selectedEmails: entry.selectedEmails.includes(normalizedValue)
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:1115:            <PersonSearch
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:1149:              const isActive = entry.selectedPhones.includes(normalizePhoneValue(phone));
+app/dashboard\clients\[clientId]\ClientProfileSupport.tsx:1207:              const isActive = entry.selectedEmails.includes(normalizeEmailValue(email));
+components\ui\FYTabBar.tsx:936:    const btn = track.querySelector<HTMLElement>(`[data-fy="${value}"]`);
+components\ui\FYTabBar.tsx:964:    const btn = el.querySelector<HTMLElement>(`[data-fy="${year}"]`);
+app/dashboard\contacts\page.tsx:13:import { Plus, Search, Pencil, Trash2, ChevronDown, ChevronUp, Building2, Phone, X, Users } from "lucide-react";
+app/dashboard\contacts\page.tsx:28:  const [searchInput, setSearchInput] = useState("");
+app/dashboard\contacts\page.tsx:29:  const [search, setSearch] = useState("");
+app/dashboard\contacts\page.tsx:31:    const t = setTimeout(() => setSearch(searchInput), 300);
+app/dashboard\contacts\page.tsx:33:  }, [searchInput]);
+app/dashboard\contacts\page.tsx:42:  const personsUrl = `/api/persons?limit=all${search ? `&search=${encodeURIComponent(search)}` : ""}`;
+app/dashboard\contacts\page.tsx:47:    `/api/contacts?withCompanies=true${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+app/dashboard\contacts\page.tsx:58:  const hasSearch = Boolean(search.trim());
+app/dashboard\contacts\page.tsx:124:          <Search className="w-4 h-4 text-faint flex-shrink-0" />
+app/dashboard\contacts\page.tsx:125:          <input className="input-field !border-0 !ring-0 flex-1" placeholder="Search by name, phone, or email..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+app/dashboard\contacts\page.tsx:134:            {hasSearch && (
+app/dashboard\contacts\page.tsx:149:          {hasSearch && (
+app/dashboard\billing\BillingSummaryStats.tsx:6: * and BillingSearchFilters (sticky, top: ~[FY bar height]).
+app/dashboard\billing\BillingSummaryStats.tsx:29:   *  offset the billing list and prevent it sliding under the search bar
+app/dashboard\email-history\page.tsx:7:import { Trash2, RefreshCw, Inbox, ChevronDown, Search } from "lucide-react";
+app/dashboard\email-history\page.tsx:47:  const [search, setSearch]             = useState("");
+app/dashboard\email-history\page.tsx:87:      const params = new URLSearchParams({ all: "true" });
+app/dashboard\email-history\page.tsx:96:    if (!search.trim()) return logs;
+app/dashboard\email-history\page.tsx:97:    const q = search.toLowerCase();
+app/dashboard\email-history\page.tsx:100:        l.subject.toLowerCase().includes(q) ||
+app/dashboard\email-history\page.tsx:101:        l.clientName?.toLowerCase().includes(q) ||
+app/dashboard\email-history\page.tsx:102:        l.to.some((e) => e.toLowerCase().includes(q)) ||
+app/dashboard\email-history\page.tsx:103:        l.financialYear?.toLowerCase().includes(q)
+app/dashboard\email-history\page.tsx:105:  }, [logs, search]);
+app/dashboard\email-history\page.tsx:162:      {/* Search bar */}
+app/dashboard\email-history\page.tsx:164:        <Search className="w-4 h-4 text-faint flex-shrink-0 ml-1" />
+app/dashboard\email-history\page.tsx:167:          placeholder="Search by subject, client, recipient, or FY…"
+app/dashboard\email-history\page.tsx:168:          value={search}
+app/dashboard\email-history\page.tsx:169:          onChange={(e) => setSearch(e.target.value)}
+app/dashboard\email-history\page.tsx:171:        {search && (
+app/dashboard\email-history\page.tsx:172:          <button onClick={() => setSearch("")} className="text-xs text-faint hover:text-default px-2 py-0.5 rounded transition-colors">
+app/dashboard\cpcb-uploads\upload-records\page.tsx:13:import { Plus, Search, X, Trash2, ChevronDown, LayoutList, Table2 } from "lucide-react";
+app/dashboard\cpcb-uploads\upload-records\page.tsx:124:  const [search, setSearch] = useState("");
+app/dashboard\cpcb-uploads\upload-records\page.tsx:125:  const [clientQuery, setClientQuery] = useState("");
+app/dashboard\cpcb-uploads\upload-records\page.tsx:160:    const query = clientQuery.trim().toLowerCase();
+app/dashboard\cpcb-uploads\upload-records\page.tsx:161:    const matches = query
+app/dashboard\cpcb-uploads\upload-records\page.tsx:163:          client.companyName.toLowerCase().includes(query) ||
+app/dashboard\cpcb-uploads\upload-records\page.tsx:164:          client.clientId.toLowerCase().includes(query)
+app/dashboard\cpcb-uploads\upload-records\page.tsx:168:  }, [clients, clientQuery]);
+app/dashboard\cpcb-uploads\upload-records\page.tsx:189:    if (!search.trim()) return uploads;
+app/dashboard\cpcb-uploads\upload-records\page.tsx:190:    const query = search.toLowerCase();
+app/dashboard\cpcb-uploads\upload-records\page.tsx:192:      clientName(upload.clientId).toLowerCase().includes(query) ||
+app/dashboard\cpcb-uploads\upload-records\page.tsx:193:      upload.clientId.toLowerCase().includes(query) ||
+app/dashboard\cpcb-uploads\upload-records\page.tsx:194:      uploadTypeLabel(upload.uploadType).toLowerCase().includes(query)
+app/dashboard\cpcb-uploads\upload-records\page.tsx:196:  }, [uploads, search, clientName]);
+app/dashboard\cpcb-uploads\upload-records\page.tsx:235:    setClientQuery("");
+app/dashboard\cpcb-uploads\upload-records\page.tsx:298:        <Search className="w-4 h-4 text-faint flex-shrink-0 ml-1" />
+app/dashboard\cpcb-uploads\upload-records\page.tsx:301:          placeholder="Search by client name, ID, sale, or purchase..."
+app/dashboard\cpcb-uploads\upload-records\page.tsx:302:          value={search}
+app/dashboard\cpcb-uploads\upload-records\page.tsx:303:          onChange={(e) => setSearch(e.target.value)}
+app/dashboard\cpcb-uploads\upload-records\page.tsx:305:        {search && (
+app/dashboard\cpcb-uploads\upload-records\page.tsx:306:          <button onClick={() => setSearch("")} className="p-1 text-faint hover:text-default rounded transition-colors">
+app/dashboard\cpcb-uploads\upload-records\page.tsx:349:              message={search.trim() ? `No upload summary results for "${search}"` : "No upload records for this FY"}
+app/dashboard\cpcb-uploads\upload-records\page.tsx:448:                            No results for &quot;{search}&quot;
+app/dashboard\cpcb-uploads\upload-records\page.tsx:488:                  <EmptyState message={`No results for "${search}"`} description="Try a different search term" />
+app/dashboard\cpcb-uploads\upload-records\page.tsx:559:                <p className="text-xs text-muted mt-0.5">Search by company name or client ID.</p>
+app/dashboard\cpcb-uploads\upload-records\page.tsx:572:                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+app/dashboard\cpcb-uploads\upload-records\page.tsx:575:                    placeholder="Type to search clients..."
+app/dashboard\cpcb-uploads\upload-records\page.tsx:576:                    value={clientQuery}
+app/dashboard\cpcb-uploads\upload-records\page.tsx:578:                      setClientQuery(e.target.value);
+app/dashboard\cpcb-uploads\upload-records\page.tsx:586:                    aria-invalid={!form.clientId && clientQuery.trim().length > 0}
+app/dashboard\cpcb-uploads\upload-records\page.tsx:589:                  {clientQuery && (
+app/dashboard\cpcb-uploads\upload-records\page.tsx:594:                        setClientQuery("");
+app/dashboard\cpcb-uploads\upload-records\page.tsx:615:                            setClientQuery(client.companyName);
+app/dashboard\cpcb-uploads\upload-records\page.tsx:629:                {!form.clientId && clientQuery.trim().length > 0 && (
+app/dashboard\clients\[clientId]\page.tsx:550:    const params = new URLSearchParams({
+app/dashboard\clients\[clientId]\page.tsx:609:    const params = new URLSearchParams({
+app/dashboard\clients\[clientId]\page.tsx:967:    const profileHeader = document.querySelector<HTMLElement>(".client-profile-header");
+app/dashboard\clients\[clientId]\page.tsx:1672:        if (response.status === 409 && message.toLowerCase().includes("already")) {
+app/dashboard\clients\[clientId]\page.tsx:1941:      else if (trigger) Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+app/dashboard\clients\[clientId]\page.tsx:2238:      const query = new URLSearchParams();
+app/dashboard\clients\[clientId]\page.tsx:2239:      if (activity.recordType) query.set("type", activity.recordType);
+app/dashboard\clients\[clientId]\page.tsx:2240:      if (activity.actionSearch) query.set("search", activity.actionSearch);
+app/dashboard\clients\[clientId]\page.tsx:2241:      router.push(`/dashboard/trash${query.toString() ? `?${query.toString()}` : ""}`);
+app/dashboard\clients\[clientId]\page.tsx:2472:      if (field.applicableCategories?.length && !field.applicableCategories.includes(client.category)) return false;
+app/dashboard\clients\[clientId]\page.tsx:2477:    !group.applicableCategories?.length || group.applicableCategories.includes(client.category)
+app/dashboard\clients\[clientId]\page.tsx:3243:      kinds.includes(item.kind) && (!item.financialYear || item.financialYear === selectedFy)
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:14:import { Plus, Search, X, Trash2, ChevronDown, Pencil, Eye, LayoutList, Table2 } from "lucide-react";
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:353:  const [search, setSearch] = useState("");
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:354:  const [debouncedSearch, setDebouncedSearch] = useState("");
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:373:  const trimmedDebouncedSearch = debouncedSearch.trim();
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:374:  const encodedSearch = encodeURIComponent(trimmedDebouncedSearch);
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:375:  const coverageUrl = `/api/invoices/coverage?fy=${encodeURIComponent(fy)}${trimmedDebouncedSearch ? `&search=${encodedSearch}` : ""}`;
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:376:  const entriesEnabled = activeView === "entries" || Boolean(selectedClientId) || Boolean(trimmedDebouncedSearch);
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:379:    : `/api/invoices?fy=${encodeURIComponent(fy)}${trimmedDebouncedSearch ? `&search=${encodedSearch}` : ""}`;
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:392:  const showEntriesPanel = activeView === "entries" || Boolean(trimmedDebouncedSearch);
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:410:      setDebouncedSearch(search);
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:414:  }, [search]);
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:416:  const updateSearch = (value: string) => {
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:417:    setSearch(value);
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:506:        <Search className="w-4 h-4 text-faint flex-shrink-0 ml-1" />
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:509:          placeholder="Search by client name or ID..."
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:510:          value={search}
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:511:          onChange={(e) => updateSearch(e.target.value)}
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:513:        {search && (
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:514:          <button onClick={() => updateSearch("")} className="p-1 text-faint hover:text-default rounded transition-colors">
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:563:            message={search.trim() ? `No coverage results for "${search}"` : "No coverage yet"}
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:784:                  : trimmedDebouncedSearch
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:785:                    ? "Raw invoice tracking records matching the current client search"
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:804:                message={trimmedDebouncedSearch ? `No entries for "${debouncedSearch}"` : "No invoice tracking records for this FY"}
+app/dashboard\cpcb-uploads\invoice-tracking\page.tsx:820:              <EmptyState message={trimmedDebouncedSearch ? `No entries for "${debouncedSearch}"` : "No invoice tracking records for this FY"} />
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:10:  Search,
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:138:  query,
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:144:  query: string;
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:149:    const normalisedQuery = query.trim().toLowerCase();
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:152:      const matchesQuery =
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:153:        !normalisedQuery ||
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:154:        row.clientName.toLowerCase().includes(normalisedQuery) ||
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:155:        row.clientId.toLowerCase().includes(normalisedQuery);
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:156:      return matchesCategory && matchesQuery;
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:163:  }, [activeMetric, category, query, rows, sortKey]);
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:411:    const button = track.querySelector<HTMLElement>(`[data-metric="${activeGroup}-${activeMetric}"]`);
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:751:  const [query, setQuery] = useState("");
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:754:  const drawerRows = useDrawerRows({ activeMetric, category, query, rows, sortKey });
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:758:    setQuery("");
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:808:                  <Search className="h-4 w-4 shrink-0 text-faint" />
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:810:                    value={query}
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:811:                    onChange={(event) => setQuery(event.target.value)}
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:812:                    placeholder="Search client or ID..."
+app/dashboard\financial-year\FinancialYearInsightsModal.tsx:852:                    <p className="mt-1 text-xs text-muted">Adjust search or category filters.</p>
+app/dashboard\settings\SettingsSidebar.tsx:3:import { CalendarDays, UserPlus, LayoutList, Search, X } from "lucide-react";
+app/dashboard\settings\SettingsSidebar.tsx:5:import { useSettingsSearch, STATIC_SECTIONS, type SearchResult } from "./SettingsSearchContext";
+app/dashboard\settings\SettingsSidebar.tsx:78:  const { users } = useSettingsSearch();
+app/dashboard\settings\SettingsSidebar.tsx:79:  const [search, setSearch] = useState("");
+app/dashboard\settings\SettingsSidebar.tsx:101:  // Build search results from query
+app/dashboard\settings\SettingsSidebar.tsx:102:  const results: SearchResult[] = search.trim().length < 1 ? [] : (() => {
+app/dashboard\settings\SettingsSidebar.tsx:103:    const q = search.toLowerCase().trim();
+app/dashboard\settings\SettingsSidebar.tsx:104:    const matched: SearchResult[] = [];
+app/dashboard\settings\SettingsSidebar.tsx:108:      if (s.label.toLowerCase().includes(q) || s.sublabel?.toLowerCase().includes(q)) {
+app/dashboard\settings\SettingsSidebar.tsx:116:        u.name.toLowerCase().includes(q) ||
+app/dashboard\settings\SettingsSidebar.tsx:117:        u.email.toLowerCase().includes(q) ||
+app/dashboard\settings\SettingsSidebar.tsx:118:        u.loginId.toLowerCase().includes(q)
+app/dashboard\settings\SettingsSidebar.tsx:135:  useEffect(() => { setHighlightedIdx(0); }, [search]);
+app/dashboard\settings\SettingsSidebar.tsx:148:  const selectResult = useCallback((result: SearchResult) => {
+app/dashboard\settings\SettingsSidebar.tsx:150:    setSearch("");
+app/dashboard\settings\SettingsSidebar.tsx:160:    if (e.key === "Escape")    { setShowDropdown(false); setSearch(""); inputRef.current?.blur(); }
+app/dashboard\settings\SettingsSidebar.tsx:208:  const filteredTabs = search.trim()
+app/dashboard\settings\SettingsSidebar.tsx:209:    ? SETTINGS_TABS.filter((t) => t.label.toLowerCase().includes(search.toLowerCase()))
+app/dashboard\settings\SettingsSidebar.tsx:215:      {/* Search bar */}
+app/dashboard\settings\SettingsSidebar.tsx:221:          <Search className="flex-shrink-0 text-faint" style={{ width: "14px", height: "14px", opacity: 0.7 }} />
+app/dashboard\settings\SettingsSidebar.tsx:225:            placeholder="Search settings"
+app/dashboard\settings\SettingsSidebar.tsx:226:            value={search}
+app/dashboard\settings\SettingsSidebar.tsx:227:            onChange={(e) => { setSearch(e.target.value); setShowDropdown(true); }}
+app/dashboard\settings\SettingsSidebar.tsx:230:            className="flex-1 bg-transparent text-[13px] text-default focus:outline-none settings-search"
+app/dashboard\settings\SettingsSidebar.tsx:234:          {search && (
+app/dashboard\settings\SettingsSidebar.tsx:237:              onClick={() => { setSearch(""); setShowDropdown(false); inputRef.current?.focus(); }}
+app/dashboard\settings\SettingsSidebar.tsx:247:        {showDropdown && search.trim().length > 0 && (
+app/dashboard\settings\SettingsSidebar.tsx:261:                <p className="text-[13px] text-faint">No results for &quot;{search}&quot;</p>
+app/dashboard\settings\SettingsSidebar.tsx:378:  result: SearchResult;
+components\ui\DeviceBrandIcon.tsx:80:  if (["macOS", "iOS", "iPadOS", "iPhone", "iPad"].includes(device.os)) {
+components\client-trackers\WorkflowTemplateWorkspace.tsx:24:    const content = workspace.current?.querySelector<HTMLElement>(`.workflow-template-${field} .tracker-rich-text-content`);
+components\client-trackers\WorkflowTemplateWorkspace.tsx:31:    previous.querySelectorAll<HTMLElement>("[contenteditable], [id], [role], [tabindex]").forEach(node => {
+components\client-trackers\WorkflowTemplateWorkspace.tsx:46:    if (!reduced && !wasEditing.current && !workspace.current?.querySelector(".tracker-rich-text:focus")) {
+app/dashboard\settings\SettingsShell.tsx:3:import { usePathname, useRouter, useSearchParams } from "next/navigation";
+app/dashboard\settings\SettingsShell.tsx:6:import { SettingsSearchProvider } from "./SettingsSearchContext";
+app/dashboard\settings\SettingsShell.tsx:19:  const searchParams = useSearchParams();
+app/dashboard\settings\SettingsShell.tsx:20:  const tabParam = searchParams.get("tab");
+app/dashboard\settings\SettingsShell.tsx:71:      const params = new URLSearchParams(searchParams.toString());
+app/dashboard\settings\SettingsShell.tsx:100:    const params = new URLSearchParams(searchParams.toString());
+app/dashboard\settings\SettingsShell.tsx:112:    <SettingsSearchProvider>
+app/dashboard\settings\SettingsShell.tsx:330:    </SettingsSearchProvider>
+app/dashboard\financial-year\financialYearInsights.ts:145:  return (CAT_IDS as readonly string[]).includes(categoryId);
+app/dashboard\billing\BulkReminderModal.tsx:144:      if (["completed", "failed", "cancelled"].includes(data.status)) {
+app/dashboard\billing\BulkReminderModal.tsx:240:    const done = ["completed", "failed", "cancelled"].includes(job.status);
+app/dashboard\financial-year\page.tsx:13:import { Plus, Pencil, Trash2, BarChart2, ChevronDown, Search, X, Recycle, Leaf } from "lucide-react";
+app/dashboard\financial-year\page.tsx:36:  const [search, setSearch] = useState("");
+app/dashboard\financial-year\page.tsx:49:    if (!search.trim()) return true;
+app/dashboard\financial-year\page.tsx:50:    const q = search.toLowerCase();
+app/dashboard\financial-year\page.tsx:56:      clientName.toLowerCase().includes(q) ||
+app/dashboard\financial-year\page.tsx:57:      rec.clientId.toLowerCase().includes(q) ||
+app/dashboard\financial-year\page.tsx:58:      category.toLowerCase().includes(q)
+app/dashboard\financial-year\page.tsx:60:  }), [clientMap, records, search]);
+app/dashboard\financial-year\page.tsx:75:    const params = new URLSearchParams(window.location.search);
+app/dashboard\financial-year\page.tsx:94:    setSearch(linkedClientId);
+app/dashboard\financial-year\page.tsx:199:      {/* Search */}
+app/dashboard\financial-year\page.tsx:202:          <Search className="w-4 h-4 text-faint flex-shrink-0" />
+app/dashboard\financial-year\page.tsx:205:            placeholder="Search by client name, ID or category..."
+app/dashboard\financial-year\page.tsx:206:            value={search}
+app/dashboard\financial-year\page.tsx:207:            onChange={(e) => setSearch(e.target.value)}
+app/dashboard\financial-year\page.tsx:210:          {search && (
+app/dashboard\financial-year\page.tsx:211:            <button onClick={() => setSearch("")} className="text-faint hover:text-default transition-colors flex-shrink-0">
+app/dashboard\financial-year\page.tsx:233:          <EmptyState message={search ? `No results for "${search}"` : "No records for this FY"} />
+app/dashboard\financial-year\page.tsx:355:          <EmptyState message={search ? `No results for "${search}"` : "No records for this FY"} />
+app/dashboard\settings\SettingsSearchContext.tsx:4:export type SearchResult = {
+app/dashboard\settings\SettingsSearchContext.tsx:14:type SettingsSearchContextType = {
+app/dashboard\settings\SettingsSearchContext.tsx:19:const SettingsSearchContext = createContext<SettingsSearchContextType>({
+app/dashboard\settings\SettingsSearchContext.tsx:24:export function SettingsSearchProvider({ children }: { children: ReactNode }) {
+app/dashboard\settings\SettingsSearchContext.tsx:27:    <SettingsSearchContext.Provider value={{ users, setUsers }}>
+app/dashboard\settings\SettingsSearchContext.tsx:29:    </SettingsSearchContext.Provider>
+app/dashboard\settings\SettingsSearchContext.tsx:33:export function useSettingsSearch() {
+app/dashboard\settings\SettingsSearchContext.tsx:34:  return useContext(SettingsSearchContext);
+app/dashboard\settings\SettingsSearchContext.tsx:37:// Static searchable sections per tab
+app/dashboard\settings\SettingsSearchContext.tsx:38:export const STATIC_SECTIONS: Omit<SearchResult, "id">[] = [
+components\client-trackers\WorkflowStepNavigation.tsx:375:    const header = editor?.querySelector<HTMLElement>(".tracker-email-sticky-header");
+components\client-trackers\WorkflowStepNavigation.tsx:376:    const footer = editor?.closest(".tracker-email-modal")?.querySelector<HTMLElement>(".tracker-email-footer");
+components\client-trackers\WorkflowStepNavigation.tsx:383:      const stepper = header.querySelector<HTMLElement>(".fluid-step-navigation");
+components\ui\LiquidGlassDropdown.tsx:179:      const scroller = conditionStyle ? menu?.querySelector<HTMLElement>(".condition-select-options") : menu;
+components\ui\LiquidGlassDropdown.tsx:192:    if (!open && ["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
+components\ui\LiquidGlassDropdown.tsx:203:    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+app/dashboard\billing\helpers.ts:96:    const sug = Array.from(new Set((contact.allEmails || []).filter((e) => e && !sel.includes(e))));
+components\ui\Modal.tsx:74:    const getFocusable = () => Array.from(el.querySelectorAll<HTMLElement>(
+components\client-trackers\WorkflowSendRuleComposer.tsx:87:          const needsValue = !["is_empty", "is_not_empty"].includes(condition.operator);
+app/dashboard\billing\page.tsx:3:import { useSearchParams } from "next/navigation";
+app/dashboard\billing\page.tsx:16:import BillingSearchFilters from "./BillingSearchFilters";
+app/dashboard\billing\page.tsx:48:  const searchParams = useSearchParams();
+app/dashboard\billing\page.tsx:68:  const [search, setSearch] = useState("");
+app/dashboard\billing\page.tsx:75:    const linkedFinancialYear = searchParams.get("fy");
+app/dashboard\billing\page.tsx:76:    const linkedClientId = searchParams.get("clientId");
+app/dashboard\billing\page.tsx:80:    if (linkedClientId) setSearch(linkedClientId);
+app/dashboard\billing\page.tsx:82:  }, [searchParams, setFy]);
+app/dashboard\billing\page.tsx:123:  const searchMatchedBillings = useMemo(() => {
+app/dashboard\billing\page.tsx:124:    const q = search.trim().toLowerCase();
+app/dashboard\billing\page.tsx:128:      return name.includes(q) ||
+app/dashboard\billing\page.tsx:129:        billing.clientId.toLowerCase().includes(q) ||
+app/dashboard\billing\page.tsx:130:        billing.paymentStatus.toLowerCase().includes(q) ||
+app/dashboard\billing\page.tsx:131:        (billing.billTitle || "").toLowerCase().includes(q);
+app/dashboard\billing\page.tsx:133:  }, [billings, clientName, search]);
+app/dashboard\billing\page.tsx:137:      ? searchMatchedBillings
+app/dashboard\billing\page.tsx:138:      : searchMatchedBillings.filter((billing) => (billing.billType || "annual_return") === billTypeFilter)
+app/dashboard\billing\page.tsx:139:  ), [billTypeFilter, searchMatchedBillings]);
+app/dashboard\billing\page.tsx:190:    all: searchMatchedBillings.length,
+app/dashboard\billing\page.tsx:191:    annual_return: searchMatchedBillings.filter((billing) => (billing.billType || "annual_return") === "annual_return").length,
+app/dashboard\billing\page.tsx:192:    general: searchMatchedBillings.filter((billing) => billing.billType === "general").length,
+app/dashboard\billing\page.tsx:193:  }), [searchMatchedBillings]);
+app/dashboard\billing\page.tsx:227:    const q = search.trim().toLowerCase();
+app/dashboard\billing\page.tsx:231:        .some((p) => [p.paymentMode, p.referenceNumber, p.notes].some((v) => (v || "").toLowerCase().includes(q)));
+app/dashboard\billing\page.tsx:232:      return row.clientName.toLowerCase().includes(q) || row.clientId.toLowerCase().includes(q) || paymentText;
+app/dashboard\billing\page.tsx:234:  }, [advanceClientRows, search]);
+app/dashboard\billing\page.tsx:376:    searchBarStickyTop,
+app/dashboard\billing\page.tsx:386:  const searchStickyTop = isMobile ? Math.max(topControlsHeight, 100) : topControlsHeight;
+app/dashboard\billing\page.tsx:418:          {/*    Visually sits freely between FY bar and search bar.           */}
+app/dashboard\billing\page.tsx:430:          {/* ── 3. Search + filters — sticky below FY bar (~88px from top) ── */}
+app/dashboard\billing\page.tsx:432:          <BillingSearchFilters
+app/dashboard\billing\page.tsx:433:            search={search}
+app/dashboard\billing\page.tsx:434:            onSearchChange={setSearch}
+app/dashboard\billing\page.tsx:446:            stickyTop={searchStickyTop}
+app/dashboard\billing\page.tsx:447:            stickyTopOffset={isMobile ? undefined : searchBarStickyTop}
+app/dashboard\billing\page.tsx:493:          search={search}
+app/dashboard\billing\page.tsx:494:          onSearchChange={setSearch}
+components\client-trackers\WorkflowMessagesWorkspace.tsx:40:    return `${field?.label || "Removed column"} ${operator}${["is_empty", "is_not_empty"].includes(condition.operator) ? "" : ` ${String(condition.value ?? "…") || "…"}`}`;
+app/dashboard\settings\CustomFieldsPanel.tsx:40:  searchable: false,
+app/dashboard\settings\CustomFieldsPanel.tsx:509:    const rowEls = grid.querySelectorAll<HTMLElement>(".honeycomb-row");
+app/dashboard\settings\CustomFieldsPanel.tsx:613:      const iconEl = el.querySelector<HTMLElement>(".honeycomb-icon");
+app/dashboard\settings\CustomFieldsPanel.tsx:626:      const tooltipEl = el.querySelector<HTMLElement>(".honeycomb-tooltip");
+app/dashboard\settings\CustomFieldsPanel.tsx:1031:        searchable: editingField.searchable,
+app/dashboard\settings\CustomFieldsPanel.tsx:1117:      applicableCategories: current.applicableCategories.includes(category)
+app/dashboard\settings\CustomFieldsPanel.tsx:1301:                    searchable: v === "password" || v === "checkbox" ? false : c.searchable,
+app/dashboard\settings\CustomFieldsPanel.tsx:1401:                    className={`apple-category-chip ${form.applicableCategories.includes(category) ? "selected" : ""}`}
+app/dashboard\settings\CustomFieldsPanel.tsx:1405:                    {form.applicableCategories.includes(category) && <Check size={11} />}
+app/dashboard\settings\CustomFieldsPanel.tsx:1413:                checked={form.searchable}
+app/dashboard\settings\CustomFieldsPanel.tsx:1414:                onChange={(v) => setForm((c) => ({ ...c, searchable: v }))}
+app/dashboard\settings\CustomFieldsPanel.tsx:1415:                label="Searchable"
+app/dashboard\settings\CustomFieldsPanel.tsx:1416:                subtitle={form.type === "password" || form.type === "checkbox" ? "Unavailable for secure and checkbox fields" : "Allow the client search box to match this value"}
+app/dashboard\settings\CustomFieldsPanel.tsx:1671:    applicableCategories: current.applicableCategories.includes(category)
+app/dashboard\settings\CustomFieldsPanel.tsx:1753:            <div className="apple-category-grid">{CATEGORIES.map((category) => <button key={category} type="button" className={`apple-category-chip ${form.applicableCategories.includes(category) ? "selected" : ""}`} onClick={() => toggleCategory(category)}>{category}{form.applicableCategories.includes(category) && <Check size={11} />}</button>)}</div>
+app/dashboard\settings\CustomFieldsPanel.tsx:2138:    field.searchable ? "Searchable" : null,
+app/dashboard\reports\CustomExportModal.tsx:5:import { ChevronDown, Download, Search, Save, X } from "lucide-react";
+app/dashboard\reports\CustomExportModal.tsx:35:  clientSearch: string;
+app/dashboard\reports\CustomExportModal.tsx:50:  hasClientQuery: boolean;
+app/dashboard\reports\CustomExportModal.tsx:62:  setClientSearch: React.Dispatch<React.SetStateAction<string>>;
+app/dashboard\reports\CustomExportModal.tsx:92:  clientSearch,
+app/dashboard\reports\CustomExportModal.tsx:101:  hasClientQuery,
+app/dashboard\reports\CustomExportModal.tsx:113:  setClientSearch,
+app/dashboard\reports\CustomExportModal.tsx:130:  const [fieldQuery, setFieldQuery] = useState("");
+app/dashboard\reports\CustomExportModal.tsx:146:  const resetFilters = () => { setCustomCategories([]); setSelectedClientIds([]); setClientSearch(""); setDateFrom(""); setDateTo(""); setIncludeOnlyNonEmpty(false); setSortBy("companyName"); };
+app/dashboard\reports\CustomExportModal.tsx:155:          <label className="report-client-search !max-w-none mb-4"><Search size={16} /><input value={fieldQuery} onChange={(event) => setFieldQuery(event.target.value)} placeholder="Find a field…" aria-label="Search export fields" /></label>
+app/dashboard\reports\CustomExportModal.tsx:157:            const visible = fields.filter((field) => `${field.label} ${field.description} ${group}`.toLowerCase().includes(fieldQuery.toLowerCase()));
+app/dashboard\reports\CustomExportModal.tsx:159:            const open = Boolean(fieldQuery) || expandedFieldGroups.includes(group);
+app/dashboard\reports\CustomExportModal.tsx:160:            return <section key={group} className="report-export-field-group"><button onClick={() => toggleFieldGroup(group)} aria-expanded={open} className="report-export-group-title"><span>{group}<small>{fields.filter((field) => customFields.includes(field.id)).length} / {fields.length}</small></span><motion.span animate={{ rotate: open ? 0 : -90 }} transition={reduceMotion ? { duration: 0.01 } : reportControlSpring}><ChevronDown size={15} /></motion.span></button><AnimatePresence initial={false}>{open && <motion.div className="report-export-field-options overflow-hidden" initial={reduceMotion ? false : { opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0 }} transition={reduceMotion ? { duration: 0.01 } : reportSoftSpring}>{visible.map((field) => <label key={field.id}><input type="checkbox" checked={customFields.includes(field.id)} onChange={() => toggleCustomField(field.id)} /><span><strong>{field.label}</strong><small>{field.description}</small></span></label>)}</motion.div>}</AnimatePresence></section>;
+app/dashboard\reports\CustomExportModal.tsx:162:          {fieldQuery && !allCustomExportFields.some((field) => `${field.label} ${field.description} ${field.group}`.toLowerCase().includes(fieldQuery.toLowerCase())) && <p className="py-8 text-center text-sm text-muted">No fields match your search.</p>}
+app/dashboard\reports\CustomExportModal.tsx:168:        <fieldset className="report-export-filter-section"><legend>Client categories</legend><div className="flex flex-wrap gap-2">{CUSTOM_EXPORT_CLIENT_CATEGORIES.map((category) => <button key={category} aria-pressed={customCategories.includes(category)} className={`report-category-choice ${customCategories.includes(category) ? "is-active" : ""}`} onClick={() => toggleCategory(category)}>{category}</button>)}</div></fieldset>
+app/dashboard\reports\CustomExportModal.tsx:169:        <div className="report-export-filter-section"><h4>Specific clients</h4><p className="report-caption">Search and select clients to limit the workbook. Search alone does not filter the export.</p><label className="report-client-search !max-w-none mt-3"><Search size={16} /><input value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder="Search by client name…" aria-label="Find export clients" /></label>
+app/dashboard\reports\CustomExportModal.tsx:171:          {clientsLoadError ? <p className="mt-3 text-sm text-rose-600">{clientsLoadError}<button onClick={() => setClientLoadAttempt((attempt) => attempt + 1)} className="ml-2 underline">Retry</button></p> : clientsLoading ? <p className="mt-3 text-sm text-muted" role="status">Finding clients…</p> : hasClientQuery && <div className="mt-3 max-h-48 overflow-y-auto rounded-xl border border-base">{filteredClientOptions.length ? filteredClientOptions.map((client) => <label key={client.clientId} className="flex items-center gap-3 border-b border-base p-3 last:border-0"><input type="checkbox" checked={selectedClientSet.has(client.clientId)} onChange={() => toggleClientSelection(client.clientId)} /><span className="text-xs text-default">{client.companyName}<small className="block text-muted">{client.clientId} · {client.category}</small></span></label>) : <p className="p-4 text-sm text-muted">No clients match that search.</p>}</div>}
+app/dashboard\reports\page.tsx:62:  const [clientSearch, setClientSearch] = useState("");
+app/dashboard\reports\page.tsx:121:  const hasClientQuery = clientSearch.trim().length > 0 || customCategories.length > 0;
+app/dashboard\reports\page.tsx:128:    clientSearch === "" &&
+app/dashboard\reports\page.tsx:155:      .filter(([, fields]) => fields.some((field) => customFields.includes(field.id as CustomClientExportField)))
+app/dashboard\reports\page.tsx:171:    if (!hasClientQuery) {
+app/dashboard\reports\page.tsx:184:        const params = new URLSearchParams({ summary: "1" });
+app/dashboard\reports\page.tsx:185:        const trimmedSearch = clientSearch.trim();
+app/dashboard\reports\page.tsx:186:        if (trimmedSearch) {
+app/dashboard\reports\page.tsx:187:          params.set("search", trimmedSearch);
+app/dashboard\reports\page.tsx:221:  }, [clientLoadAttempt, clientSearch, customCategories, customExportOpen, hasClientQuery]);
+app/dashboard\reports\page.tsx:291:    if (downloading.includes(type)) return;
+app/dashboard\reports\page.tsx:322:      current.includes(field)
+app/dashboard\reports\page.tsx:382:      current.includes(category)
+app/dashboard\reports\page.tsx:390:      current.includes(clientId)
+app/dashboard\reports\page.tsx:462:      if (current.includes(groupName)) {
+app/dashboard\reports\page.tsx:504:        clientSearch={clientSearch}
+app/dashboard\reports\page.tsx:519:        hasClientQuery={hasClientQuery}
+app/dashboard\reports\page.tsx:531:        setClientSearch={setClientSearch}
+app/dashboard\settings\AccessPanel.tsx:6:import { useSettingsSearch } from "./SettingsSearchContext";
+app/dashboard\settings\AccessPanel.tsx:626:  const { setUsers } = useSettingsSearch();
+app/dashboard\quotations\page.tsx:5:import { usePathname, useRouter, useSearchParams } from "next/navigation";
+app/dashboard\quotations\page.tsx:8:  Plus, Search, Filter, FileText, MoreHorizontal,
+app/dashboard\quotations\page.tsx:48:  const searchParams = useSearchParams();
+app/dashboard\quotations\page.tsx:49:  const initialSearch = searchParams.get("search") || "";
+app/dashboard\quotations\page.tsx:50:  const initialStatus = searchParams.get("status") || "all";
+app/dashboard\quotations\page.tsx:51:  const initialFinancialYear = searchParams.get("financialYear") || "all";
+app/dashboard\quotations\page.tsx:52:  const listReturnTo = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+app/dashboard\quotations\page.tsx:56:  const [search, setSearch] = useState(initialSearch);
+app/dashboard\quotations\page.tsx:57:  const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
+app/dashboard\quotations\page.tsx:75:  // Debounce search input
+app/dashboard\quotations\page.tsx:77:    const timer = setTimeout(() => setDebouncedSearch(search), 350);
+app/dashboard\quotations\page.tsx:79:  }, [search]);
+app/dashboard\quotations\page.tsx:82:    const params = new URLSearchParams(searchParams.toString());
+app/dashboard\quotations\page.tsx:83:    if (debouncedSearch) params.set("search", debouncedSearch); else params.delete("search");
+app/dashboard\quotations\page.tsx:86:    const nextQuery = params.toString();
+app/dashboard\quotations\page.tsx:87:    const currentQuery = searchParams.toString();
+app/dashboard\quotations\page.tsx:88:    if (nextQuery !== currentQuery) {
+app/dashboard\quotations\page.tsx:89:      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+app/dashboard\quotations\page.tsx:91:  }, [debouncedSearch, fyFilter, pathname, router, searchParams, statusFilter]);
+app/dashboard\quotations\page.tsx:94:    const params = new URLSearchParams();
+app/dashboard\quotations\page.tsx:108:        const res = await fetch(`/api/clients?summary=1&search=${encodeURIComponent(newClientName)}`);
+app/dashboard\quotations\page.tsx:131:      const params = new URLSearchParams();
+app/dashboard\quotations\page.tsx:134:      if (debouncedSearch) params.set("search", debouncedSearch);
+app/dashboard\quotations\page.tsx:140:  }, [statusFilter, fyFilter, debouncedSearch]);
+app/dashboard\quotations\page.tsx:221:  const isFiltered = statusFilter !== "all" || fyFilter !== "all" || Boolean(debouncedSearch);
+app/dashboard\quotations\page.tsx:227:    setSearch("");
+app/dashboard\quotations\page.tsx:228:    setDebouncedSearch("");
+app/dashboard\quotations\page.tsx:259:            { label: statusFilter !== "all" || fyFilter !== "all" || debouncedSearch ? "Showing" : "Total", value: total, icon: Inbox, color: "text-default" },
+app/dashboard\quotations\page.tsx:373:          {/* Search */}
+app/dashboard\quotations\page.tsx:375:            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-faint" />
+app/dashboard\quotations\page.tsx:379:              placeholder="Search client, authorized person, quote no..."
+app/dashboard\quotations\page.tsx:380:              aria-label="Search quotations by client, authorized person, quotation number, financial year, or status"
+app/dashboard\quotations\page.tsx:381:              value={search}
+app/dashboard\quotations\page.tsx:382:              onChange={e => setSearch(e.target.value)}
+components\client-trackers\WorkflowDeliveryWorkspace.tsx:75:            const direction = ["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : ["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 0;
+components\client-trackers\WorkflowDeliveryWorkspace.tsx:76:            if (!direction && !["Home", "End"].includes(event.key)) return;
+components\client-trackers\WorkflowDeliveryWorkspace.tsx:78:            chooseSpacing(next); event.currentTarget.querySelector<HTMLButtonElement>(`[data-gap="${next}"]`)?.focus({ preventScroll: true });
+components\client-trackers\WorkflowDeliveryWorkspace.tsx:140:          const Icon = document?.mimeType?.includes("pdf") ? FileText : document?.mimeType?.match(/spreadsheet|excel/) ? FileSpreadsheet : File;
+components\client-trackers\WorkflowDeliveryWorkspace.tsx:142:          const needsValue = !["is_empty", "is_not_empty"].includes(condition?.operator || "equals"), open = expandedFile === attachment.id;
+components\client-trackers\WorkflowCombinationPreview.tsx:61:    const parents = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')).filter(parent => parent !== dialog);
+components\client-trackers\WorkflowCombinationPreview.tsx:65:    const frame = requestAnimationFrame(() => (dialog.querySelector<HTMLElement>('[role="option"][aria-selected="true"]') || dialog.querySelector<HTMLElement>("button") || dialog).focus({ preventScroll: true }));
+components\client-trackers\WorkflowCombinationPreview.tsx:70:      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled), [href], [tabindex="0"]')).filter(node => node.tabIndex >= 0 && node.getClientRects().length && !node.closest("[inert]"));
+components\client-trackers\WorkflowCombinationPreview.tsx:179:  container.querySelectorAll<HTMLElement>("[data-email-variable]").forEach(atom => {
+components\client-trackers\TrackerRichTextEditor.tsx:10:import { Bold, Italic, Underline, List, ListOrdered, Link2, RemoveFormatting, Undo2, Redo2, Plus, Search, X } from "lucide-react";
+components\client-trackers\TrackerRichTextEditor.tsx:42:  const [variablesOpen, setVariablesOpen] = useState(false), [variableSearch, setVariableSearch] = useState("");
+components\client-trackers\TrackerRichTextEditor.tsx:96:          if (singleLine && !input.isComposing && ["insertParagraph", "insertLineBreak"].includes(input.inputType)) { event.preventDefault(); return true; }
+components\client-trackers\TrackerRichTextEditor.tsx:183:    palette.showPopover(); position(); palette.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true });
+components\client-trackers\TrackerRichTextEditor.tsx:191:  const filteredVariables = variables.filter(variable => variable.label.toLocaleLowerCase().includes(variableSearch.trim().toLocaleLowerCase()));
+components\client-trackers\TrackerRichTextEditor.tsx:197:          onMouseDown={event => event.preventDefault()} onClick={() => format(command)} aria-label={name} aria-pressed={active.includes(command)} data-tooltip={mode ? undefined : name}>
+components\client-trackers\TrackerRichTextEditor.tsx:205:            rememberSelection(); setLinkOpen(false); setVariableSearch(""); setVariablesOpen(open => !open);
+components\client-trackers\TrackerRichTextEditor.tsx:216:        <label className="workflow-variable-search"><Search size={14} aria-hidden="true" />
+components\client-trackers\TrackerRichTextEditor.tsx:217:          <input type="search" aria-label="Search variables" placeholder="Search variables…" value={variableSearch} onChange={event => setVariableSearch(event.target.value)} /></label>
+app/dashboard\billing\useBillingScrollState.ts:176:  const searchBarStickyTop = useTransform(
+app/dashboard\billing\useBillingScrollState.ts:189:    searchBarStickyTop,
+components\client-trackers\create\BuilderControls.tsx:18:        const direction = ["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : ["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 0;
+app/dashboard\quotations\[id]\page.tsx:7:import { useRouter, useParams, useSearchParams } from "next/navigation";
+app/dashboard\quotations\[id]\page.tsx:15:  WalletCards, ArrowRight, ShieldCheck, Search, Link2, Recycle, Leaf
+app/dashboard\quotations\[id]\page.tsx:573:    const activeSegment = track.querySelector<HTMLElement>('[data-segment-active="true"]');
+app/dashboard\quotations\[id]\page.tsx:650:    const button = track.querySelector<HTMLElement>(`[data-quote-tab="${activeTab}"]`);
+app/dashboard\quotations\[id]\page.tsx:938:  wrapper.querySelectorAll("[data-email-variable]").forEach(element => {
+app/dashboard\quotations\[id]\page.tsx:1075:  wrapper.querySelectorAll("[data-email-variable]").forEach(element => {
+app/dashboard\quotations\[id]\page.tsx:1198:  const searchParams = useSearchParams();
+app/dashboard\quotations\[id]\page.tsx:1297:  const [linkClientSearch, setLinkClientSearch] = useState("");
+app/dashboard\quotations\[id]\page.tsx:1308:  const listReturnToRef = useRef(searchParams.get("returnTo"));
+app/dashboard\quotations\[id]\page.tsx:1702:        const query = linkClientSearch.trim();
+app/dashboard\quotations\[id]\page.tsx:1703:        const response = await fetch(`/api/clients${query ? `?search=${encodeURIComponent(query)}` : ""}`, { cache: "no-store" });
+app/dashboard\quotations\[id]\page.tsx:1715:    }, linkClientSearch ? 250 : 0);
+app/dashboard\quotations\[id]\page.tsx:1720:  }, [linkClientModalOpen, linkClientSearch]);
+app/dashboard\quotations\[id]\page.tsx:1730:        const res = await fetch(`/api/clients?summary=1&search=${encodeURIComponent(clientName)}`);
+app/dashboard\quotations\[id]\page.tsx:2098:    ? RESPONSE_ACTION_STATUSES.filter((status) => getAllowedQuotationTransitions(quotation.status).includes(status))
+app/dashboard\quotations\[id]\page.tsx:2159:      const params = new URLSearchParams();
+app/dashboard\quotations\[id]\page.tsx:2171:    if (!quotation || !getAllowedQuotationTransitions(quotation.status).includes(newStatus)) return;
+app/dashboard\quotations\[id]\page.tsx:2246:    setSelected(current => current.includes(email) ? current.filter(value => value !== email) : [...current, email]);
+app/dashboard\quotations\[id]\page.tsx:2297:      setLinkClientSearch("");
+app/dashboard\quotations\[id]\page.tsx:2568:      .filter(email => !toList.includes(email));
+app/dashboard\quotations\[id]\page.tsx:2650:    const action = searchParams.get("action");
+app/dashboard\quotations\[id]\page.tsx:2659:    // Clean query params so it doesn't trigger again on component updates or back-navigation
+app/dashboard\quotations\[id]\page.tsx:2660:    const cleanParams = new URLSearchParams(window.location.search);
+app/dashboard\quotations\[id]\page.tsx:2662:    const cleanQuery = cleanParams.toString();
+app/dashboard\quotations\[id]\page.tsx:2663:    window.history.replaceState({}, "", `${window.location.pathname}${cleanQuery ? `?${cleanQuery}` : ""}`);
+app/dashboard\quotations\[id]\page.tsx:2664:  }, [loading, quotation, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+app/dashboard\quotations\[id]\page.tsx:3527:                      const normalizedServiceQuery = item.description.trim().toLowerCase();
+app/dashboard\quotations\[id]\page.tsx:3528:                      const showAllServices = !normalizedServiceQuery
+app/dashboard\quotations\[id]\page.tsx:3529:                        || normalizedServiceQuery === "epr credit procurement"
+app/dashboard\quotations\[id]\page.tsx:3530:                        || STANDARD_SERVICES.some(service => service.description.toLowerCase() === normalizedServiceQuery);
+app/dashboard\quotations\[id]\page.tsx:3533:                        : STANDARD_SERVICES.filter(service => `${service.label} ${service.category} ${service.type}`.toLowerCase().includes(normalizedServiceQuery));
+app/dashboard\quotations\[id]\page.tsx:3565:                                <Search aria-hidden="true" className="pointer-events-none absolute right-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+app/dashboard\quotations\[id]\page.tsx:3641:                                  activeKey={MORE_TYPES.includes(item.type) ? "More" : item.type}
+app/dashboard\quotations\[id]\page.tsx:3642:                                  pillClassName={MORE_TYPES.includes(item.type) ? DEFAULT_TYPE_VISUAL.selected : getTypeVisual(item.type).selected}
+app/dashboard\quotations\[id]\page.tsx:3667:                                      data-segment-active={MORE_TYPES.includes(item.type) ? "true" : undefined}
+app/dashboard\quotations\[id]\page.tsx:3670:                                      className={`flex h-9 w-full items-center justify-between gap-1.5 rounded-xl border border-transparent py-0 pl-3 pr-2.5 text-left text-xs font-semibold outline-none transition-colors duration-200 focus:ring-4 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-50 sm:h-10 ${MORE_TYPES.includes(item.type) ? "text-default" : "text-muted hover:bg-white/70 hover:text-default dark:hover:bg-white/[0.07]"}`}
+app/dashboard\quotations\[id]\page.tsx:3674:                                        <span className="truncate">{MORE_TYPES.includes(item.type) ? item.type : "More"}</span>
+app/dashboard\quotations\[id]\page.tsx:4106:                        <label className={`cursor-pointer rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition duration-200 ${selectedToEmails.includes(option.email) ? "bg-brand-600 text-white shadow-sm shadow-brand-600/20" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"}`}>
+app/dashboard\quotations\[id]\page.tsx:4107:                          <input type="checkbox" checked={selectedToEmails.includes(option.email)} onChange={() => toggleContactEmail(option.email, "to")} className="sr-only" />
+app/dashboard\quotations\[id]\page.tsx:4110:                        <label className={`cursor-pointer rounded-full px-2.5 py-1 text-[9px] font-bold uppercase leading-none transition duration-200 ${selectedCcEmails.includes(option.email) ? "bg-muted text-white shadow-sm dark:bg-white/[0.22]" : "bg-[#f1f1f3] text-faint hover:text-muted dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"}`}>
+app/dashboard\quotations\[id]\page.tsx:4111:                          <input type="checkbox" checked={selectedCcEmails.includes(option.email)} onChange={() => toggleContactEmail(option.email, "cc")} className="sr-only" />
+app/dashboard\quotations\[id]\page.tsx:4327:              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+app/dashboard\quotations\[id]\page.tsx:4330:                value={linkClientSearch}
+app/dashboard\quotations\[id]\page.tsx:4332:                  setLinkClientSearch(event.target.value);
+app/dashboard\quotations\[id]\page.tsx:4336:                placeholder="Search by company name or client ID"
+app/dashboard\quotations\[id]\page.tsx:4342:                <div className="rounded-[20px] border border-black/[0.06] bg-[#f5f5f7]/70 px-4 py-6 text-center text-sm text-muted dark:border-white/[0.08] dark:bg-white/[0.04]">Searching saved clients…</div>
+components\client-trackers\create\ClientDetailsPicker.tsx:15:      {CLIENT_TRACKER_DETAIL_OPTIONS.map(option => <button type="button" key={option.key} className={`create-chip ${value.includes(option.key) ? "is-selected" : ""}`}
+components\client-trackers\create\ClientDetailsPicker.tsx:16:        aria-pressed={value.includes(option.key)} onClick={() => onChange(value.includes(option.key) ? value.filter(key => key !== option.key) : [...value, option.key])}>
+app/dashboard\reports\ReportSelect.tsx:5:import { Check, ChevronDown, Search, X } from "lucide-react";
+app/dashboard\reports\ReportSelect.tsx:22:  searchable?: boolean;
+app/dashboard\reports\ReportSelect.tsx:37:  searchable = false,
+app/dashboard\reports\ReportSelect.tsx:45:  const searchRef = useRef<HTMLInputElement>(null);
+app/dashboard\reports\ReportSelect.tsx:48:  const [search, setSearch] = useState("");
+app/dashboard\reports\ReportSelect.tsx:54:    const query = search.trim().toLowerCase();
+app/dashboard\reports\ReportSelect.tsx:55:    if (!query) return options;
+app/dashboard\reports\ReportSelect.tsx:56:    return options.filter((option) => `${option.label} ${option.group || ""}`.toLowerCase().includes(query));
+app/dashboard\reports\ReportSelect.tsx:57:  }, [options, search]);
+app/dashboard\reports\ReportSelect.tsx:70:    const preferredHeight = searchable ? 340 : 300;
+app/dashboard\reports\ReportSelect.tsx:80:  }, [searchable]);
+app/dashboard\reports\ReportSelect.tsx:106:    window.setTimeout(() => (searchable ? searchRef.current : menuRef.current)?.focus(), 0);
+app/dashboard\reports\ReportSelect.tsx:113:  }, [open, positionMenu, searchable]);
+app/dashboard\reports\ReportSelect.tsx:118:    setSearch("");
+app/dashboard\reports\ReportSelect.tsx:129:    if (!["ArrowDown", "ArrowUp", "Home", "End", "Enter", " "].includes(event.key)) return;
+app/dashboard\reports\ReportSelect.tsx:165:        if (["ArrowDown", "Enter", " "].includes(event.key) && !open) {
+app/dashboard\reports\ReportSelect.tsx:192:      {searchable && <div className="report-select-search-wrap">
+app/dashboard\reports\ReportSelect.tsx:193:        <Search className="h-3.5 w-3.5 shrink-0 text-faint" />
+app/dashboard\reports\ReportSelect.tsx:194:        <input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${ariaLabel.toLowerCase()}`} aria-label={`Search ${ariaLabel.toLowerCase()}`} className="min-w-0 flex-1 bg-transparent text-xs text-default outline-none placeholder:text-faint" />
+app/dashboard\reports\ReportSelect.tsx:195:        {search && <button type="button" onClick={() => setSearch("")} aria-label="Clear search" className="rounded-full p-1 text-faint hover:bg-surface"><X className="h-3 w-3" /></button>}
+app/dashboard\reports\ReportSelect.tsx:197:      <div className="report-select-options" style={{ maxHeight: searchable ? position.maxHeight - 58 : position.maxHeight }}>
+components\client-trackers\configure\TrackerClientManager.tsx:4:import { Check, Search } from "lucide-react";
+components\client-trackers\configure\TrackerClientManager.tsx:12:  const [query, setQuery] = useState(""), [filter, setFilter] = useState("all"), [limit, setLimit] = useState(100);
+components\client-trackers\configure\TrackerClientManager.tsx:15:    const term = query.trim().toLowerCase();
+components\client-trackers\configure\TrackerClientManager.tsx:17:      && (!term || `${client.companyName} ${client.clientId} ${client.category}`.toLowerCase().includes(term)));
+components\client-trackers\configure\TrackerClientManager.tsx:18:  }, [clients, query, filter, selected]);
+components\client-trackers\configure\TrackerClientManager.tsx:25:      <label className="create-client-search"><Search size={14} /><input aria-label="Search tracker clients" value={query} placeholder="Search name, client ID, or category"
+components\client-trackers\configure\TrackerClientManager.tsx:26:        onChange={event => { setQuery(event.target.value); setLimit(100); }} /></label>
+components\client-trackers\create\TrackerAudienceSection.tsx:4:import { Check, Search } from "lucide-react";
+components\client-trackers\create\TrackerAudienceSection.tsx:15:  const [query, setQuery] = useState(""), [limit, setLimit] = useState(100);
+components\client-trackers\create\TrackerAudienceSection.tsx:18:    const term = query.trim().toLowerCase();
+components\client-trackers\create\TrackerAudienceSection.tsx:19:    return clients.filter(client => !term || `${client.companyName} ${client.clientId} ${client.category}`.toLowerCase().includes(term));
+components\client-trackers\create\TrackerAudienceSection.tsx:20:  }, [clients, query]);
+components\client-trackers\create\TrackerAudienceSection.tsx:28:  const toggleCategory = (category: ClientTrackerCategory) => patch({ selectedCategories: form.selectedCategories.includes(category)
+components\client-trackers\create\TrackerAudienceSection.tsx:42:        {CLIENT_TRACKER_CATEGORIES.map(category => <button type="button" key={category} aria-pressed={form.selectedCategories.includes(category)}
+components\client-trackers\create\TrackerAudienceSection.tsx:43:          onClick={() => toggleCategory(category)} className={`create-chip ${form.selectedCategories.includes(category) ? "is-selected" : ""}`}>
+components\client-trackers\create\TrackerAudienceSection.tsx:55:      <label className="create-client-search"><Search size={15} /><input aria-label="Search clients" placeholder="Search name, client ID, or category"
+components\client-trackers\create\TrackerAudienceSection.tsx:56:        value={query} onChange={event => { setQuery(event.target.value); setLimit(100); }} /></label>
+components\client-trackers\create\TrackerAudienceSection.tsx:63:        {!matching.length && <p className="create-picker-empty">{loading ? "Loading clients…" : clients.length ? "No clients match your search." : "No clients are currently available."}</p>}
+components\client-trackers\create\TrackerAudienceSection.tsx:66:      <p className="create-help">{form.selected.length} selected · Selections stay when you search.</p>
+app/dashboard\reports\ReportStudio.tsx:32:  Search,
+app/dashboard\reports\ReportStudio.tsx:182:  if (["number", "quantity"].includes(result.type)) return quantity(Number(result.value));
+app/dashboard\reports\ReportStudio.tsx:259:  sortBySelectorOrder(additions.filter((fieldId) => !next.includes(fieldId)), fields).forEach((fieldId) => {
+app/dashboard\reports\ReportStudio.tsx:269:  const primary = columns.includes("client.companyName") ? "client.companyName" : columns[0];
+app/dashboard\reports\ReportStudio.tsx:291:  const [clientQuery, setClientQuery] = useState("");
+app/dashboard\reports\ReportStudio.tsx:294:  const [fieldSearch, setFieldSearch] = useState("");
+app/dashboard\reports\ReportStudio.tsx:358:    setFrozenColumnIds((current) => current.filter((fieldId) => applied.columns.includes(fieldId)));
+app/dashboard\reports\ReportStudio.tsx:403:  useEffect(() => { setClientQuery(applied.search || ""); }, [applied.search]);
+app/dashboard\reports\ReportStudio.tsx:405:    if (clientQuery.trim() === (applied.search || "")) return;
+app/dashboard\reports\ReportStudio.tsx:407:      const search = clientQuery.trim();
+app/dashboard\reports\ReportStudio.tsx:408:      setApplied((current) => ({ ...current, search, page: 1 }));
+app/dashboard\reports\ReportStudio.tsx:409:      setDraft((current) => ({ ...current, search, page: 1 }));
+app/dashboard\reports\ReportStudio.tsx:412:  }, [clientQuery, applied.search]);
+app/dashboard\reports\ReportStudio.tsx:416:    const search = fieldSearch.trim().toLowerCase();
+app/dashboard\reports\ReportStudio.tsx:417:    const filtered = search
+app/dashboard\reports\ReportStudio.tsx:418:      ? availableFields.filter((definition) => `${definition.label} ${definition.description} ${definition.group}`.toLowerCase().includes(search))
+app/dashboard\reports\ReportStudio.tsx:423:  }, [availableFields, fieldSearch]);
+app/dashboard\reports\ReportStudio.tsx:452:  const detailedPreset = draft.columns.length === ACCEPTED_TARGET_DETAIL_COLUMNS.length && ACCEPTED_TARGET_DETAIL_COLUMNS.every((column) => draft.columns.includes(column));
+app/dashboard\reports\ReportStudio.tsx:453:  const compactPreset = draft.columns.length === ACCEPTED_TARGET_COMPACT_COLUMNS.length && ACCEPTED_TARGET_COMPACT_COLUMNS.every((column) => draft.columns.includes(column));
+app/dashboard\reports\ReportStudio.tsx:502:      const selected = current.columns.includes(fieldId);
+app/dashboard\reports\ReportStudio.tsx:599:    const metrics = current.metrics.includes(fieldId)
+app/dashboard\reports\ReportStudio.tsx:606:    const selected = draft.groupBy.includes(fieldId);
+app/dashboard\reports\ReportStudio.tsx:612:      const currentlySelected = current.groupBy.includes(fieldId);
+app/dashboard\reports\ReportStudio.tsx:715:      (requestedAnalysis.transform === "range" && ["number", "quantity", "currency", "percentage"].includes(requestedAnalysisField.type)) ||
+app/dashboard\reports\ReportStudio.tsx:845:      if (config.columns.includes(fieldId)) return config;
+app/dashboard\reports\ReportStudio.tsx:855:    updateTableConfig((config) => config.columns.includes(fieldId)
+app/dashboard\reports\ReportStudio.tsx:1058:            <label className="text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">Report on<span className="mt-1.5 block"><ReportSelect value={draft.source} onChange={(value) => changeSource(value as ReportStudioSource)} ariaLabel="Report source" searchable options={REPORT_STUDIO_SOURCES.map((source) => ({ value: source.id, label: source.label }))} buttonClassName="text-sm" /></span></label>
+app/dashboard\reports\ReportStudio.tsx:1069:            <div className="reports-sort-control text-xs"><SlidersHorizontal className="h-3.5 w-3.5" /><ReportSelect variant="bare" value={draft.sort[0]?.field || draft.columns[0]} onChange={(value) => setDraft((current) => ({ ...current, sort: [{ field: value, direction: current.sort[0]?.direction || "asc" }] }))} ariaLabel="Sort field" searchable options={availableFields.map((definition) => ({ value: definition.id, label: definition.shortLabel, group: definition.group }))} /><span className="reports-sort-divider" /><ReportSelect variant="bare" value={draft.sort[0]?.direction || "asc"} onChange={(value) => setDraft((current) => ({ ...current, sort: [{ field: current.sort[0]?.field || current.columns[0], direction: value as "asc" | "desc" }] }))} ariaLabel="Sort direction" options={[{ value: "asc", label: "Ascending" }, { value: "desc", label: "Descending" }]} /></div>
+app/dashboard\reports\ReportStudio.tsx:1080:        {panel === "columns" && <ColumnPanel groups={fieldGroups} selected={draft.columns} colors={draft.excelColumnColors || {}} search={fieldSearch} onSearch={setFieldSearch} onToggle={toggleColumn} onToggleGroup={toggleColumnGroup} onReorder={reorderDraftColumn} onColor={setExcelColumnColor} onGroupColor={setExcelGroupColor} />}
+app/dashboard\reports\ReportStudio.tsx:1088:      {!report && loading && <div className={`report-overview-skeleton ${["clients", "pibo-targets", "financial-years"].includes(applied.source) ? "with-target" : ""}`} aria-hidden="true"><div /><div /></div>}
+app/dashboard\reports\ReportStudio.tsx:1098:        <div className="report-table-controls"><label className="report-client-search"><Search size={16} /><input value={clientQuery} maxLength={120} onChange={(event) => setClientQuery(event.target.value)} placeholder="Search clients, ID or registration…" aria-label="Search all report clients" />{clientQuery && <button onClick={() => setClientQuery("")} aria-label="Clear client search"><X size={14} /></button>}</label>
+app/dashboard\reports\ReportStudio.tsx:1113:        {loading && !report ? <InitialReportSkeleton ready={ready} /> : error && !report ? <div className="p-10 text-center"><p className="text-sm text-muted">Your report could not be loaded. Your setup has been kept.</p><button onClick={() => void fetchReport(applied, true)} className="report-secondary-button mx-auto mt-4"><RefreshCw size={15} />Try again</button></div> : report && report.rows.length > 0 ? <StudioResult report={report} availableFields={fieldsForSource(report.config.source, customFields)} onUpdateAnalysis={updateAnalysis} onDrilldownAnalysis={drillIntoAnalysisBucket} frozenColumnIds={frozenColumnIds} onFrozenColumnsChange={setFrozenColumnIds} onRowClick={drillIntoRow} onReorderColumn={reorderTableColumn} onMoveColumn={moveTableColumn} onInsertColumn={insertTableColumn} onShowColumn={showTableColumn} onShowAllColumns={showAllTableColumns} onHideColumn={hideTableColumn} onSortColumn={sortTableColumn} onAddSort={addTableSort} onClearColumnSort={clearTableColumnSort} onClearAllSort={clearAllTableSort} onOpenColumnFilter={openTableColumnFilter} onClearColumnFilter={clearTableColumnFilter} onFilterCell={filterFromTableCell} /> : <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center"><span className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface text-faint"><Layers3 className="h-5 w-5" /></span><h3 className="font-semibold text-default">No clients match this report</h3><p className="mt-1 max-w-md text-sm leading-6 text-muted">Try a different search, clear a filter, or choose another financial year.</p><div className="mt-4 flex flex-wrap justify-center gap-2">{appliedConditions.length > 0 && <button type="button" onClick={showAllRecords} className="btn-primary h-9 px-4 text-xs"><Sparkles className="h-3.5 w-3.5" />Show all records</button>}<button type="button" onClick={() => setPanel("filters")} className="glass-btn h-9 text-xs"><Filter className="h-3.5 w-3.5" />Review filters</button></div></div>}
+app/dashboard\reports\ReportStudio.tsx:1174:              const isDownloading = downloading.includes(id);
+app/dashboard\reports\ReportStudio.tsx:1265:      const first = dialog?.querySelector<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])');
+app/dashboard\reports\ReportStudio.tsx:1275:      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'));
+app/dashboard\reports\ReportStudio.tsx:1421:function InspectorSearch({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
+app/dashboard\reports\ReportStudio.tsx:1422:  return <label className="reports-search-field">
+app/dashboard\reports\ReportStudio.tsx:1423:    <Search className="pointer-events-none h-4 w-4 shrink-0 text-faint" />
+app/dashboard\reports\ReportStudio.tsx:1426:    {value && <button type="button" onClick={() => onChange("")} aria-label="Clear search" className="rounded-full p-1 text-faint hover:bg-surface hover:text-default"><X className="h-3 w-3" /></button>}
+app/dashboard\reports\ReportStudio.tsx:1445:function ColumnPanel({ groups, selected, colors, search, onSearch, onToggle, onToggleGroup, onReorder, onColor, onGroupColor }: {
+app/dashboard\reports\ReportStudio.tsx:1449:  search: string;
+app/dashboard\reports\ReportStudio.tsx:1450:  onSearch: (value: string) => void;
+app/dashboard\reports\ReportStudio.tsx:1488:      <div className="mx-3.5 mb-3"><InspectorSearch value={search} onChange={onSearch} placeholder="Search fields, sections or descriptions" /></div>
+app/dashboard\reports\ReportStudio.tsx:1489:      <div className="report-inspector-library min-h-0 max-h-[calc(100dvh-310px)] flex-1 space-y-1 overflow-y-auto border-t border-base p-2">{groups.length === 0 ? <div className="rounded-xl border border-dashed border-base p-6 text-center text-xs text-muted">No fields match your search.</div> : groups.map(([group, fields]) => {
+app/dashboard\reports\ReportStudio.tsx:1491:        const selectedCount = fieldIds.filter((fieldId) => selected.includes(fieldId)).length;
+app/dashboard\reports\ReportStudio.tsx:1494:        const open = Boolean(search.trim()) || expandedGroups.has(group);
+app/dashboard\reports\ReportStudio.tsx:1501:            const active = selected.includes(definition.id);
+app/dashboard\reports\ReportStudio.tsx:1516:  const [search, setSearch] = useState("");
+app/dashboard\reports\ReportStudio.tsx:1518:  const filteredFields = fields.filter((definition) => `${definition.label} ${definition.description} ${definition.group}`.toLowerCase().includes(search.trim().toLowerCase()));
+app/dashboard\reports\ReportStudio.tsx:1527:    <div className={`mb-3 grid gap-2 ${view === "all" ? "sm:grid-cols-[auto_minmax(200px,1fr)] sm:items-center" : ""}`}><div className="flex w-fit rounded-xl bg-surface p-1 text-[10px] font-semibold"><button type="button" onClick={() => setView("selected")} className={`whitespace-nowrap rounded-lg px-2.5 py-1.5 ${view === "selected" ? "bg-card text-brand-600 shadow-sm" : "text-muted"}`}>Selected <span className="ml-1 text-faint">{selected.length}</span></button><button type="button" onClick={() => setView("all")} className={`whitespace-nowrap rounded-lg px-2.5 py-1.5 ${view === "all" ? "bg-card text-brand-600 shadow-sm" : "text-muted"}`}>All fields <span className="ml-1 text-faint">{fields.length}</span></button></div>{view === "all" && <InspectorSearch value={search} onChange={setSearch} placeholder="Search fields" />}</div>
+app/dashboard\reports\ReportStudio.tsx:1529:      const active = selected.includes(definition.id);
+app/dashboard\reports\ReportStudio.tsx:1609:  if (["number", "quantity", "currency", "percentage"].includes(definition.type)) return value === "" ? null : Number(value);
+app/dashboard\reports\ReportStudio.tsx:1651:  const inputType = ["number", "quantity", "currency", "percentage"].includes(definition.type) ? "number" : definition.type === "date" ? "date" : "text";
+app/dashboard\reports\ReportStudio.tsx:1654:    <ReportSelect value={condition.field} onChange={(value) => onField(condition, value)} ariaLabel="Filter field" searchable options={fields.map((entry) => ({ value: entry.id, label: entry.label, group: entry.group }))} buttonClassName="min-h-9 text-xs" />
+app/dashboard\reports\ReportStudio.tsx:1659:        ? <ReportSelect value={String(condition.value ?? "")} onChange={(value) => onUpdate(condition.id, { value: parseFilterInput(value, definition, condition.operator) })} ariaLabel="Filter value" searchable={definition.options.length > 8} options={definition.options.map((option) => ({ value: option, label: option }))} buttonClassName="min-h-9 text-xs" />
+app/dashboard\reports\ReportStudio.tsx:1823:  const [contextSearch, setContextSearch] = useState("");
+app/dashboard\reports\ReportStudio.tsx:1837:  const hiddenFields = useMemo(() => availableFields.filter((field) => !report.config.columns.includes(field.id)), [availableFields, report.config.columns]);
+app/dashboard\reports\ReportStudio.tsx:1839:    const search = contextSearch.trim().toLowerCase();
+app/dashboard\reports\ReportStudio.tsx:1840:    return search
+app/dashboard\reports\ReportStudio.tsx:1841:      ? hiddenFields.filter((field) => `${field.label} ${field.group} ${field.description}`.toLowerCase().includes(search))
+app/dashboard\reports\ReportStudio.tsx:1843:  }, [contextSearch, hiddenFields]);
+app/dashboard\reports\ReportStudio.tsx:1854:    setContextSearch("");
+app/dashboard\reports\ReportStudio.tsx:1859:    setContextSearch("");
+app/dashboard\reports\ReportStudio.tsx:1863:    const focusFrame = window.requestAnimationFrame(() => contextMenuRef.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus());
+app/dashboard\reports\ReportStudio.tsx:1867:      setContextSearch("");
+app/dashboard\reports\ReportStudio.tsx:1885:    setContextSearch("");
+app/dashboard\reports\ReportStudio.tsx:1892:      const menu = document.querySelector<HTMLElement>('[data-report-column-menu="true"]');
+app/dashboard\reports\ReportStudio.tsx:1926:    setContextSearch("");
+app/dashboard\reports\ReportStudio.tsx:1961:        const header = table.querySelector<HTMLElement>(`thead [data-column-id="${column.id}"]`);
+app/dashboard\reports\ReportStudio.tsx:1984:    const unique = report.columns.map((column) => column.id).filter((fieldId) => nextIds.includes(fieldId));
+app/dashboard\reports\ReportStudio.tsx:1988:        .filter((column) => unique.includes(column.id))
+app/dashboard\reports\ReportStudio.tsx:2308:    if (["number", "quantity", "currency"].includes(column.type)) return results.find((result) => result.id === "sum");
+app/dashboard\reports\ReportStudio.tsx:2352:        <tbody className="divide-y divide-base">{report.rows.map((row) => <tr key={row.id} tabIndex={0} aria-label={`${String(row.values["client.companyName"] || row.id)}. ${grouped ? "Open underlying clients" : "Explore client relationships"}`} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onRowClick(row); return; } if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); const column = displayedColumns[0]; if (!column) return; const rect = event.currentTarget.getBoundingClientRect(); setContextView("root"); setContextSearch(""); setContext({ x: rect.left + 36, y: rect.top + 30, column, row, value: row.values[column.id] ?? null }); } }} onClick={() => onRowClick(row)} className="cursor-pointer hover:bg-surface/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500" title={grouped ? "Open underlying clients" : "Explore client relationships"}>{displayedColumns.map((column) => {
+app/dashboard\reports\ReportStudio.tsx:2371:      {(contextView === "add-left" || contextView === "add-right" || contextView === "hidden") && <ContextFieldPicker fields={filteredHiddenFields} search={contextSearch} onSearch={setContextSearch} emptyLabel="No hidden columns match" onSelect={(fieldId) => runAndClose(() => contextView === "hidden" ? onShowColumn(fieldId) : onInsertColumn(context.column.id, fieldId, contextView === "add-left" ? "left" : "right"))} />}
+app/dashboard\reports\ReportStudio.tsx:2403:function ContextFieldPicker({ fields, search, onSearch, emptyLabel, onSelect }: { fields: ReportStudioFieldDefinition[]; search: string; onSearch: (value: string) => void; emptyLabel: string; onSelect: (fieldId: string) => void }) {
+app/dashboard\reports\ReportStudio.tsx:2404:  return <div><div className="sticky top-0 z-10 border-b border-base bg-card p-2"><label className="flex items-center gap-2 rounded-lg border border-base bg-surface px-2"><Search className="h-3.5 w-3.5 text-faint" /><input autoFocus value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search fields" className="h-8 min-w-0 flex-1 bg-transparent text-xs text-default outline-none" /></label></div><div className="max-h-72 overflow-y-auto py-1">{fields.length > 0 ? fields.map((field) => <button key={field.id} type="button" role="menuitem" onClick={() => onSelect(field.id)} title={field.description} className="block w-full px-3 py-2 text-left hover:bg-surface"><span className="block text-[9px] font-semibold uppercase tracking-[0.06em] text-faint">{field.group}</span><span className="mt-0.5 block text-xs font-medium text-default">{field.label}</span></button>) : <p className="px-3 py-5 text-center text-xs text-muted">{emptyLabel}</p>}</div></div>;
+app/dashboard\reports\ReportStudio.tsx:2416:    if (!metricFields.includes(metricField)) setMetricField(metricFields[0] || "");
+components\client-trackers\create\TrackerColumnEditor.tsx:17:    root.current?.querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]')?.focus({ preventScroll: true });
+components\client-trackers\create\TrackerColumnEditor.tsx:34:            const direction = ["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : ["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 0;
+components\client-trackers\create\TrackerColumnEditor.tsx:77:    {mode === "manual" && ["select", "multiSelect", "tags"].includes(field.type) && <div className="create-options">
+app/dashboard\reports\ReportStudioAnalysis.tsx:56:  if (["number", "quantity", "currency", "percentage"].includes(field.type)) options.push({ value: "range", label: "Numeric ranges" });
+app/dashboard\reports\ReportStudioAnalysis.tsx:90:        <label className="min-w-[240px] flex-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">Analyze field<span className="mt-1.5 block"><ReportSelect value={field.id} onChange={(value) => onChange({ field: value, transform: "presence" })} ariaLabel="Field to analyze" searchable options={availableFields.map((definition) => ({ value: definition.id, label: definition.label, group: definition.group }))} /></span></label>
+app/dashboard\reports\ReportStudioAnalysis.tsx:95:      <p className="mt-3 text-[11px] text-muted">Counting distinct clients after the report’s current search and filters. Select a chart segment or breakdown row to open those clients.</p>
+app/dashboard\reports\ReportStudioChart.tsx:112:  return PREFERRED_METRICS.find((fieldId) => metrics.includes(fieldId)) || metrics[0] || "";
+app/dashboard\reports\ReportStudioChart.tsx:212:    if (!metricFields.includes(metricField)) setMetricField(preferredMetric(metricFields));
+components\client-trackers\create\TrackerColumnsBuilder.tsx:84:      requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`#${field.uiId}-editor input`)?.focus({ preventScroll: false }));
+components\client-trackers\create\TrackerComputedEditor.tsx:58:        const needsValue = !["is_empty", "is_not_empty"].includes(condition.operator);
+components\client-trackers\create\TrackerLivePreview.tsx:28:    return ["select", "multiSelect", "tags", "status"].includes(column.type || "") ? "Select…" : "—";

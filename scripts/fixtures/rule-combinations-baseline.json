@@ -1,0 +1,62 @@
+{
+  "base": {
+    "sha256": "aa56ed683b0d22840bc1c973b57875bcf05aed30cc60ce06bfd7a17c6352d38d",
+    "count": 8,
+    "matched": 3,
+    "possibleCount": 8
+  },
+  "reversed": {
+    "sha256": "66cd82bfd52e8a67ac636e263e6c024ad65a6f204a1485e64793b77b550f75c1",
+    "count": 8,
+    "matched": 3,
+    "possibleCount": 8
+  },
+  "skip": {
+    "sha256": "171836645b728230639b166fd2d5bc4e8acba6907aefabaa9da66a0ebc233291",
+    "count": 8,
+    "matched": 1,
+    "possibleCount": 8
+  },
+  "none": {
+    "sha256": "a3948385eb449cf86c81981849a3d80e8e8b558f7b093002a63dd52b9e0ae56d",
+    "count": 4,
+    "matched": 0,
+    "possibleCount": 4
+  },
+  "all": {
+    "sha256": "b78b6c69f31813aa43bb1435720b056c4f68e7eb48896e303516046b31486e21",
+    "count": 2,
+    "matched": 2,
+    "possibleCount": 2
+  },
+  "many": {
+    "sha256": "b90c4d098815499b7e91c0bf0eadac69aa843931a2179fdabffb3018ea08292a",
+    "count": 32,
+    "matched": 31,
+    "possibleCount": 64
+  },
+  "legacy": {
+    "sha256": "b4679cea64a5cc897de6ac32071cc9f1d5981fb3bea875547d83ec850829847c",
+    "count": 2,
+    "matched": 1,
+    "possibleCount": 2
+  },
+  "points": {
+    "sha256": "b3018e28f35f2702a1f449f8d8510d0ace8d7911a777caffa68e4e9fbe3aac89",
+    "count": 2,
+    "matched": 1,
+    "possibleCount": 2
+  },
+  "statements": {
+    "sha256": "5c46930ee5f677d1e1304aec59525b408738e76115ab9ef31dd2f6e58f76ae38",
+    "count": 2,
+    "matched": 1,
+    "possibleCount": 2
+  },
+  "unsaved": {
+    "sha256": "02df9597d12e27063ebff3befde074e58fe66408c145ec64f43b155e0cb5a357",
+    "count": 8,
+    "matched": 3,
+    "possibleCount": 8
+  }
+}

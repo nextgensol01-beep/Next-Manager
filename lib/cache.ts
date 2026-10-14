@@ -1,3 +1,4 @@
+import { readJsonResponse } from "@/lib/http-response";
 /**
  * Module-level fetch cache.
  * Lives in JS memory — survives tab switches within a session.
@@ -11,6 +12,15 @@ interface Entry {
 
 export const store = new Map<string, Entry>();
 export const STALE_MS = 5 * 60 * 1000; // 5 minutes
+const inFlight = new Map<string, { token: object; promise: Promise<unknown> }>();
+let accountScope = "";
+
+/** Called by the session provider before descendants read shared cache data. */
+export function setCacheScope(scope: string) {
+  if (scope === accountScope) return;
+  accountScope = scope;
+  clearAll();
+}
 
 /** Returns cached data if fresh, otherwise fetches, stores and returns. */
 export async function cachedFetch<T>(url: string): Promise<T> {
@@ -18,11 +28,20 @@ export async function cachedFetch<T>(url: string): Promise<T> {
   if (hit && Date.now() - hit.at < STALE_MS) {
     return hit.data as T;
   }
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  store.set(url, { data, at: Date.now() });
-  return data as T;
+  const pending = inFlight.get(url);
+  if (pending) return pending.promise as Promise<T>;
+  const token = {};
+  const request = (async () => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await readJsonResponse(res);
+    // Invalidated/optimistically updated keys must not be repopulated by old reads.
+    if (inFlight.get(url)?.token === token) store.set(url, { data, at: Date.now() });
+    return data as T;
+  })();
+  inFlight.set(url, { token, promise: request });
+  try { return await request; }
+  finally { if (inFlight.get(url)?.token === token) inFlight.delete(url); }
 }
 
 /** Returns cached data synchronously if fresh, or null if not cached/stale. */
@@ -34,6 +53,7 @@ export function getCached<T>(url: string): T | null {
 
 /** Stores fresh data for a cache key. Useful for optimistic UI updates. */
 export function setCached<T>(url: string, data: T) {
+  inFlight.delete(url);
   store.set(url, { data, at: Date.now() });
 }
 
@@ -43,13 +63,18 @@ export function setCached<T>(url: string, data: T) {
  * The next cachedFetch call will re-fetch and re-populate.
  */
 export function invalidate(...prefixes: string[]) {
-  for (const prefix of prefixes) {
+  const affected = prefixes.includes("/api/clients")
+    ? [...prefixes, "/api/annual-return", "/api/invoices", "/api/quotations", "/api/email-log", "/api/reports"]
+    : prefixes;
+  for (const prefix of affected) {
     for (const key of store.keys()) {
       if (key.startsWith(prefix)) store.delete(key);
     }
+    for (const key of inFlight.keys()) if (key.startsWith(prefix)) inFlight.delete(key);
   }
 }
 
 export function clearAll() {
   store.clear();
+  inFlight.clear();
 }

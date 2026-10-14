@@ -1,4 +1,5 @@
 "use client";
+import { createSearchMatcher, clientSearchValues } from "@/lib/search/client-search";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion, useSpring, useTransform, useVelocity } from "framer-motion";
@@ -147,10 +148,12 @@ function useDrawerRows({
 }) {
   return useMemo(() => {
     const normalisedQuery = query.trim().toLowerCase();
+    const matchesClientValue = createSearchMatcher(query);
     const filtered = rows.filter((row) => {
       const matchesCategory = category === "all" || row.category === category;
       const matchesQuery =
         !normalisedQuery ||
+        (row.client && clientSearchValues(row.client).some(matchesClientValue)) ||
         row.clientName.toLowerCase().includes(normalisedQuery) ||
         row.clientId.toLowerCase().includes(normalisedQuery);
       return matchesCategory && matchesQuery;

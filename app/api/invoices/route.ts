@@ -1,9 +1,10 @@
+import { recordClientSearchStages } from "@/lib/server/client-search";
+import { MAX_SEARCH_LENGTH } from "@/lib/search/client-search";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import Invoice from "@/models/Invoice";
-import Client from "@/models/Client";
 import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
 import { recordActivityEvent } from "@/lib/server/activity-events";
 
@@ -42,18 +43,10 @@ export async function GET(req: NextRequest) {
     if (clientId) query.clientId = clientId;
     if (fy) query.financialYear = fy;
 
-    if (!clientId && search) {
-      const matchingClients = await Client.find({
-        $or: [
-          { clientId: { $regex: search, $options: "i" } },
-          { companyName: { $regex: search, $options: "i" } },
-        ],
-      }).select("clientId").lean() as Array<{ clientId?: string }>;
-      const matchingClientIds = matchingClients.map((client) => client.clientId).filter(Boolean);
-      query.clientId = { $in: matchingClientIds };
-    }
+    if (search.length > MAX_SEARCH_LENGTH) return NextResponse.json({ error: "Search is too long" }, { status: 400 });
+    const stages = await recordClientSearchStages(search, ["clientId"]);
 
-    const invoices = await Invoice.find(query).sort({ fromDate: -1 });
+    const invoices = await Invoice.aggregate([{ $match: query }, ...stages, { $sort: { fromDate: -1, _id: -1 } }]);
     return NextResponse.json(invoices);
   } catch (error) {
     console.error("GET /api/invoices:", error);

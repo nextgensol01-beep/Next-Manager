@@ -1,0 +1,853 @@
+{
+  "FIELD_TYPES": [
+    {
+      "id": "toggle",
+      "label": "Yes / No toggle"
+    },
+    {
+      "id": "select",
+      "label": "Dropdown"
+    },
+    {
+      "id": "text",
+      "label": "Short text"
+    },
+    {
+      "id": "longText",
+      "label": "Long text"
+    },
+    {
+      "id": "multiSelect",
+      "label": "Multi-select"
+    },
+    {
+      "id": "tags",
+      "label": "Tags"
+    },
+    {
+      "id": "number",
+      "label": "Number"
+    },
+    {
+      "id": "percentage",
+      "label": "Percentage"
+    },
+    {
+      "id": "quantity",
+      "label": "Quantity"
+    },
+    {
+      "id": "currency",
+      "label": "Currency"
+    },
+    {
+      "id": "progress",
+      "label": "Progress"
+    },
+    {
+      "id": "date",
+      "label": "Date"
+    }
+  ],
+  "TRACKER_STARTERS": [
+    {
+      "id": "blank",
+      "label": "Blank tracker",
+      "fields": []
+    },
+    {
+      "id": "follow-up",
+      "label": "Client follow-up worklist",
+      "fields": [
+        {
+          "key": "assignee",
+          "label": "Assignee",
+          "type": "text"
+        },
+        {
+          "key": "dueDate",
+          "label": "Due date",
+          "type": "date"
+        },
+        {
+          "key": "priority",
+          "label": "Priority",
+          "type": "select",
+          "options": [
+            "Low",
+            "Medium",
+            "High"
+          ],
+          "optionInput": "Low, Medium, High"
+        },
+        {
+          "key": "nextAction",
+          "label": "Next action",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "id": "cpcb",
+      "label": "CPCB invoice and upload follow-up",
+      "fields": [
+        {
+          "key": "purchaseInvoiceCollection",
+          "label": "Purchase invoices received",
+          "type": "toggle",
+          "dataLink": {
+            "source": "purchaseInvoices",
+            "display": "yesNo"
+          }
+        },
+        {
+          "key": "saleInvoiceCollection",
+          "label": "Sale invoices received",
+          "type": "toggle",
+          "dataLink": {
+            "source": "saleInvoices",
+            "display": "yesNo"
+          }
+        },
+        {
+          "key": "purchaseUpload",
+          "label": "Purchase uploaded on CPCB",
+          "type": "toggle",
+          "dataLink": {
+            "source": "purchaseUploads",
+            "display": "yesNo"
+          }
+        },
+        {
+          "key": "saleUpload",
+          "label": "Sale uploaded on CPCB",
+          "type": "toggle",
+          "dataLink": {
+            "source": "saleUploads",
+            "display": "yesNo"
+          }
+        },
+        {
+          "key": "purchaseInvoiceCount",
+          "label": "Purchase invoices uploaded",
+          "type": "number",
+          "dataLink": {
+            "source": "purchaseUploads",
+            "display": "invoiceCount"
+          }
+        },
+        {
+          "key": "saleInvoiceCount",
+          "label": "Sale invoices uploaded",
+          "type": "number",
+          "dataLink": {
+            "source": "saleUploads",
+            "display": "invoiceCount"
+          }
+        },
+        {
+          "key": "purchaseMt",
+          "label": "Purchase plastic uploaded (MT)",
+          "type": "number",
+          "dataLink": {
+            "source": "purchaseUploads",
+            "display": "quantity"
+          }
+        },
+        {
+          "key": "saleMt",
+          "label": "Sale plastic uploaded (MT)",
+          "type": "number",
+          "dataLink": {
+            "source": "saleUploads",
+            "display": "quantity"
+          }
+        },
+        {
+          "key": "nextAction",
+          "label": "Next action",
+          "type": "text"
+        },
+        {
+          "key": "dueDate",
+          "label": "Due date",
+          "type": "date"
+        }
+      ]
+    }
+  ],
+  "LIVE_DATA_SOURCES": [
+    {
+      "value": "purchaseInvoices",
+      "label": "Purchase invoice collection"
+    },
+    {
+      "value": "saleInvoices",
+      "label": "Sale invoice collection"
+    },
+    {
+      "value": "annualReturn",
+      "label": "Annual return"
+    },
+    {
+      "value": "purchaseUploads",
+      "label": "CPCB purchase uploads"
+    },
+    {
+      "value": "saleUploads",
+      "label": "CPCB sale uploads"
+    }
+  ],
+  "LIVE_DATA_DISPLAYS": {
+    "purchaseInvoices": [
+      {
+        "value": "coverageStatus",
+        "label": "Coverage status"
+      },
+      {
+        "value": "monthsCovered",
+        "label": "Months covered"
+      },
+      {
+        "value": "requiredMonths",
+        "label": "Required months"
+      },
+      {
+        "value": "missingMonths",
+        "label": "Missing months"
+      },
+      {
+        "value": "yesNo",
+        "label": "Received / covered (legacy)"
+      },
+      {
+        "value": "count",
+        "label": "Number of records"
+      },
+      {
+        "value": "status",
+        "label": "Latest status"
+      },
+      {
+        "value": "latestDate",
+        "label": "Latest period end"
+      }
+    ],
+    "saleInvoices": [
+      {
+        "value": "coverageStatus",
+        "label": "Coverage status"
+      },
+      {
+        "value": "monthsCovered",
+        "label": "Months covered"
+      },
+      {
+        "value": "requiredMonths",
+        "label": "Required months"
+      },
+      {
+        "value": "missingMonths",
+        "label": "Missing months"
+      },
+      {
+        "value": "yesNo",
+        "label": "Received / covered (legacy)"
+      },
+      {
+        "value": "count",
+        "label": "Number of records"
+      },
+      {
+        "value": "status",
+        "label": "Latest status"
+      },
+      {
+        "value": "latestDate",
+        "label": "Latest period end"
+      }
+    ],
+    "annualReturn": [
+      {
+        "value": "yesNo",
+        "label": "Filed / verified"
+      },
+      {
+        "value": "status",
+        "label": "Current status"
+      },
+      {
+        "value": "latestDate",
+        "label": "Filing date"
+      }
+    ],
+    "purchaseUploads": [
+      {
+        "value": "uploadStatus",
+        "label": "Upload status"
+      },
+      {
+        "value": "yesNo",
+        "label": "Has purchase upload"
+      },
+      {
+        "value": "quantity",
+        "label": "Total quantity (MT)"
+      },
+      {
+        "value": "invoiceCount",
+        "label": "Invoices uploaded"
+      },
+      {
+        "value": "cat1",
+        "label": "CAT-I quantity (MT)"
+      },
+      {
+        "value": "cat2",
+        "label": "CAT-II quantity (MT)"
+      },
+      {
+        "value": "cat3",
+        "label": "CAT-III quantity (MT)"
+      },
+      {
+        "value": "cat4",
+        "label": "CAT-IV quantity (MT)"
+      },
+      {
+        "value": "count",
+        "label": "Upload records"
+      }
+    ],
+    "saleUploads": [
+      {
+        "value": "uploadStatus",
+        "label": "Upload status"
+      },
+      {
+        "value": "yesNo",
+        "label": "Has sale upload"
+      },
+      {
+        "value": "quantity",
+        "label": "Total quantity (MT)"
+      },
+      {
+        "value": "invoiceCount",
+        "label": "Invoices uploaded"
+      },
+      {
+        "value": "cat1",
+        "label": "CAT-I quantity (MT)"
+      },
+      {
+        "value": "cat2",
+        "label": "CAT-II quantity (MT)"
+      },
+      {
+        "value": "cat3",
+        "label": "CAT-III quantity (MT)"
+      },
+      {
+        "value": "cat4",
+        "label": "CAT-IV quantity (MT)"
+      },
+      {
+        "value": "count",
+        "label": "Upload records"
+      }
+    ],
+    "uploadedData": [
+      {
+        "value": "yesNo",
+        "label": "Has uploaded data"
+      },
+      {
+        "value": "quantity",
+        "label": "Invoice quantity (MT)"
+      },
+      {
+        "value": "invoiceCount",
+        "label": "Number of invoices"
+      },
+      {
+        "value": "count",
+        "label": "Upload records"
+      }
+    ]
+  },
+  "liveTypes": {
+    "coverageStatus": "text",
+    "monthsCovered": "text",
+    "requiredMonths": "number",
+    "missingMonths": "text",
+    "yesNo": "toggle",
+    "count": "number",
+    "status": "text",
+    "latestDate": "date",
+    "uploadStatus": "text",
+    "quantity": "number",
+    "invoiceCount": "number",
+    "cat1": "number",
+    "cat2": "number",
+    "cat3": "number",
+    "cat4": "number"
+  },
+  "blank": {
+    "key": "",
+    "label": "",
+    "type": "toggle"
+  },
+  "payloads": [
+    {
+      "draft": {
+        "name": "",
+        "description": "",
+        "financialYear": "",
+        "includeStatus": true,
+        "emailEnabled": false,
+        "fields": [],
+        "clientColumns": [
+          "state"
+        ],
+        "scope": "all",
+        "membershipMode": "snapshot",
+        "selectedCategories": [],
+        "selected": []
+      },
+      "payload": {
+        "name": "",
+        "description": "",
+        "financialYear": "",
+        "includeStatus": true,
+        "emailEnabled": false,
+        "fields": [],
+        "clientColumns": [
+          "state"
+        ],
+        "scope": "all",
+        "membershipMode": "snapshot",
+        "selectedCategories": [],
+        "selected": [],
+        "clientMembershipMode": "snapshot",
+        "clientIds": [],
+        "clientCategories": []
+      }
+    },
+    {
+      "draft": {
+        "name": "Blank tracker",
+        "description": "",
+        "financialYear": "2025-26",
+        "includeStatus": true,
+        "emailEnabled": false,
+        "fields": [],
+        "clientColumns": [
+          "state"
+        ],
+        "scope": "all",
+        "membershipMode": "snapshot",
+        "selectedCategories": [],
+        "selected": []
+      },
+      "payload": {
+        "name": "Blank tracker",
+        "description": "",
+        "financialYear": "2025-26",
+        "includeStatus": true,
+        "emailEnabled": false,
+        "fields": [],
+        "clientColumns": [
+          "state"
+        ],
+        "scope": "all",
+        "membershipMode": "snapshot",
+        "selectedCategories": [],
+        "selected": [],
+        "clientMembershipMode": "snapshot",
+        "clientIds": [],
+        "clientCategories": []
+      }
+    },
+    {
+      "draft": {
+        "name": "Client follow-up worklist",
+        "description": "",
+        "financialYear": "2025-26",
+        "includeStatus": true,
+        "emailEnabled": false,
+        "fields": [
+          {
+            "key": "assignee",
+            "label": "Assignee",
+            "type": "text"
+          },
+          {
+            "key": "dueDate",
+            "label": "Due date",
+            "type": "date"
+          },
+          {
+            "key": "priority",
+            "label": "Priority",
+            "type": "select",
+            "options": [
+              "Low",
+              "Medium",
+              "High"
+            ],
+            "optionInput": "Low, Medium, High"
+          },
+          {
+            "key": "nextAction",
+            "label": "Next action",
+            "type": "text"
+          }
+        ],
+        "clientColumns": [
+          "state"
+        ],
+        "scope": "all",
+        "membershipMode": "snapshot",
+        "selectedCategories": [],
+        "selected": []
+      },
+      "payload": {
+        "name": "Client follow-up worklist",
+        "description": "",
+        "financialYear": "2025-26",
+        "includeStatus": true,
+        "emailEnabled": false,
+        "fields": [
+          {
+            "key": "assignee",
+            "label": "Assignee",
+            "type": "text"
+          },
+          {
+            "key": "dueDate",
+            "label": "Due date",
+            "type": "date"
+          },
+          {
+            "key": "priority",
+            "label": "Priority",
+            "type": "select",
+            "options": [
+              "Low",
+              "Medium",
+              "High"
+            ],
+            "optionInput": "Low, Medium, High"
+          },
+          {
+            "key": "nextAction",
+            "label": "Next action",
+            "type": "text"
+          }
+        ],
+        "clientColumns": [
+          "state"
+        ],
+        "scope": "all",
+        "membershipMode": "snapshot",
+        "selectedCategories": [],
+        "selected": [],
+        "clientMembershipMode": "snapshot",
+        "clientIds": [],
+        "clientCategories": []
+      }
+    },
+    {
+      "draft": {
+        "name": "CPCB invoice and upload follow-up",
+        "description": "",
+        "financialYear": "2025-26",
+        "includeStatus": true,
+        "emailEnabled": false,
+        "fields": [
+          {
+            "key": "purchaseInvoiceCollection",
+            "label": "Purchase invoices received",
+            "type": "toggle",
+            "dataLink": {
+              "source": "purchaseInvoices",
+              "display": "yesNo"
+            }
+          },
+          {
+            "key": "saleInvoiceCollection",
+            "label": "Sale invoices received",
+            "type": "toggle",
+            "dataLink": {
+              "source": "saleInvoices",
+              "display": "yesNo"
+            }
+          },
+          {
+            "key": "purchaseUpload",
+            "label": "Purchase uploaded on CPCB",
+            "type": "toggle",
+            "dataLink": {
+              "source": "purchaseUploads",
+              "display": "yesNo"
+            }
+          },
+          {
+            "key": "saleUpload",
+            "label": "Sale uploaded on CPCB",
+            "type": "toggle",
+            "dataLink": {
+              "source": "saleUploads",
+              "display": "yesNo"
+            }
+          },
+          {
+            "key": "purchaseInvoiceCount",
+            "label": "Purchase invoices uploaded",
+            "type": "number",
+            "dataLink": {
+              "source": "purchaseUploads",
+              "display": "invoiceCount"
+            }
+          },
+          {
+            "key": "saleInvoiceCount",
+            "label": "Sale invoices uploaded",
+            "type": "number",
+            "dataLink": {
+              "source": "saleUploads",
+              "display": "invoiceCount"
+            }
+          },
+          {
+            "key": "purchaseMt",
+            "label": "Purchase plastic uploaded (MT)",
+            "type": "number",
+            "dataLink": {
+              "source": "purchaseUploads",
+              "display": "quantity"
+            }
+          },
+          {
+            "key": "saleMt",
+            "label": "Sale plastic uploaded (MT)",
+            "type": "number",
+            "dataLink": {
+              "source": "saleUploads",
+              "display": "quantity"
+            }
+          },
+          {
+            "key": "nextAction",
+            "label": "Next action",
+            "type": "text"
+          },
+          {
+            "key": "dueDate",
+            "label": "Due date",
+            "type": "date"
+          }
+        ],
+        "clientColumns": [
+          "state"
+        ],
+        "scope": "all",
+        "membershipMode": "snapshot",
+        "selectedCategories": [],
+        "selected": []
+      },
+      "payload": {
+        "name": "CPCB invoice and upload follow-up",
+        "description": "",
+        "financialYear": "2025-26",
+        "includeStatus": true,
+        "emailEnabled": false,
+        "fields": [
+          {
+            "key": "purchaseInvoiceCollection",
+            "label": "Purchase invoices received",
+            "type": "toggle",
+            "dataLink": {
+              "source": "purchaseInvoices",
+              "display": "yesNo"
+            }
+          },
+          {
+            "key": "saleInvoiceCollection",
+            "label": "Sale invoices received",
+            "type": "toggle",
+            "dataLink": {
+              "source": "saleInvoices",
+              "display": "yesNo"
+            }
+          },
+          {
+            "key": "purchaseUpload",
+            "label": "Purchase uploaded on CPCB",
+            "type": "toggle",
+            "dataLink": {
+              "source": "purchaseUploads",
+              "display": "yesNo"
+            }
+          },
+          {
+            "key": "saleUpload",
+            "label": "Sale uploaded on CPCB",
+            "type": "toggle",
+            "dataLink": {
+              "source": "saleUploads",
+              "display": "yesNo"
+            }
+          },
+          {
+            "key": "purchaseInvoiceCount",
+            "label": "Purchase invoices uploaded",
+            "type": "number",
+            "dataLink": {
+              "source": "purchaseUploads",
+              "display": "invoiceCount"
+            }
+          },
+          {
+            "key": "saleInvoiceCount",
+            "label": "Sale invoices uploaded",
+            "type": "number",
+            "dataLink": {
+              "source": "saleUploads",
+              "display": "invoiceCount"
+            }
+          },
+          {
+            "key": "purchaseMt",
+            "label": "Purchase plastic uploaded (MT)",
+            "type": "number",
+            "dataLink": {
+              "source": "purchaseUploads",
+              "display": "quantity"
+            }
+          },
+          {
+            "key": "saleMt",
+            "label": "Sale plastic uploaded (MT)",
+            "type": "number",
+            "dataLink": {
+              "source": "saleUploads",
+              "display": "quantity"
+            }
+          },
+          {
+            "key": "nextAction",
+            "label": "Next action",
+            "type": "text"
+          },
+          {
+            "key": "dueDate",
+            "label": "Due date",
+            "type": "date"
+          }
+        ],
+        "clientColumns": [
+          "state"
+        ],
+        "scope": "all",
+        "membershipMode": "snapshot",
+        "selectedCategories": [],
+        "selected": [],
+        "clientMembershipMode": "snapshot",
+        "clientIds": [],
+        "clientCategories": []
+      }
+    },
+    {
+      "draft": {
+        "name": "Categories",
+        "description": "",
+        "financialYear": "",
+        "includeStatus": true,
+        "emailEnabled": false,
+        "fields": [],
+        "clientColumns": [
+          "state"
+        ],
+        "scope": "categories",
+        "membershipMode": "categorySync",
+        "selectedCategories": [
+          "PWP"
+        ],
+        "selected": [
+          "unused"
+        ]
+      },
+      "payload": {
+        "name": "Categories",
+        "description": "",
+        "financialYear": "",
+        "includeStatus": true,
+        "emailEnabled": false,
+        "fields": [],
+        "clientColumns": [
+          "state"
+        ],
+        "scope": "categories",
+        "membershipMode": "categorySync",
+        "selectedCategories": [
+          "PWP"
+        ],
+        "selected": [
+          "unused"
+        ],
+        "clientMembershipMode": "categorySync",
+        "clientIds": [],
+        "clientCategories": [
+          "PWP"
+        ]
+      }
+    },
+    {
+      "draft": {
+        "name": "Selected",
+        "description": "",
+        "financialYear": "",
+        "includeStatus": false,
+        "emailEnabled": true,
+        "fields": [],
+        "clientColumns": [
+          "state"
+        ],
+        "scope": "selected",
+        "membershipMode": "categorySync",
+        "selectedCategories": [
+          "unused"
+        ],
+        "selected": [
+          "C1"
+        ]
+      },
+      "payload": {
+        "name": "Selected",
+        "description": "",
+        "financialYear": "",
+        "includeStatus": false,
+        "emailEnabled": true,
+        "fields": [],
+        "clientColumns": [
+          "state"
+        ],
+        "scope": "selected",
+        "membershipMode": "categorySync",
+        "selectedCategories": [
+          "unused"
+        ],
+        "selected": [
+          "C1"
+        ],
+        "clientMembershipMode": "snapshot",
+        "clientIds": [
+          "C1"
+        ],
+        "clientCategories": []
+      }
+    }
+  ]
+}

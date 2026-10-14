@@ -15,6 +15,7 @@ export interface LiquidGlassDropdownOption {
 
 interface LiquidGlassDropdownProps {
   label: string;
+  description?: string;
   options: LiquidGlassDropdownOption[];
   value: string;
   onChange: (value: string) => void;
@@ -23,6 +24,10 @@ interface LiquidGlassDropdownProps {
   icon?: React.ReactNode;
   portal?: boolean;
   variant?: "glass" | "soft" | "condition";
+  /** Associate caller-owned guidance and validation with the actual control. */
+  describedBy?: string;
+  invalid?: boolean;
+  required?: boolean;
 }
 
 export default function LiquidGlassDropdown({
@@ -30,11 +35,15 @@ export default function LiquidGlassDropdown({
   disabled = false,
   icon,
   label,
+  description,
   onChange,
   options,
   portal = false,
   variant = "glass",
   value,
+  describedBy,
+  invalid,
+  required,
 }: LiquidGlassDropdownProps) {
   const listboxId = useId();
   const conditionStyle = variant === "condition";
@@ -63,8 +72,18 @@ export default function LiquidGlassDropdown({
     setOpen(false);
     setHoveredIndex(null);
     setKeyboardHighlight(false);
-    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus(conditionStyle ? { preventScroll: true } : undefined));
-  }, [conditionStyle]);
+    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus({ preventScroll: true }));
+  }, []);
+
+  // Presence retains the old menu during its exit. Stop it receiving clicks immediately.
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menu) return;
+    menu.inert = !open;
+    menu.style.pointerEvents = open ? "" : "none";
+    if (open) menu.removeAttribute("aria-hidden");
+    else menu.setAttribute("aria-hidden", "true");
+  }, [open]);
 
   const updateMenuPosition = useCallback(() => {
     if (!portal || !triggerRef.current || typeof window === "undefined") return;
@@ -155,10 +174,17 @@ export default function LiquidGlassDropdown({
   useEffect(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => {
-      document.getElementById(optionIds[activeIndex])?.scrollIntoView({ block: "nearest" });
+      const menu = menuRef.current;
+      const option = document.getElementById(optionIds[activeIndex]);
+      const scroller = conditionStyle ? menu?.querySelector<HTMLElement>(".condition-select-options") : menu;
+      if (!option || !scroller) return;
+      // Keep keyboard navigation inside the popup; scrollIntoView also moves ancestor forms.
+      const item = option.getBoundingClientRect(), viewport = scroller.getBoundingClientRect();
+      if (item.top < viewport.top) scroller.scrollTop -= viewport.top - item.top;
+      else if (item.bottom > viewport.bottom) scroller.scrollTop += item.bottom - viewport.bottom;
     });
     return () => cancelAnimationFrame(frame);
-  }, [activeIndex, open, optionIds]);
+  }, [activeIndex, conditionStyle, open, optionIds]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (unavailable) return;
@@ -308,7 +334,9 @@ export default function LiquidGlassDropdown({
         disabled={unavailable}
         aria-label={label}
         role={conditionStyle ? "combobox" : undefined}
-        aria-describedby={conditionStyle ? `${listboxId}-value` : undefined}
+        aria-describedby={[conditionStyle ? `${listboxId}-value` : "", describedBy].filter(Boolean).join(" ") || undefined}
+        aria-invalid={invalid}
+        aria-required={required}
         aria-activedescendant={conditionStyle && open ? optionIds[activeIndex] : undefined}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -331,7 +359,9 @@ export default function LiquidGlassDropdown({
         )}
       >
         {icon && <span className="flex h-4 w-4 shrink-0 items-center justify-center text-faint">{icon}</span>}
-        <span id={`${listboxId}-value`} className="min-w-0 flex-1 truncate">{selectedOption?.label ?? label}</span>
+        <span id={`${listboxId}-value`} className={cn("min-w-0 flex-1", !description && "truncate", description && "liquid-dropdown-value")}>
+          {description ? <><span>{selectedOption?.label ?? label}</span><span className="liquid-dropdown-description">{description}</span></> : selectedOption?.label ?? label}
+        </span>
         <ChevronDown
           className={cn("h-4 w-4 shrink-0 text-faint transition-transform duration-200", open && "rotate-180")}
         />

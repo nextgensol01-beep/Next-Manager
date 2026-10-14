@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
+import { MAX_SEARCH_LENGTH } from "@/lib/search/client-search";
 import {
   createPersonProfile,
   listContactDirectory,
@@ -15,6 +16,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const search = searchParams.get("search");
+  if ((search || "").length > MAX_SEARCH_LENGTH) return NextResponse.json({ error: "Search is too long" }, { status: 400 });
   const withCompanies = searchParams.get("withCompanies") === "true";
 
   const contacts = await listContactDirectory({ search, withCompanies });

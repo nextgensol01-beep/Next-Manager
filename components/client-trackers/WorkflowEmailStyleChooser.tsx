@@ -6,6 +6,8 @@ import { ArrowDown, Check } from "lucide-react";
 import { GlassSurface } from "@/components/ui/liquid-glass";
 import type { TrackerEmailWorkflow, TrackerField } from "@/lib/clientTrackers";
 import { emailStyleSamples, type EmailStyleSample } from "@/lib/workflow-email-style";
+import type { StyleCommit } from "./WorkflowStepNavigation";
+import { styleTransitionDuration } from "@/lib/workflow-style-handoff";
 
 type EmailStyle = NonNullable<TrackerEmailWorkflow["contentMode"]>;
 const choices: { mode: EmailStyle; title: string; explanation: string }[] = [
@@ -28,27 +30,33 @@ function FormatPreview({ mode, samples }: { mode: EmailStyle; samples: EmailStyl
   </div>;
 }
 
-export default function WorkflowEmailStyleChooser({ workflow, fields, value, onChange, reduced }: {
+export default function WorkflowEmailStyleChooser({ workflow, fields, value, onChange, onConfirm, commit, reduced }: {
   workflow: TrackerEmailWorkflow; fields: TrackerField[]; value: EmailStyle;
   onChange: (mode: EmailStyle) => void; reduced: boolean;
+  onConfirm: (mode: EmailStyle, keyboard: boolean, tile: HTMLButtonElement) => void; commit: StyleCommit | null;
 }) {
   const id = useId();
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const samples = emailStyleSamples(fields, workflow);
-  const explanation = choices.find(choice => choice.mode === value)!.explanation;
-  return <section className="workflow-email-style-chooser">
+  const visualStyle = commit?.style ?? value;
+  const explanation = choices.find(choice => choice.mode === visualStyle)!.explanation;
+  const delay = commit?.selectionDelay ?? 0;
+  const copyExit = commit ? { opacity: 0, y: reduced ? 0 : -3, transition: { duration: reduced ? .12 : styleTransitionDuration(.16) } } : undefined;
+  return <section className="workflow-email-style-chooser" data-committing={!!commit} aria-busy={!!commit}>
     <motion.h3 id={`${id}-question`} className="workflow-style-question"
       initial={{ opacity: 0, y: reduced ? 0 : 6 }} animate={{ opacity: 1, y: 0 }}
+      exit={copyExit}
       transition={{ duration: reduced ? .01 : .26, ease }}>How should matches appear?</motion.h3>
     <LayoutGroup id={id}>
       <div className="workflow-style-options" role="radiogroup" aria-labelledby={`${id}-question`} aria-describedby={`${id}-explanation ${id}-sample-note`}>
         {choices.map((choice, index) => {
-          const selected = value === choice.mode;
+          const selected = visualStyle === choice.mode;
           return <motion.button key={choice.mode} ref={element => { buttons.current[index] = element; }} type="button"
-            role="radio" aria-checked={selected} aria-label={choice.title} tabIndex={selected ? 0 : -1}
+            role="radio" aria-checked={selected} aria-label={choice.title} aria-disabled={!!commit} tabIndex={selected ? 0 : -1}
             className={`workflow-style-tile${selected ? " is-selected" : ""}`}
-            onClick={() => onChange(choice.mode)}
+            onClick={event => { if (!commit) onConfirm(choice.mode, event.detail === 0, event.currentTarget); }}
             onKeyDown={event => {
+              if (commit) { event.preventDefault(); return; }
               let next: number;
               if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % choices.length;
               else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index + choices.length - 1) % choices.length;
@@ -60,10 +68,18 @@ export default function WorkflowEmailStyleChooser({ workflow, fields, value, onC
               buttons.current[next]?.focus({ preventScroll: true });
             }}
             initial={{ opacity: 0, y: reduced ? 0 : 8, filter: reduced ? "blur(0px)" : "blur(2px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            transition={{ duration: reduced ? .01 : .28, delay: reduced ? 0 : index * .03, ease }}>
+            animate={commit ? reduced ? { opacity: selected ? 1 : .65 } : selected
+              ? { opacity: 1, y: 0, scale: [1, .975, 1.018], filter: "blur(0px)" }
+              : { opacity: .35, y: 0, scale: .985, filter: "blur(2px)" }
+              : { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+            exit={commit ? reduced ? { opacity: 0, transition: { duration: .12 } } : selected
+              ? { opacity: [1, .55, 0], scale: 1.025, filter: "blur(3px)", transition: { duration: styleTransitionDuration(.28), times: [0, .55, 1], ease } }
+              : { opacity: 0, scale: .97, filter: "blur(3px)", transition: { duration: styleTransitionDuration(.18), ease } } : undefined}
+            transition={commit ? { duration: reduced ? .08 : styleTransitionDuration(.2), delay: reduced ? 0 : selected ? 0 : styleTransitionDuration(delay + .05), ease,
+              scale: selected && !reduced ? { duration: styleTransitionDuration(.2 + delay), times: [0, .06 / (.2 + delay), 1], ease } : undefined }
+              : { duration: reduced ? .01 : .28, delay: reduced ? 0 : index * .03, ease }}>
             {selected && <motion.div className="workflow-style-selection" layoutId="selected-email-style"
-              initial={false} transition={reduced ? { duration: .01 } : { type: "spring", stiffness: 320, damping: 36, mass: .85 }}>
+              initial={false} transition={reduced ? { duration: .01 } : commit ? { duration: styleTransitionDuration(.1), ease } : { type: "spring", stiffness: 320, damping: 36, mass: .85 }}>
               <GlassSurface className="workflow-style-selected-material" variant="regular" intensity="medium" radius="lg" />
             </motion.div>}
             <GlassSurface className="workflow-style-material" variant="regular" intensity="subtle" radius="lg" interactive={!reduced}>
@@ -78,13 +94,13 @@ export default function WorkflowEmailStyleChooser({ workflow, fields, value, onC
         })}
       </div>
     </LayoutGroup>
-    <div id={`${id}-explanation`} className="workflow-style-explanation" aria-live="polite" aria-atomic="true">
+    <motion.div id={`${id}-explanation`} className="workflow-style-explanation" aria-live="polite" aria-atomic="true" exit={copyExit}>
       <AnimatePresence initial={false}>
-        <motion.p key={value} initial={{ opacity: 0, y: reduced ? 0 : 3, filter: reduced ? "blur(0px)" : "blur(2px)" }}
+        <motion.p key={visualStyle} initial={{ opacity: 0, y: reduced ? 0 : 3, filter: reduced ? "blur(0px)" : "blur(2px)" }}
           animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} exit={{ opacity: 0, y: reduced ? 0 : -3, filter: reduced ? "blur(0px)" : "blur(2px)" }}
           transition={{ duration: reduced ? .01 : .2, ease }}>{explanation}</motion.p>
       </AnimatePresence>
-    </div>
-    <p id={`${id}-sample-note`} className="workflow-style-sample-note">Preview only · Sample values</p>
+    </motion.div>
+    <motion.p id={`${id}-sample-note`} className="workflow-style-sample-note" exit={copyExit}>Preview only · Sample values</motion.p>
   </section>;
 }

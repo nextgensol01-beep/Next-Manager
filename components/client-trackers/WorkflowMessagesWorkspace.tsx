@@ -7,18 +7,19 @@ import WorkflowSendRuleComposer from "./WorkflowSendRuleComposer";
 import RichTextEditor, { type EmailEditorVariable } from "./TrackerRichTextEditor";
 import LiquidGlassDropdown from "@/components/ui/LiquidGlassDropdown";
 import type { TrackerConditionGroup, TrackerEmailContentRule, TrackerEmailWorkflow, TrackerField, TrackerRuleOperator } from "@/lib/clientTrackers";
+import { readableEmailPreview } from "@/lib/tracker-editor-document";
 
 type Mode = NonNullable<TrackerEmailWorkflow["contentMode"]>;
 const modes = {
-  points: { title: "Points", item: "Point", type: "point", intro: "Add the short points that should appear when matching conditions are met.", content: "Point content", placeholder: "Write the short point to include when these conditions match." },
-  statements: { title: "Statements", item: "Statement", type: "statement", intro: "Add the statements that should appear when matching conditions are met.", content: "Statement content", placeholder: "Write the statement to include when these conditions match." },
-  combinations: { title: "Combination scenarios", item: "Scenario", type: "combination", intro: "Add scenarios that determine which message is used for each matching combination.", content: "Combination message", placeholder: "Write the message to use for this matching combination." },
+  points: { title: "Points", item: "Point", type: "point", intro: "Add the short points that should appear when matching conditions are met.", content: "Point content", placeholder: "Write the point added when these conditions match…" },
+  statements: { title: "Statements", item: "Statement", type: "statement", intro: "Add the statements that should appear when matching conditions are met.", content: "Statement content", placeholder: "Write the statement added when these conditions match…" },
+  combinations: { title: "Combination scenarios", item: "Scenario", type: "combination", intro: "Add scenarios that determine which message is used for each matching combination.", content: "Combination message", placeholder: "Write the message used for this combination…" },
 } as const;
 const ease = [0.22, 1, 0.36, 1] as const;
 
-function RuleSurface({ children, reduced }: { children: React.ReactNode; reduced: boolean }) {
+function RuleSurface({ children, reduced, open }: { children: React.ReactNode; reduced: boolean; open: boolean }) {
   const present = useIsPresent();
-  return <motion.article layout="position" className="workflow-message-surface" inert={!present} aria-hidden={!present}
+  return <motion.article layout="position" className={`workflow-message-surface${open ? " is-expanded" : ""}`} inert={!present} aria-hidden={!present}
     initial={{ height: 0, opacity: 0, y: reduced ? 0 : -8, filter: reduced ? "blur(0px)" : "blur(2px)" }}
     animate={{ height: "auto", opacity: 1, y: 0, filter: "blur(0px)" }}
     exit={{ height: 0, opacity: 0, scale: reduced ? 1 : .985 }} transition={{ duration: reduced ? .01 : .32, ease }}>
@@ -42,6 +43,8 @@ function conditionSummary(group: TrackerConditionGroup, fields: TrackerField[], 
 
 type Props = {
   mode: Mode; rules: TrackerEmailContentRule[]; fields: TrackerField[]; variables: EmailEditorVariable[]; reduced: boolean;
+  /** The selection handoff animates the whole workspace; avoid stacking entry motion. */
+  resolveFromStyle?: boolean;
   onAdd: (type: TrackerEmailContentRule["type"]) => string;
   onUpdate: (id: string, patch: Partial<TrackerEmailContentRule>) => void;
   onRemove: (id: string) => void; onMove: (id: string, direction: -1 | 1) => void; onPreview: () => void;
@@ -49,7 +52,7 @@ type Props = {
   operatorsForField: (field?: TrackerField) => { value: TrackerRuleOperator; label: string }[];
 };
 
-export default function WorkflowMessagesWorkspace({ mode, rules, fields, variables, reduced, onAdd, onUpdate, onRemove, onMove, onPreview, valuesForField, operatorsForField }: Props) {
+export default function WorkflowMessagesWorkspace({ mode, rules, fields, variables, reduced, resolveFromStyle = false, onAdd, onUpdate, onRemove, onMove, onPreview, valuesForField, operatorsForField }: Props) {
   const id = useId();
   const config = modes[mode];
   const addRef = useRef<HTMLButtonElement>(null);
@@ -57,7 +60,7 @@ export default function WorkflowMessagesWorkspace({ mode, rules, fields, variabl
   const [pendingRemoval, setPendingRemoval] = useState<string | null>(null);
   const isCombination = mode === "combinations";
   return <section className={`workflow-messages-workspace is-${config.type}`} aria-labelledby={`${id}-heading`}>
-    <motion.header className="workflow-messages-intro" initial={{ opacity: 0, y: reduced ? 0 : 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? .01 : .3, ease }}>
+    <motion.header className="workflow-messages-intro" initial={resolveFromStyle ? false : { opacity: 0, y: reduced ? 0 : 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? .01 : .3, ease }}>
       <div><h3 id={`${id}-heading`}>{config.title}</h3><p>{config.intro}</p></div>
       <div className="workflow-message-actions">
         {isCombination && <button type="button" className="workflow-message-preview" onClick={onPreview}><FileText size={14} />Preview rule combinations</button>}
@@ -67,19 +70,19 @@ export default function WorkflowMessagesWorkspace({ mode, rules, fields, variabl
         }}><Plus size={15} />Add {config.item.toLowerCase()}</button>
       </div>
     </motion.header>
-    <motion.div className="workflow-message-stack" initial={{ opacity: 0, y: reduced ? 0 : 8, filter: reduced ? "blur(0px)" : "blur(2px)" }}
+    <motion.div className="workflow-message-stack" initial={resolveFromStyle ? false : { opacity: 0, y: reduced ? 0 : 8, filter: reduced ? "blur(0px)" : "blur(2px)" }}
       animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} transition={{ duration: reduced ? .01 : .34, ease }}>
       <AnimatePresence initial={false}>
         {rules.map((rule, index) => {
           const open = expanded[rule.id] ?? false;
           const itemLabel = `${config.item} ${index + 1}`;
           const bodyId = `${id}-${rule.id}-body`;
-          return <RuleSurface key={rule.id} reduced={reduced}>
+          return <RuleSurface key={rule.id} reduced={reduced} open={open}>
             <div className="workflow-message-head">
               <button type="button" className="workflow-message-expander" aria-expanded={open} aria-controls={bodyId}
                 onClick={() => setExpanded(current => ({ ...current, [rule.id]: !open }))}>
                 <span><strong>{itemLabel}</strong><span className="workflow-message-summary">{conditionSummary(rule.conditionGroup, fields, operatorsForField)}</span>
-                  {!open && <span className="workflow-message-excerpt">{rule.action === "skip" ? "Exclude matching clients" : textPreview(rule.content || "") || "No content yet"}</span>}
+                  {!open && <span className="workflow-message-excerpt">{rule.action === "skip" ? "Exclude matching clients" : readableEmailPreview(textPreview(rule.content || ""), variables) || "No content yet"}</span>}
                 </span><ChevronDown size={16} className={open ? "is-open" : ""} />
               </button>
               <div className="workflow-message-head-actions">
@@ -99,7 +102,7 @@ export default function WorkflowMessagesWorkspace({ mode, rules, fields, variabl
                 window.requestAnimationFrame(() => addRef.current?.focus({ preventScroll: true }));
               }}>Remove {config.item.toLowerCase()}</button>
             </div>}
-            {/* Keep the editor DOM mounted while collapsed, retaining native history and selection. */}
+            {/* Keep the editor mounted while collapsed, retaining document history and selection. */}
             <motion.div id={bodyId} className="workflow-message-body" inert={!open} aria-hidden={!open} initial={false}
               animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0, y: open || reduced ? 0 : -4, filter: open || reduced ? "blur(0px)" : "blur(2px)" }}
               transition={{ duration: reduced ? .01 : .3, ease }}>

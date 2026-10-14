@@ -7,13 +7,20 @@ import { SettingsSearchProvider } from "./SettingsSearchContext";
 import GeneralPanel from "./GeneralPanel";
 import AccessPanel from "./AccessPanel";
 import CustomFieldsPanel from "./CustomFieldsPanel";
+import EmailDeliveryPanel from "./EmailDeliveryPanel";
+import { EmailDeliverySettingsProvider, useEmailDeliverySettings } from "./EmailDeliverySettingsContext";
 
-const PANELS = [GeneralPanel, AccessPanel, CustomFieldsPanel];
+const PANELS = [GeneralPanel, AccessPanel, CustomFieldsPanel, EmailDeliveryPanel];
 const ANIM_DURATION = 280;
 const LARGE_TITLE_THRESHOLD = 52;
-const TAB_SLUGS = ["general", "access", "custom-fields"];
+const TAB_SLUGS = ["general", "access", "custom-fields", "email-delivery"];
 
 export default function SettingsShell() {
+  const router = useRouter();
+  return <EmailDeliverySettingsProvider navigateHref={href => router.push(href)}><SettingsShellContent /></EmailDeliverySettingsProvider>;
+}
+function SettingsShellContent() {
+  const { navigate } = useEmailDeliverySettings();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -65,7 +72,7 @@ export default function SettingsShell() {
   const largeTitleTranslate = Math.min(16, listScrollY * 0.3);
   const isScrolled = listScrollY > 0;
 
-  const selectDesktopTab = (index: number, sectionId?: string) => {
+  const commitDesktopTab = (index: number, sectionId?: string) => {
     const slug = TAB_SLUGS[index];
     if (tabParam !== slug) {
       const params = new URLSearchParams(searchParams.toString());
@@ -96,13 +103,17 @@ export default function SettingsShell() {
     }, ANIM_DURATION);
   };
 
-  const selectMobileTab = (index: number) => {
+  const selectDesktopTab = (index: number, sectionId?: string) => {
+    if (index === desktopTabRef.current) commitDesktopTab(index, sectionId);
+    else navigate(() => commitDesktopTab(index, sectionId));
+  };
+  const selectMobileTab = (index: number) => navigate(() => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", TAB_SLUGS[index]);
     router.push(`${pathname}?${params.toString()}`);
-  };
+  });
 
-  const goBack = () => router.back();
+  const goBack = () => navigate(() => router.back());
 
   const DesktopActivePanel = PANELS[desktopTab];
   const DesktopExitingPanel = exitingTab !== null ? PANELS[exitingTab] : null;

@@ -24,7 +24,8 @@ export function useCache<T>(
   // Stable ref for initialData — never changes after mount, avoids stale closure issues
   const initRef = useRef<T | null>(initialData !== undefined ? initialData : null);
   const mountedRef  = useRef(true);
-  const fetchingRef = useRef(false);
+  const fetchingRef = useRef<{ url: string; sequence: number } | null>(null);
+  const sequenceRef = useRef(0);
   // Track the url + enabled so the effect re-runs only when these actually change
   const urlRef     = useRef(url);
   const enabledRef = useRef(enabled);
@@ -39,10 +40,11 @@ export function useCache<T>(
   });
 
   // Stable load function — deps are refs so it never changes reference
-  const load = useCallback(async (silent = false) => {
-    if (!enabledRef.current || fetchingRef.current) return;
-    fetchingRef.current = true;
+  const load = useCallback(async (silent = false, force = false) => {
+    if (!enabledRef.current || (!force && fetchingRef.current?.url === urlRef.current)) return;
     const requestUrl = urlRef.current;
+    const request = { url: requestUrl, sequence: ++sequenceRef.current };
+    fetchingRef.current = request;
 
     if (!silent) {
       setState((s) => {
@@ -54,21 +56,21 @@ export function useCache<T>(
 
     try {
       const data = await cachedFetch<T>(requestUrl);
-      if (mountedRef.current && enabledRef.current && urlRef.current === requestUrl) {
+      if (mountedRef.current && enabledRef.current && urlRef.current === requestUrl && sequenceRef.current === request.sequence) {
         setState({ data, loading: false, error: null });
       }
     } catch (e) {
-      if (mountedRef.current && enabledRef.current && urlRef.current === requestUrl)
+      if (mountedRef.current && enabledRef.current && urlRef.current === requestUrl && sequenceRef.current === request.sequence)
         setState((s) => ({ ...s, loading: false, error: String(e) }));
     } finally {
-      fetchingRef.current = false;
+      if (fetchingRef.current === request) fetchingRef.current = null;
     }
   }, []); // no deps — reads everything via refs
 
   // Re-run effect only when url or enabled actually changes
   useEffect(() => {
     mountedRef.current = true;
-    fetchingRef.current = false;
+    fetchingRef.current = null;
 
     const cached = getCached<T>(urlRef.current);
     if (cached !== null) {
@@ -78,19 +80,21 @@ export function useCache<T>(
         return { data: cached, loading: false, error: null };
       });
     } else if (enabledRef.current) {
-      setState((s) => (s.loading ? s : { ...s, loading: true }));
+      setState({ data: initRef.current, loading: true, error: null });
       load(false);
     }
 
-    return () => { mountedRef.current = false; };
+    return () => { mountedRef.current = false; sequenceRef.current += 1; };
   }, [url, enabled, load]); // stable refs mean load never changes
 
   const refetch = useCallback(() => {
     invalidate(urlRef.current);
-    load(true);
+    load(true, true);
   }, [load]);
 
   const mutate = useCallback((next: T | ((current: T | null) => T)) => {
+    sequenceRef.current += 1;
+    fetchingRef.current = null;
     setState((currentState) => {
       const nextData = typeof next === "function"
         ? (next as (current: T | null) => T)(currentState.data)

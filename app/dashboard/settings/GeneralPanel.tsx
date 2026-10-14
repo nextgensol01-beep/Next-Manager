@@ -1,4 +1,6 @@
 "use client";
+
+import { readJsonResponse } from "@/lib/http-response";
 import { useState, useEffect } from "react";
 import { BellRing } from "lucide-react";
 import toast from "react-hot-toast";
@@ -107,7 +109,7 @@ export default function GeneralPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ settings: nextSettings }),
       });
-      const body = await response.json().catch(() => null);
+      const body = await readJsonResponse(response).catch(() => null);
       if (!response.ok) {
         toast.error(body?.error || "Failed to save financial year settings");
         return false;

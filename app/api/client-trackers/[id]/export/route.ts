@@ -1,3 +1,6 @@
+import { trackerEntrySearchStages } from "@/lib/server/client-search";
+import { MAX_SEARCH_LENGTH } from "@/lib/search/client-search";
+import { withTrackerApiErrors } from "@/lib/server/tracker-api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { getServerSession } from "next-auth";
@@ -13,6 +16,7 @@ import { resolveTrackerLinkedValues } from "@/lib/server/tracker-linked-data";
 import { resolveTrackerComputedValues } from "@/lib/server/tracker-computed-values";
 import { evaluateTrackerConditionGroup } from "@/lib/server/tracker-conditions";
 import { finaliseReadableReportSheet } from "@/lib/server/excel-report-style";
+import { matchesTrackerFieldFilter, trackerFieldFilterQuery } from "@/lib/tracker-filters";
 import {
   CLIENT_TRACKER_DETAIL_OPTIONS,
   type ClientTrackerDetailKey,
@@ -31,13 +35,11 @@ const textValue = (value: TrackerValue | undefined) =>
         ? "No"
         : String(value ?? "");
 
-const escapedRegExp = (value: string) =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const clientDetail = (client: unknown, key: ClientTrackerDetailKey) =>
   String((client as Record<string, unknown> | null)?.[key] || "—");
 
-export async function GET(
+export const GET = withTrackerApiErrors(async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -57,6 +59,7 @@ export async function GET(
     fields: TrackerField[];
     clientColumns?: ClientTrackerDetailKey[];
     savedViews?: TrackerSavedView[];
+    clientIds?: string[];
     emailEnabled?: boolean;
   };
   const searchParams = req.nextUrl.searchParams;
@@ -69,50 +72,23 @@ export async function GET(
   const savedView = (tracker.savedViews || []).find(
     (view) => view.id === savedViewId,
   );
-  let eligibleClientIds: string[] | undefined;
-  if (search || category) {
-    const clientFilter: Record<string, unknown> = {};
-    if (category) clientFilter.category = category;
-    if (search) {
-      const term = new RegExp(escapedRegExp(search), "i");
-      clientFilter.$or = [
-        { companyName: term },
-        { clientId: term },
-        { category: term },
-      ];
-    }
-    eligibleClientIds = (
-      await Client.find(clientFilter).select("clientId").lean()
-    ).map((client) => client.clientId);
-  }
+  if (search.length > MAX_SEARCH_LENGTH) return NextResponse.json({ error: "Search is too long" }, { status: 400 });
+  const searchStages = await trackerEntrySearchStages(search, category);
   const entryFilter: Record<string, unknown> = {
     trackerId: tracker._id,
     inScope: { $ne: false },
   };
-  if (eligibleClientIds) entryFilter.clientId = { $in: eligibleClientIds };
+  if (search || category) entryFilter.clientId = { $in: tracker.clientIds || [] };
   const dynamicFilter = Boolean(
     savedView || (field && fieldValue && (field.dataLink || field.computed)),
   );
   if (field && fieldValue && !dynamicFilter) {
     const valuePath = `values.${field.key}`;
-    if (["text", "longText"].includes(field.type))
-      entryFilter[valuePath] = new RegExp(escapedRegExp(fieldValue), "i");
-    else if (["multiSelect", "tags"].includes(field.type))
-      entryFilter[valuePath] = { $in: [fieldValue] };
-    else if (
-      ["number", "percentage", "quantity", "currency", "progress"].includes(
-        field.type,
-      )
-    ) {
-      const numericValue = Number(fieldValue);
-      entryFilter[valuePath] = Number.isFinite(numericValue)
-        ? numericValue
-        : fieldValue;
-    } else entryFilter[valuePath] = fieldValue;
+    entryFilter[valuePath] = trackerFieldFilterQuery(field, fieldValue);
   }
-  const entries = (await ClientTrackerEntry.find(entryFilter)
-    .sort({ updatedAt: -1, _id: -1 })
-    .lean()) as unknown as Array<{
+  const entries = (await (searchStages.length
+    ? ClientTrackerEntry.aggregate([{ $match: entryFilter }, ...searchStages, { $sort: { updatedAt: -1, _id: -1 } }])
+    : ClientTrackerEntry.find(entryFilter).sort({ updatedAt: -1, _id: -1 }).lean())) as unknown as Array<{
     clientId: string;
     values: TrackerValues;
     updatedAt: Date;
@@ -137,12 +113,7 @@ export async function GET(
       )
         return false;
       if (!field || !fieldValue || !dynamicFilter) return true;
-      const value = entry.values[field.key];
-      return ["multiSelect", "tags"].includes(field.type)
-        ? Array.isArray(value) && value.includes(fieldValue)
-        : ["text", "longText"].includes(field.type)
-          ? textValue(value).toLowerCase().includes(fieldValue.toLowerCase())
-          : textValue(value) === fieldValue;
+      return matchesTrackerFieldFilter(field, entry.values[field.key], fieldValue);
     });
   const clientIds = resolved.map((entry) => entry.clientId);
   const [clients, logs] = await Promise.all([
@@ -223,4 +194,4 @@ export async function GET(
       "Cache-Control": "no-store",
     },
   });
-}
+});

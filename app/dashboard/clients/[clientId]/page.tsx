@@ -1,4 +1,6 @@
 "use client";
+
+import { readJsonResponse } from "@/lib/http-response";
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -23,6 +25,8 @@ import {
 } from "@/lib/clientWorkspaceCache";
 import type { ClientCustomFieldDefinition, ClientCustomFieldGroupDefinition } from "@/lib/clientCustomFields";
 import type { TrackerField, TrackerValues } from "@/lib/clientTrackers";
+import TrackerOptionBadge from "@/components/client-trackers/TrackerOptionBadge";
+import { trackerHasOptionColors } from "@/lib/tracker-option-colors";
 import FYTabBar from "@/components/ui/FYTabBar";
 import { useFinancialYearState } from "@/app/providers";
 import BillingModal from "@/app/dashboard/billing/BillingModal";
@@ -33,6 +37,8 @@ import ClientProfileActivityTimeline from "./ClientProfileActivityTimeline";
 import ClientProfileBillingPayments, { FinancialOverviewPanel } from "./ClientProfileBillingPayments";
 import ClientProfileFinancialSummary from "./ClientProfileFinancialSummary";
 import ClientProfileModals from "./ClientProfileModals";
+import FinancialYearModal from "@/components/financial-year/FinancialYearModal";
+import type { FinancialYearRecord } from "@/lib/financial-year-form";
 import DocumentUploadModal from "./DocumentUploadModal";
 import {
   ClientProfileHeader,
@@ -95,11 +101,9 @@ import {
   ACTIVITY_PAGE_SIZE,
   ACTIVITY_RANGES,
   buildEntryValueMap,
-  buildFyEntries,
   buildLinkedContactEmailOptions,
   CAT_IDS,
   CATS,
-  createEmptyFyEntries,
   CREDIT_TYPES,
   getContactEmails,
   getContactPhones,
@@ -108,7 +112,6 @@ import {
   normalizeEmailList,
   normalizePhoneList,
   restoreSuggestion,
-  sumFyEntries,
   syncEntrySelections,
   todayInputValue,
   type ActivityFilter,
@@ -214,11 +217,6 @@ const CUSTOM_FIELD_ICON_COMPONENTS = {
   lock: LockKeyhole,
   shield: Shield,
 } as const;
-
-function trackerBadgeClass(field: TrackerField, value: unknown) {
-  if (field.type === "status") return ({ "Not Started": "bg-slate-100 text-slate-700", "In Progress": "bg-amber-100 text-amber-800", Done: "bg-emerald-100 text-emerald-800", Blocked: "bg-rose-100 text-rose-800", "Not Applicable": "bg-blue-100 text-blue-800" })[String(value)] || "bg-card text-muted";
-  return ({ slate: "bg-slate-100 text-slate-700", blue: "bg-blue-100 text-blue-800", violet: "bg-violet-100 text-violet-800", amber: "bg-amber-100 text-amber-800", emerald: "bg-emerald-100 text-emerald-800", rose: "bg-rose-100 text-rose-800" })[field.optionColors?.[String(value)] || "slate"];
-}
 
 export default function ClientProfilePage() {
   const { data: session, status: sessionStatus } = useSession();
@@ -385,11 +383,8 @@ export default function ClientProfilePage() {
     notes: "",
   });
   const [fyModal, setFyModal] = useState(false);
-  const [fyForm, setFyForm] = useState({
-    financialYear: selectedFy,
-    generated: createEmptyFyEntries(),
-    targets: createEmptyFyEntries(),
-  });
+  const fyReturnFocus = useRef<HTMLElement | null>(null);
+  const [fyContext, setFyContext] = useState<{ financialYear: string; record: FYRecord | null }>({ financialYear: selectedFy, record: null });
   const [reminderModal, setReminderModal] = useState(false);
   const [activeReminderBillingId, setActiveReminderBillingId] = useState<string | null>(null);
   const [reminderRecipients, setReminderRecipients] = useState<EmailOption[]>([]);
@@ -464,7 +459,7 @@ export default function ClientProfilePage() {
 
   const readErrorMessage = useCallback(async (response: Response, fallback: string) => {
     try {
-      const payload = await response.json();
+      const payload = await readJsonResponse(response);
       if (payload && typeof payload.error === "string" && payload.error.trim()) {
         return payload.error.trim();
       }
@@ -558,7 +553,7 @@ export default function ClientProfilePage() {
     });
 
     void fetch(`/api/quotations?${params.toString()}`)
-      .then((response) => response.ok ? response.json() : [])
+      .then((response) => response.ok ? readJsonResponse(response) : [])
       .then((payload: QuotationSummary[]) => {
         if (cancelled) return;
         const records = Array.isArray(payload) ? payload : [];
@@ -584,15 +579,15 @@ export default function ClientProfilePage() {
       fetch(`/api/client-trackers?clientId=${encodedClientId}`, { cache: "no-store" }),
     ]);
     if (notesResponse.ok) {
-      const payload = await notesResponse.json();
+      const payload = await readJsonResponse(notesResponse);
       setClientNotes(Array.isArray(payload) ? payload : []);
     }
     if (workItemsResponse.ok) {
-      const payload = await workItemsResponse.json();
+      const payload = await readJsonResponse(workItemsResponse);
       setClientWorkItems(Array.isArray(payload) ? payload : []);
     }
     if (trackersResponse.ok) {
-      const payload = await trackersResponse.json();
+      const payload = await readJsonResponse(trackersResponse);
       setClientTrackers(Array.isArray(payload) ? payload : []);
     }
   }, [clientId]);
@@ -628,7 +623,7 @@ export default function ClientProfilePage() {
       throw new Error(await readErrorMessage(response, "Unable to load recent activity."));
     }
 
-    const payload = await response.json() as ActivityResponse;
+    const payload = await readJsonResponse(response) as ActivityResponse;
     if (requestId !== activityRequestIdRef.current) return;
 
     setActivities((current) => replace ? payload.items || [] : [...current, ...(payload.items || [])]);
@@ -724,7 +719,7 @@ export default function ClientProfilePage() {
         toast.error(await readErrorMessage(response, "Unable to save the note."));
         return;
       }
-      const saved = await response.json() as ClientNote;
+      const saved = await readJsonResponse(response) as ClientNote;
       setClientNotes((current) => [saved, ...current]);
       setNoteModal(false);
       setNoteBody("");
@@ -779,7 +774,7 @@ export default function ClientProfilePage() {
         toast.error(await readErrorMessage(response, "Unable to save this item."));
         return;
       }
-      const saved = await response.json() as ClientWorkItem;
+      const saved = await readJsonResponse(response) as ClientWorkItem;
       setClientWorkItems((current) => [saved, ...current]);
       setWorkItemModal(false);
       scheduleActivityRefresh();
@@ -799,7 +794,7 @@ export default function ClientProfilePage() {
       toast.error(await readErrorMessage(response, "Unable to update this item."));
       return;
     }
-    const saved = await response.json() as ClientWorkItem;
+    const saved = await readJsonResponse(response) as ClientWorkItem;
     setClientWorkItems((current) => current.map((entry) => entry._id === saved._id ? saved : entry));
     scheduleActivityRefresh();
   };
@@ -855,8 +850,6 @@ export default function ClientProfilePage() {
     Number(billingForm.targetCharges || 0) +
     Number(billingForm.otherCharges || 0) +
     billingFormLineItems.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
-  const fyGeneratedTotal = sumFyEntries(fyForm.generated);
-  const fyTargetTotal = sumFyEntries(fyForm.targets);
 
   useEffect(() => {
     const scrollContainer = document.getElementById("dashboard-scroll-area");
@@ -1354,12 +1347,12 @@ export default function ClientProfilePage() {
       );
 
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
+        const data = await readJsonResponse(response).catch(() => null);
         toast.error(data?.error || `Failed to ${editingDocumentId ? "update" : "add"} document.`);
         return;
       }
 
-      const saved = await response.json();
+      const saved = await readJsonResponse(response);
       setDocuments((prev) => {
         if (editingDocumentId) {
           return prev.map((d) => d._id === editingDocumentId ? saved : d);
@@ -1401,7 +1394,7 @@ export default function ClientProfilePage() {
     setBusyAction(`document-migrate-${document._id}`);
     try {
       const response = await fetch(`/api/documents/${document._id}/migrate`, { method: "POST" });
-      const data = await response.json().catch(() => null);
+      const data = await readJsonResponse(response).catch(() => null);
       if (!response.ok) {
         toast.error(data?.error || "Could not migrate this Drive link.");
         return;
@@ -1457,7 +1450,7 @@ export default function ClientProfilePage() {
         { cache: "no-store" },
       );
       if (!response.ok) return;
-      const records = await response.json() as AnnualReturnRecord[];
+      const records = await readJsonResponse(response) as AnnualReturnRecord[];
       const refreshed = records.find((record) => record.financialYear === financialYear);
       if (!refreshed) return;
       setAnnualReturns((current) => {
@@ -1529,7 +1522,7 @@ export default function ClientProfilePage() {
         return;
       }
 
-      const savedRecords = await Promise.all(responses.map((response) => response.json() as Promise<InvoiceTrackingRecord>));
+      const savedRecords = await Promise.all(responses.map((response) => readJsonResponse(response) as Promise<InvoiceTrackingRecord>));
       savedRecords.forEach((saved, index) => optimisticOps[index]?.commit(saved));
       invalidate("/api/invoices");
       await refreshAnnualReturnForFy(invoiceForm.financialYear);
@@ -1597,13 +1590,13 @@ export default function ClientProfilePage() {
       });
 
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
+        const data = await readJsonResponse(response).catch(() => null);
         rollback();
         toast.error(data?.error || "Failed to add upload record.");
         return;
       }
 
-      const saved = await response.json();
+      const saved = await readJsonResponse(response);
       commit(saved);
       invalidate("/api/upload-records");
       await refreshAnnualReturnForFy(payload.financialYear);
@@ -1746,13 +1739,13 @@ export default function ClientProfilePage() {
       );
 
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
+        const data = await readJsonResponse(response).catch(() => null);
         ops?.rollback?.();
         toast.error(data?.error || `Failed to ${editingBillingId ? "update" : "save"} billing.`);
         return;
       }
 
-      const saved = await response.json();
+      const saved = await readJsonResponse(response);
       // Defensive merge: ensure totalPaid / pendingAmount / paymentStatus are always
       // numbers even if the API ever returns a partial document (prevents ₹NaN).
       const safeCommit = {
@@ -1889,13 +1882,13 @@ export default function ClientProfilePage() {
       );
 
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
+        const data = await readJsonResponse(response).catch(() => null);
         ops?.rollback?.();
         toast.error(data?.error || `Failed to ${editingPaymentId ? "update" : "record"} payment.`);
         return;
       }
 
-      const saved = await response.json();
+      const saved = await readJsonResponse(response);
       ops?.commit?.(saved);
       refreshWorkspaceSilently();
       scheduleActivityRefresh();
@@ -1935,89 +1928,31 @@ export default function ClientProfilePage() {
     });
   };
 
-  const closeFyModal = () => {
+  const openFYModal = (record?: FYRecord | null, financialYear = selectedFy) => {
+    fyReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const target = record || fyRecords.find(entry => entry.financialYear === financialYear) || null;
+    setFyContext({ financialYear: target?.financialYear || financialYear, record: target }); setFyModal(true);
+  };
+  const closeFYModal = () => {
+    const trigger = fyReturnFocus.current;
     setFyModal(false);
-    setFyForm({
-      financialYear: selectedFy,
-      generated: createEmptyFyEntries(),
-      targets: createEmptyFyEntries(),
+    requestAnimationFrame(() => {
+      if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+      else if (trigger) Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+        .find(button => button.textContent?.trim() === trigger.textContent?.trim())?.focus({ preventScroll: true });
     });
   };
-
-  const openFYModal = (record?: FYRecord | null) => {
-    const targetRecord = record || fyRecords.find((entry) => entry.financialYear === selectedFy) || null;
-    const targetFy = targetRecord?.financialYear || selectedFy;
-    router.push(`/dashboard/financial-year?open=targets&clientId=${encodeURIComponent(clientId)}&fy=${encodeURIComponent(targetFy)}`);
-  };
-
-  const updateFyEntry = (section: "generated" | "targets", categoryId: string, type: "RECYCLING" | "EOL", value: string) => {
-    setFyForm((current) => ({
-      ...current,
-      [section]: current[section].map((entry) => (
-        entry.categoryId === categoryId && entry.type === type
-          ? { ...entry, value }
-          : entry
-      )),
-    }));
-  };
-
-  const saveFY = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setInlineSaving(true);
-    try {
-      const payload = {
-        clientId,
-        financialYear: fyForm.financialYear,
-        generated: isPWP
-          ? fyForm.generated.map((entry) => ({ ...entry, value: Number(entry.value) || 0 }))
-          : [],
-        targets: !isPWP && !isSIMP
-          ? fyForm.targets.map((entry) => ({ ...entry, value: Number(entry.value) || 0 }))
-          : [],
-      };
-
-      const response = await fetch("/api/financial-year", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        toast.error(data?.error || "Failed to save financial year data.");
-        return;
-      }
-
-      const saved = await response.json();
-      // Update only fyRecords in state — no full page reload
-      setFyRecords((prev) => {
-        const exists = prev.some((r) => r.financialYear === saved.financialYear);
-        return exists
-          ? prev.map((r) => r.financialYear === saved.financialYear ? saved : r)
-          : [...prev, saved];
-      });
-      closeFyModal();
-      setSelectedFy(payload.financialYear);
-      invalidate("/api/financial-year", "/api/dashboard", "/api/activities");
-      refreshWorkspaceSilently();
-      scheduleActivityRefresh();
-      toast.success(isPWP ? "Credit data saved!" : "FY data saved!");
-      const targetTotal = payload.targets.reduce((sum, entry) => sum + Number(entry.value || 0), 0);
-      const hasScreenshot = documents.some((document) => (
-        document.documentKind === "target-screenshot" && document.financialYear === payload.financialYear
-      ));
-      if (targetTotal > 0 && !hasScreenshot) {
-        setProfileConfirmation({
-          title: "Add target screenshot?",
-          description: `Target data for FY ${payload.financialYear} has been saved. Upload the source screenshot now to keep the record auditable.`,
-          confirmLabel: "Upload screenshot",
-          variant: "warning",
-          action: async () => openDocumentUpload("target-screenshot", payload.financialYear),
-        });
-      }
-      navigateToClientSection({ primary: "compliance", secondary: "targetsCredits" });
-    } finally {
-      setInlineSaving(false);
+  const onFYRecordSaved = async (saved: FinancialYearRecord) => {
+    const merge = (records: FYRecord[]) => records.some(record => record.financialYear === saved.financialYear)
+      ? records.map(record => record.financialYear === saved.financialYear ? saved : record) : [...records, saved];
+    setFyRecords(merge); setSelectedFy(saved.financialYear);
+    await mutateWorkspace(current => current ? { ...current, financialYears: merge(current.financialYears),
+      failedSections: current.failedSections.filter(section => section !== "financial years") } : current, { revalidate: false });
+    invalidate("/api/financial-year", "/api/dashboard", "/api/activities"); scheduleActivityRefresh();
+    const targetTotal = saved.targets?.reduce((sum, entry) => sum + entry.value, 0) || 0;
+    if (targetTotal > 0 && !documents.some(document => document.documentKind === "target-screenshot" && document.financialYear === saved.financialYear)) {
+      setProfileConfirmation({ title: "Add target screenshot?", description: `Target data for FY ${saved.financialYear} has been saved. Upload the source screenshot to keep the record auditable.`,
+        confirmLabel: "Upload screenshot", variant: "warning", action: async () => openDocumentUpload("target-screenshot", saved.financialYear) });
     }
   };
 
@@ -2050,7 +1985,7 @@ export default function ClientProfilePage() {
         return;
       }
 
-      const saved = await response.json() as AnnualReturnRecord;
+      const saved = await readJsonResponse(response) as AnnualReturnRecord;
       setAnnualReturns((current) => {
         const exists = current.some((record) => record.financialYear === saved.financialYear);
         return exists
@@ -2104,7 +2039,7 @@ export default function ClientProfilePage() {
 
     try {
       const templateResponse = await fetch("/api/email/template?name=payment-reminder");
-      const data = await templateResponse.json();
+      const data = await readJsonResponse(templateResponse);
       const template = typeof data?.html === "string" ? data.html : "";
       if (!template) {
         setReminderPreviewHtml(null);
@@ -2202,7 +2137,7 @@ export default function ClientProfilePage() {
               logClientName: client.companyName,
               logFy: reminderBilling.financialYear,
             }),
-          }).then((response) => response.json())
+          }).then((response) => readJsonResponse(response))
         )
       );
 
@@ -2359,7 +2294,7 @@ export default function ClientProfilePage() {
         body: JSON.stringify({ ...data, persons: validPersons, removedPersonIds: removedIds }),
       });
       if (!r.ok) { toast.error(await readErrorMessage(r, "Failed to save")); return; }
-      const refreshed = await r.json() as Client;
+      const refreshed = await readJsonResponse(r) as Client;
       setClient(refreshed);
       await mutateWorkspace(
         (current) => current ? { ...current, client: refreshed } : current,
@@ -3202,7 +3137,7 @@ export default function ClientProfilePage() {
         busyAction={busyAction}
         canManageDocuments={canManageDocuments}
         onUpload={(financialYear) => openDocumentUpload("target-screenshot", financialYear)}
-        targetsHref={(financialYear) => `/dashboard/financial-year?fy=${encodeURIComponent(financialYear)}&clientId=${encodeURIComponent(client.clientId)}&open=targets`}
+        onOpenTargets={financialYear => openFYModal(null, financialYear)}
         onEdit={openEditDocument}
         onDelete={setDocumentPendingDelete}
         onMigrate={(document) => void migrateDocument(document)}
@@ -3368,7 +3303,15 @@ export default function ClientProfilePage() {
           ) : <div className="space-y-2">{clientTrackers.filter((tracker) => !tracker.financialYear || tracker.financialYear === selectedFy).map((tracker) => (
             <Link key={tracker._id} href={`/dashboard/client-trackers/${tracker._id}`} className="block rounded-xl border border-base bg-surface/70 p-3 transition hover:border-blue-400">
               <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-default">{tracker.name}</strong>{tracker.financialYear && <span className="text-xs text-faint">FY {tracker.financialYear}</span>}</div>
-              <div className="mt-2 flex flex-wrap gap-2">{tracker.fields.map((field) => { const value = tracker.entry?.values?.[field.key]; return <span key={field.key} className={`rounded-full px-2 py-1 text-xs ${trackerBadgeClass(field, value)}`}>{field.label}: <strong>{value === true ? "Yes" : value === false ? "No" : String(value ?? "—")}</strong></span>; })}</div>
+              <div className="mt-2 flex flex-wrap gap-2">{tracker.fields.map((field) => {
+                const value = tracker.entry?.values?.[field.key];
+                if (trackerHasOptionColors(field) && value != null && value !== "" && (!Array.isArray(value) || value.length)) {
+                  return <span key={field.key} className="inline-flex flex-wrap items-center gap-1 text-xs text-muted">{field.label}:
+                    {(Array.isArray(value) ? value : [String(value)]).map(option => <TrackerOptionBadge key={option} field={field} value={option} />)}
+                  </span>;
+                }
+                return <span key={field.key} className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">{field.label}: <strong>{value === true ? "Yes" : value === false ? "No" : String(value ?? "—")}</strong></span>;
+              })}</div>
               {tracker.entry?.updatedAt && <p className="mt-2 text-xs text-faint">Last updated {new Date(tracker.entry.updatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}{tracker.entry.updatedBy ? ` by ${tracker.entry.updatedBy}` : ""}</p>}
             </Link>
           ))}</div>}
@@ -3949,10 +3892,11 @@ export default function ClientProfilePage() {
         </form>
       </Modal>
 
+      <FinancialYearModal open={fyModal} onClose={closeFYModal} clients={[client]} lockClient lockFinancialYear
+        initialClientId={client.clientId} initialFinancialYear={fyContext.financialYear} initialRecord={fyContext.record} onSaved={onFYRecordSaved} />
       <ClientProfileModals
         client={client}
         isPWP={isPWP}
-        isSIMP={isSIMP}
         docModal={docModal}
         docModalMode={docModalMode}
         docForm={docForm}
@@ -3963,15 +3907,6 @@ export default function ClientProfilePage() {
           openDocumentUpload("general", selectedFy);
         }}
         saveDocument={saveDocument}
-        fyModal={fyModal}
-        fyForm={fyForm}
-        setFyForm={setFyForm}
-        closeFyModal={closeFyModal}
-        saveFY={saveFY}
-        updateFyEntry={updateFyEntry}
-        fyGeneratedTotal={fyGeneratedTotal}
-        fyTargetTotal={fyTargetTotal}
-        fyData={fyData}
         reminderModal={reminderModal}
         closeReminderModal={closeReminderModal}
         sendReminder={sendReminder}

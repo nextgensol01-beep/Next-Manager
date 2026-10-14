@@ -1,5 +1,7 @@
 "use client";
 
+import { readJsonResponse } from "@/lib/http-response";
+
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
@@ -392,7 +394,7 @@ function PasteImportModal({
             `/api/contacts?search=${encodeURIComponent(name)}&withCompanies=true`
           );
           if (!res.ok) throw new Error("Contact lookup failed");
-          const data: MatchCandidate[] = await res.json();
+          const data: MatchCandidate[] = await readJsonResponse(res);
           // Only keep exact name matches (case-insensitive)
           const exact = data.filter(
             (c) => c.name.trim().toLowerCase() === name.toLowerCase()
@@ -1054,7 +1056,7 @@ export default function ClientFormModal({
     try {
       const r = await fetch(`/api/clients/generate-id?category=${encodeURIComponent(category)}`);
       if (!r.ok) throw new Error();
-      const d = await r.json();
+      const d = await readJsonResponse(r);
       if (previewRequestRef.current !== requestId) return;
       setClientIdPreview(typeof d.clientId === "string" ? d.clientId : DEFAULT_CLIENT_ID_PREVIEW);
     } catch {

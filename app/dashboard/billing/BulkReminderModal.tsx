@@ -1,5 +1,7 @@
 "use client";
 
+import { readJsonResponse } from "@/lib/http-response";
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import Modal from "@/components/ui/Modal";
@@ -137,7 +139,7 @@ export default function BulkReminderModal({ open, billings, clients, fy, onClose
     try {
       const res = await fetch(`/api/email/bulk-reminder?jobId=${jobId}`);
       if (!res.ok) return;
-      const data: BulkJob = await res.json();
+      const data: BulkJob = await readJsonResponse(res);
       setJob(data);
       if (["completed", "failed", "cancelled"].includes(data.status)) {
         stopPolling();
@@ -175,7 +177,7 @@ export default function BulkReminderModal({ open, billings, clients, fy, onClose
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fy, recipients, delayMs }),
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) {
         toast.error(data.error || "Failed to create job");
         return;

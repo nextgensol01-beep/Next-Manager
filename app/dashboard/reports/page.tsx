@@ -1,4 +1,5 @@
-﻿"use client";
+"use client";
+import { readJsonResponse } from "@/lib/http-response";
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import toast from "react-hot-toast";
@@ -139,7 +140,7 @@ export default function ReportsPage() {
         let legacy: CustomExportPresetDefinition[] = [];
         try { const parsed = JSON.parse(window.localStorage.getItem(CUSTOM_EXPORT_USER_PRESETS_KEY) || "[]"); if (Array.isArray(parsed)) legacy = parsed.filter((entry) => entry?.id && entry?.name && entry?.config?.fields?.length); } catch { /* Keep malformed browser data untouched. */ }
         const response = await fetch("/api/reports/custom-export/presets", legacy.length ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ presets: legacy.map((entry) => ({ name: entry.name, config: entry.config, migrationKey: entry.id })) }) } : { cache: "no-store" });
-        const body = await response.json();
+        const body = await readJsonResponse(response);
         if (!response.ok) throw new Error(body.error || "Could not load export presets");
         if (legacy.length) window.localStorage.removeItem(CUSTOM_EXPORT_USER_PRESETS_KEY);
         if (!cancelled) { setUserPresets(body.presets || []); setPresetsLoaded(true); }
@@ -191,7 +192,7 @@ export default function ReportsPage() {
 
         const response = await fetch(`/api/clients?${params.toString()}`, { cache: "no-store", signal: controller.signal });
         if (!response.ok) throw new Error("Failed to load clients");
-        const data = await response.json();
+        const data = await readJsonResponse(response);
         if (cancelled) return;
         const nextClients = Array.isArray(data)
           ? data.map((client) => ({
@@ -250,7 +251,7 @@ export default function ReportsPage() {
             sortBy,
           }),
         });
-        const body = await response.json();
+        const body = await readJsonResponse(response);
         if (cancelled) return;
         if (!response.ok) {
           setPreview(null);
@@ -297,7 +298,7 @@ export default function ReportsPage() {
       if (!r.ok) {
         let message = "Failed to generate report";
         try {
-          const errorBody = await r.json();
+          const errorBody = await readJsonResponse(r);
           if (typeof errorBody?.error === "string" && errorBody.error.trim()) {
             message = errorBody.error;
           }
@@ -351,7 +352,7 @@ export default function ReportsPage() {
       if (!r.ok) {
         let message = "Failed to generate custom export";
         try {
-          const errorBody = await r.json();
+          const errorBody = await readJsonResponse(r);
           if (typeof errorBody?.error === "string" && errorBody.error.trim()) {
             message = errorBody.error;
           }
@@ -442,7 +443,7 @@ export default function ReportsPage() {
     savingPresetRef.current = true;
     try {
       const response = await fetch("/api/reports/custom-export/presets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: preset.name, config: preset.config }) });
-      const body = await response.json(); if (!response.ok) throw new Error(body.error || "Could not save preset");
+      const body = await readJsonResponse(response); if (!response.ok) throw new Error(body.error || "Could not save preset");
       setUserPresets(body.presets || []); setPresetName(""); toast.success("Export preset saved to your account");
     } catch (error) { toast.error(error instanceof Error ? error.message : "Could not save preset"); }
     finally { savingPresetRef.current = false; }
@@ -451,7 +452,7 @@ export default function ReportsPage() {
   const deletePreset = async (presetId: string) => {
     try {
       const response = await fetch("/api/reports/custom-export/presets?id=" + encodeURIComponent(presetId), { method: "DELETE" });
-      const body = await response.json(); if (!response.ok) throw new Error(body.error || "Could not delete preset");
+      const body = await readJsonResponse(response); if (!response.ok) throw new Error(body.error || "Could not delete preset");
       setUserPresets(body.presets || []); toast.success("Preset deleted");
     } catch (error) { toast.error(error instanceof Error ? error.message : "Could not delete preset"); }
   };

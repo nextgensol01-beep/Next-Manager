@@ -1,3 +1,4 @@
+import { MAX_SEARCH_LENGTH } from "@/lib/search/client-search";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -25,6 +26,7 @@ export async function GET(req: NextRequest) {
   const access = await clientCredentialAccess(session);
 
   const { searchParams } = new URL(req.url);
+  if ((searchParams.get("search") || "").length > MAX_SEARCH_LENGTH) return NextResponse.json({ error: "Search is too long" }, { status: 400 });
   const summaryOnly = searchParams.get("summary") === "1";
 
   if (summaryOnly) {
@@ -38,6 +40,7 @@ export async function GET(req: NextRequest) {
     const parsedLimit = limitParam ? parseInt(limitParam, 10) : NaN;
 
     const clients = await listClientSummaries({
+      searchKeys: access.searchableKeys,
       category: searchParams.get("category"),
       categories,
       state: searchParams.get("state"),
@@ -58,6 +61,7 @@ export async function GET(req: NextRequest) {
     const parsedOffset = offsetParam ? parseInt(offsetParam, 10) : 0;
 
     const page = await listClientsWithContactsPage({
+      searchKeys: access.searchableKeys,
       category: searchParams.get("category"),
       state: searchParams.get("state"),
       search: searchParams.get("search"),
@@ -71,6 +75,7 @@ export async function GET(req: NextRequest) {
   }
 
   const clients = await listClientsWithContacts({
+    searchKeys: access.searchableKeys,
     category: searchParams.get("category"),
     state: searchParams.get("state"),
     search: searchParams.get("search"),

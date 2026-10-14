@@ -1,3 +1,4 @@
+import { readJsonResponse } from "@/lib/http-response";
 type IpLocationResponse = {
   success?: boolean;
   ip?: string;
@@ -76,7 +77,7 @@ export async function lookupIpLocation(value?: string | null): Promise<SessionNe
       next: { revalidate: 86_400 },
     });
     if (!response.ok) return null;
-    const data = await response.json() as IpLocationResponse;
+    const data = await readJsonResponse(response) as IpLocationResponse;
     if (data.success === false) return null;
 
     const resolvedIp = normalizeClientIp(data.ip || ip);

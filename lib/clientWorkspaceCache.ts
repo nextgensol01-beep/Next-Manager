@@ -1,5 +1,7 @@
 "use client";
 
+import { readJsonResponse } from "@/lib/http-response";
+
 import { preload } from "swr";
 
 export type ClientWorkspaceCacheKey = readonly [url: string, sessionScope: string];
@@ -18,11 +20,11 @@ export async function fetchClientWorkspace<T>(
   });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    const payload = await readJsonResponse(response).catch(() => null) as { error?: string } | null;
     throw new Error(payload?.error || `Unable to load client workspace (HTTP ${response.status}).`);
   }
 
-  return response.json() as Promise<T>;
+  return readJsonResponse(response) as Promise<T>;
 }
 
 export function prefetchClientWorkspace(clientId: string, sessionScope: string) {

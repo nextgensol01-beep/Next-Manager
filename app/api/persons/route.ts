@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
+import { MAX_SEARCH_LENGTH } from "@/lib/search/client-search";
 import {
   createPersonProfile,
   listPersons,
@@ -14,12 +15,13 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const search = searchParams.get("search");
+  if ((search || "").length > MAX_SEARCH_LENGTH) return NextResponse.json({ error: "Search is too long" }, { status: 400 });
   const limitParam = searchParams.get("limit");
   const parsedLimit = limitParam === "all"
     ? null
     : Number.parseInt(limitParam || "20", 10);
   const safeLimit = typeof parsedLimit === "number" && Number.isFinite(parsedLimit) && parsedLimit > 0
-    ? parsedLimit
+    ? Math.min(parsedLimit, 250)
     : 20;
 
   const persons = await listPersons({

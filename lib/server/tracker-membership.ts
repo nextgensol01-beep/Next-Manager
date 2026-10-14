@@ -38,8 +38,10 @@ export async function syncCategoryTrackerMembership(tracker: {
     { trackerId: tracker._id, clientId: { $in: clientIds }, inScope: false },
     { $set: { inScope: true }, $unset: { removedAt: "", removalReason: "" } },
   );
-  const activeExisting = existing.filter((entry) => entry.inScope !== false).length;
-  const changed = additions.length > 0 || activeExisting !== clientIds.length;
+  const activeIds = new Set(existing.filter((entry) => entry.inScope !== false).map(entry => entry.clientId));
+  const storedIds = new Set(tracker.clientIds || []);
+  const changed = additions.length > 0 || activeIds.size !== clientIds.length ||
+    storedIds.size !== clientIds.length || clientIds.some(clientId => !activeIds.has(clientId) || !storedIds.has(clientId));
   if (changed && tracker.save) {
     tracker.clientIds = clientIds;
     await tracker.save();

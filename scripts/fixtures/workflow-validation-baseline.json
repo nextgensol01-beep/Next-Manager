@@ -1,0 +1,94 @@
+{
+  "ready": [
+    null,
+    null
+  ],
+  "incomplete": [
+    "Annual return update needs an email subject.",
+    "Annual return update needs an email subject."
+  ],
+  "name": [
+    "Workflow 1 needs a name.",
+    "Workflow 2 needs a name."
+  ],
+  "audience": [
+    "Annual return update eligibility needs at least one condition.",
+    "Annual return update eligibility needs at least one condition."
+  ],
+  "removed": [
+    "Annual return update eligibility references a removed tracker column.",
+    "Annual return update eligibility references a removed tracker column."
+  ],
+  "incompatible": [
+    "Annual return update eligibility uses an incompatible operator for Mail to be sent.",
+    "Annual return update eligibility uses an incompatible operator for Mail to be sent."
+  ],
+  "noValue": [
+    "Annual return update eligibility needs a value for Mail to be sent.",
+    "Annual return update eligibility needs a value for Mail to be sent."
+  ],
+  "pointColumn": [
+    "Annual return update has a message for a removed tracker column.",
+    "Annual return update has a message for a removed tracker column."
+  ],
+  "pointValue": [
+    "Annual return update needs a matching value for each message.",
+    "Annual return update needs a matching value for each message."
+  ],
+  "pointText": [
+    "Annual return update needs text for each matching message.",
+    "Annual return update needs text for each matching message."
+  ],
+  "ruleConditions": [
+    "Annual return update conditional content needs at least one condition.",
+    "Annual return update conditional content needs at least one condition."
+  ],
+  "ruleText": [
+    "Annual return update has conditional content without message text.",
+    "Annual return update has conditional content without message text."
+  ],
+  "skip": [
+    null,
+    null
+  ],
+  "inactive": [
+    "Annual return update has conditional content without message text.",
+    "Annual return update has conditional content without message text."
+  ],
+  "attachment": [
+    "Annual return update attachment rule needs at least one condition.",
+    "Annual return update attachment rule needs at least one condition."
+  ],
+  "noRules": [
+    null,
+    null
+  ],
+  "partialCoverage": [
+    null,
+    null
+  ],
+  "limited": [
+    null,
+    null
+  ],
+  "points": [
+    null,
+    null
+  ],
+  "statements": [
+    null,
+    null
+  ],
+  "legacy": [
+    null,
+    null
+  ],
+  "optional": [
+    null,
+    null
+  ],
+  "multiple": [
+    "Workflow 1 needs a name.",
+    "Workflow 2 needs a name."
+  ]
+}

@@ -1,3 +1,4 @@
+import { withTrackerApiErrors, readTrackerRequestBody } from "@/lib/server/tracker-api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -25,7 +26,7 @@ function cleanClientCategories(value: unknown): ClientTrackerCategory[] {
   return Array.isArray(value) ? [...new Set(value.filter((category): category is ClientTrackerCategory => typeof category === "string" && allowed.has(category)))] : [];
 }
 
-export async function GET(req: NextRequest) {
+export const GET = withTrackerApiErrors(async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await connectDB();
@@ -50,15 +51,15 @@ export async function GET(req: NextRequest) {
     ...(clientId ? { entry: entriesByTracker.get(String(tracker._id)) || null } : {}),
   }));
   return NextResponse.json(payload);
-}
+});
 
-export async function POST(req: NextRequest) {
+export const POST = withTrackerApiErrors(async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!await isAdminSession(session)) return NextResponse.json({ error: "Administrator access required to create trackers." }, { status: 403 });
   try {
     await connectDB();
-    const body = await req.json();
+    const body = await readTrackerRequestBody(req);
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const fields = cleanTrackerFields(body.fields, body.includeStatus !== false);
     const financialYear = typeof body.financialYear === "string" ? body.financialYear.trim() : "";
@@ -106,7 +107,6 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ...tracker.toObject(), entryCount: clientIds.length }, { status: 201 });
   } catch (error) {
-    console.error("POST /api/client-trackers:", error);
-    return NextResponse.json({ error: "Unable to create tracker." }, { status: 500 });
+    throw error;
   }
-}
+});

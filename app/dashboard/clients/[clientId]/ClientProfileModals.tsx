@@ -6,13 +6,9 @@ import { formatCurrency, FINANCIAL_YEARS, PAYMENT_MODES } from "@/lib/utils";
 import { CategoryBreakdown } from "@/components/ui/CategoryBreakdown";
 import Modal from "@/components/ui/Modal";
 import {
-  CAT_IDS,
-  CATS,
-  CREDIT_TYPES,
   type Client,
   type DocumentCategory,
   type EmailOption,
-  type FYEntryForm,
   type FYRecord,
 } from "./ClientProfileSupport";
 
@@ -43,11 +39,6 @@ type PaymentForm = {
   referenceNumber: string;
   notes: string;
 };
-type FyForm = {
-  financialYear: string;
-  generated: FYEntryForm[];
-  targets: FYEntryForm[];
-};
 type ReminderForm = { subject: string; message: string };
 type BreakdownProps = {
   entries?: Array<{ categoryId: string; type: "RECYCLING" | "EOL"; value: number }>;
@@ -58,7 +49,6 @@ type BreakdownProps = {
 interface ClientProfileModalsProps {
   client: Client;
   isPWP: boolean;
-  isSIMP: boolean;
   docModal: boolean;
   docModalMode: "create" | "edit";
   docForm: DocForm;
@@ -66,15 +56,6 @@ interface ClientProfileModalsProps {
   closeDocumentModal: () => void;
   openDocumentUpload: () => void;
   saveDocument: (event: React.FormEvent) => void;
-  fyModal: boolean;
-  fyForm: FyForm;
-  setFyForm: SetState<FyForm>;
-  closeFyModal: () => void;
-  saveFY: (event: React.FormEvent) => void;
-  updateFyEntry: (section: "generated" | "targets", categoryId: string, type: "RECYCLING" | "EOL", value: string) => void;
-  fyGeneratedTotal: number;
-  fyTargetTotal: number;
-  fyData: FYRecord | undefined;
   reminderModal: boolean;
   closeReminderModal: () => void;
   sendReminder: (event: React.FormEvent) => void;
@@ -115,7 +96,6 @@ interface ClientProfileModalsProps {
 export default function ClientProfileModals({
   client,
   isPWP,
-  isSIMP,
   docModal,
   docModalMode,
   docForm,
@@ -123,15 +103,6 @@ export default function ClientProfileModals({
   closeDocumentModal,
   openDocumentUpload,
   saveDocument,
-  fyModal,
-  fyForm,
-  setFyForm,
-  closeFyModal,
-  saveFY,
-  updateFyEntry,
-  fyGeneratedTotal,
-  fyTargetTotal,
-  fyData,
   reminderModal,
   closeReminderModal,
   sendReminder,
@@ -227,98 +198,6 @@ export default function ClientProfileModals({
           </div>
         </form>
       </Modal>
-
-      {!isSIMP && (
-        <Modal open={fyModal} onClose={closeFyModal} title={isPWP ? "Manage Credit Data" : "Manage FY Data"} size="lg">
-          <form onSubmit={saveFY} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="label">Client</label>
-                <div className="input-field bg-surface text-muted flex items-center">{client.companyName}</div>
-              </div>
-              <div>
-                <label className="label">Financial Year *</label>
-                <select className="input-field" value={fyForm.financialYear} onChange={(e) => setFyForm((current) => ({ ...current, financialYear: e.target.value }))} required>
-                  {FINANCIAL_YEARS.map((year) => <option key={year} value={year}>{year}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-base overflow-hidden">
-              <div className="px-4 py-3 border-b border-base bg-surface">
-                <p className="font-semibold text-default">{isPWP ? "Generated Credits" : "Target Entries"}</p>
-                <p className="text-xs text-faint mt-1">
-                  {isPWP
-                    ? "Enter generated credits for each category and type."
-                    : "Enter target quantities for each category and type."}
-                </p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[620px] text-sm">
-                  <thead>
-                    <tr className="bg-surface border-b border-base">
-                      <th className="text-left text-xs text-muted font-semibold px-4 py-2.5">Category</th>
-                      {CREDIT_TYPES.map((type) => (
-                        <th key={type} className="text-left text-xs text-muted font-semibold px-4 py-2.5">{type === "RECYCLING" ? "Recycling" : "EOL"}</th>
-                      ))}
-                      <th className="text-right text-xs text-muted font-semibold px-4 py-2.5">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {CAT_IDS.map((categoryId, index) => {
-                      const section = isPWP ? fyForm.generated : fyForm.targets;
-                      const rowEntries = section.filter((entry) => entry.categoryId === categoryId);
-                      const rowTotal = rowEntries.reduce((sum, entry) => sum + (Number(entry.value) || 0), 0);
-                      return (
-                        <tr key={categoryId} className="border-b border-base last:border-0">
-                          <td className="px-4 py-3 font-medium text-default">{CATS[index]}</td>
-                          {CREDIT_TYPES.map((type) => {
-                            const entry = section.find((item) => item.categoryId === categoryId && item.type === type);
-                            return (
-                              <td key={type} className="px-4 py-3">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  className="input-field"
-                                  value={entry?.value || ""}
-                                  onChange={(e) => updateFyEntry(isPWP ? "generated" : "targets", categoryId, type, e.target.value)}
-                                  placeholder="0"
-                                />
-                              </td>
-                            );
-                          })}
-                          <td className="px-4 py-3 text-right font-semibold text-default">{rowTotal.toLocaleString("en-IN")}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="bg-surface rounded-xl p-3 border border-base">
-                <p className="text-xs text-muted">{isPWP ? "Total Generated" : "Total Target"}</p>
-                <p className="text-lg font-bold text-default">{(isPWP ? fyGeneratedTotal : fyTargetTotal).toLocaleString("en-IN")}</p>
-              </div>
-              {fyData && (
-                <div className="bg-surface rounded-xl p-3 border border-base">
-                  <p className="text-xs text-muted">{isPWP ? "Already Sold" : "Already Achieved"}</p>
-                  <p className="text-lg font-bold text-default">{((isPWP ? fyData.totalSold : fyData.totalAchieved) || 0).toLocaleString("en-IN")}</p>
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button type="submit" className="btn-primary flex-1 justify-center" disabled={inlineSaving}>
-                {inlineSaving ? "Saving..." : isPWP ? "Save Credit Data" : "Save FY Data"}
-              </button>
-              <button type="button" className="btn-secondary" onClick={closeFyModal}>Cancel</button>
-            </div>
-          </form>
-        </Modal>
-      )}
 
       <Modal open={reminderModal} onClose={closeReminderModal} title="Send Payment Reminder" size="lg">
         <form onSubmit={sendReminder} className="space-y-4">

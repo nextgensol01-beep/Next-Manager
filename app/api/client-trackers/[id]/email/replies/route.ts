@@ -1,3 +1,5 @@
+import { withTrackerApiErrors } from "@/lib/server/tracker-api-errors";
+import { readJsonResponse } from "@/lib/http-response";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -23,7 +25,7 @@ async function gmailToken() {
       grant_type: "refresh_token",
     }),
   });
-  const data = (await response.json()) as {
+  const data = (await readJsonResponse(response)) as {
     access_token?: string;
     error_description?: string;
   };
@@ -32,7 +34,7 @@ async function gmailToken() {
   return data.access_token;
 }
 
-export async function POST(
+export const POST = withTrackerApiErrors(async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -71,7 +73,7 @@ export async function POST(
         `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(log.gmailThreadId)}?format=metadata&metadataHeaders=From`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
-      const thread = (await response.json()) as {
+      const thread = (await readJsonResponse(response)) as {
         messages?: Array<{
           id?: string;
           internalDate?: string;
@@ -137,4 +139,4 @@ export async function POST(
       { status: 409 },
     );
   }
-}
+});

@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { CalendarDays, UserPlus, LayoutList, Search, X } from "lucide-react";
+import { CalendarDays, UserPlus, LayoutList, MailCheck, Search, X } from "lucide-react";
 import { useFinancialYearPreference } from "@/app/providers";
 import { useSettingsSearch, STATIC_SECTIONS, type SearchResult } from "./SettingsSearchContext";
 import toast from "react-hot-toast";
@@ -13,6 +13,7 @@ export interface TabDef {
 }
 
 export const SETTINGS_TABS: TabDef[] = [
+  // Indexes stay aligned with SettingsShell and SettingsSearchContext.
   {
     label: "General",
     icon: <CalendarDays className="w-[18px] h-[18px]" />,
@@ -31,6 +32,7 @@ export const SETTINGS_TABS: TabDef[] = [
     iconBg: "bg-emerald-500 text-white",
     activeIconBg: "bg-white/25 text-white",
   },
+  { label: "Email & Delivery", icon: <MailCheck className="w-[18px] h-[18px]" />, iconBg: "bg-sky-500 text-white", activeIconBg: "bg-white/25 text-white" },
 ];
 
 /** iOS-style toggle */
@@ -380,7 +382,7 @@ function DropdownRow({
   onMouseEnter: () => void;
   onClick: () => void;
 }) {
-  const tabLabel = ["General", "Access & Users", "Custom Fields"][result.tabIndex] ?? "";
+  const tabLabel = SETTINGS_TABS[result.tabIndex]?.label ?? "";
   return (
     <button
       type="button"

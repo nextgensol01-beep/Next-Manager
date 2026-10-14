@@ -1,3 +1,4 @@
+import { withTrackerApiErrors, readTrackerRequestBody } from "@/lib/server/tracker-api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -258,7 +259,7 @@ function messageFor(input: {
   };
 }
 
-export async function GET(
+export const GET = withTrackerApiErrors(async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -277,9 +278,9 @@ export async function GET(
     return counts;
   }, {});
   return NextResponse.json({ logs, summary });
-}
+});
 
-export async function POST(
+export const POST = withTrackerApiErrors(async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -293,7 +294,7 @@ export async function POST(
     );
   await connectDB();
   const { id } = await params;
-  const body = await req.json();
+  const body = await readTrackerRequestBody(req);
   const workflowId = typeof body.workflowId === "string" ? body.workflowId : "";
   const kind = body.kind === "reminder" ? "reminder" : "initial";
   const selectedIds = Array.isArray(body.entryIds)
@@ -620,4 +621,4 @@ export async function POST(
     messages,
     skipped,
   });
-}
+});

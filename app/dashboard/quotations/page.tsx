@@ -1,5 +1,7 @@
 "use client";
-import React, { useState, useEffect, useCallback } from "react";
+
+import { readJsonResponse } from "@/lib/http-response";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import {
@@ -97,22 +99,23 @@ export default function QuotationsPage() {
 
   // Client suggestions fetch
   useEffect(() => {
+    const controller = new AbortController();
     if (!newClientName.trim() || !showNewForm) {
       setClientSuggestions([]);
       return;
     }
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/clients?summary=1&search=${encodeURIComponent(newClientName)}`);
+        const res = await fetch(`/api/clients?summary=1&search=${encodeURIComponent(newClientName)}`, { signal: controller.signal });
         if (res.ok) {
-          const data = await res.json();
-          setClientSuggestions(data);
+          const data = await readJsonResponse(res);
+          if (!controller.signal.aborted) setClientSuggestions(data);
         }
       } catch (err) {
-        console.error("Failed to fetch client suggestions", err);
+        if (!controller.signal.aborted) console.error("Failed to fetch client suggestions", err);
       }
     }, 200);
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [newClientName, showNewForm]);
 
   // Click outside to close client suggestions
@@ -123,21 +126,28 @@ export default function QuotationsPage() {
     return () => document.removeEventListener("click", handler);
   }, [showSuggestions]);
 
+  const listRequestRef = useRef<AbortController | null>(null);
   const fetchQuotations = useCallback(async () => {
+    listRequestRef.current?.abort();
+    const controller = new AbortController();
+    listRequestRef.current = controller;
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (fyFilter !== "all") params.set("financialYear", fyFilter);
       if (debouncedSearch) params.set("search", debouncedSearch);
-      const res = await fetch(`/api/quotations?${params}`);
-      if (res.ok) setQuotations(await res.json());
+      const res = await fetch(`/api/quotations?${params}`, { signal: controller.signal });
+      const data = await readJsonResponse(res);
+      if (res.ok && !controller.signal.aborted) setQuotations(data);
+    } catch (error) {
+      if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : "Unable to load quotations");
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, [statusFilter, fyFilter, debouncedSearch]);
 
-  useEffect(() => { fetchQuotations(); }, [fetchQuotations]);
+  useEffect(() => { void fetchQuotations(); return () => listRequestRef.current?.abort(); }, [fetchQuotations]);
 
   useEffect(() => {
     if (financialYearLoaded && !showNewForm) {
@@ -168,10 +178,10 @@ export default function QuotationsPage() {
         }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
+        const data = await readJsonResponse(res).catch(() => null);
         throw new Error(data?.error || `Failed to create quotation (${res.status})`);
       }
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       router.push(quotationHref(data._id));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to create quotation");
@@ -184,7 +194,7 @@ export default function QuotationsPage() {
     e.stopPropagation();
     const res = await fetch(`/api/quotations/${id}/duplicate`, { method: "POST" });
     if (res.ok) {
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       toast.success("Quotation duplicated");
       router.push(quotationHref(data._id));
     } else {

@@ -1,4 +1,6 @@
 "use client";
+
+import { readJsonResponse } from "@/lib/http-response";
 import { useState, useCallback } from "react";
 import { Globe, Shield, Trash2, RefreshCw, LogOut } from "lucide-react";
 import toast from "react-hot-toast";
@@ -79,7 +81,7 @@ export default function SessionsPage() {
     try {
       const res = await fetch("/api/sessions?all=1", { method: "DELETE" });
       if (!res.ok) throw new Error("Failed");
-      const body = await res.json();
+      const body = await readJsonResponse(res);
       toast.success(`Revoked ${body.deleted} session(s)`);
       invalidate("/api/sessions");
       refetch();

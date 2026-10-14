@@ -1,5 +1,8 @@
 "use client";
-import React, { useState, useEffect } from "react";
+
+import { readJsonResponse } from "@/lib/http-response";
+import React, { useState, useMemo } from "react";
+import { createSearchMatcher } from "@/lib/search/client-search";
 import toast from "react-hot-toast";
 import PageHeader from "@/components/ui/PageHeader";
 import Modal from "@/components/ui/Modal";
@@ -24,11 +27,7 @@ const emptyForm = { name: "", phoneNumbers: [""], emails: [""] };
 
 export default function ContactsPage() {
   const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setSearch(searchInput), 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
+  const search = searchInput;
 
   const [modalOpen,    setModalOpen]    = useState(false);
   const [editPerson,   setEditPerson]   = useState<Person | null>(null);
@@ -36,21 +35,21 @@ export default function ContactsPage() {
   const [saving,       setSaving]       = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
-  // Fetch persons from /api/persons
-  const personsUrl = `/api/persons?limit=all${search ? `&search=${encodeURIComponent(search)}` : ""}`;
-  const { data: rawPersons, loading, refetch } = useCache<Person[]>(personsUrl, { initialData: [] });
-  const { data: allPersons } = useCache<Person[]>("/api/persons?limit=all", { initialData: [] });
+  // These endpoints return complete collections, so typing is request-free.
+  const { data: allPersons, loading, refetch } = useCache<Person[]>("/api/persons?limit=all", { initialData: [] });
   // Fetch companies per person via /api/contacts (legacy endpoint, still works)
-  const { data: contactsWithCompanies } = useCache<(Person & { companies: Person["companies"] })[]>(
-    `/api/contacts?withCompanies=true${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+  const { data: contactsWithCompanies, refetch: refetchDirectory } = useCache<(Person & { companies: Person["companies"] })[]>(
+    "/api/contacts?withCompanies=true",
     { initialData: [] }
   );
 
   // Merge company data into persons
-  const persons: Person[] = (rawPersons || []).map((p) => {
-    const withCo = (contactsWithCompanies || []).find((c) => c._id === p._id);
-    return { ...p, companies: withCo?.companies || [] };
-  });
+  const directoryMap = useMemo(() => new Map(contactsWithCompanies.map(person => [person._id, person.companies])), [contactsWithCompanies]);
+  const persons = useMemo(() => {
+    const matches = createSearchMatcher(search);
+    return allPersons.filter(person => [person.name, ...person.phoneNumbers, ...person.emails].some(matches))
+      .map(person => ({ ...person, companies: directoryMap.get(person._id) || [] }));
+  }, [allPersons, directoryMap, search]);
   const totalContacts = allPersons.length;
   const shownContacts = persons.length;
   const hasSearch = Boolean(search.trim());
@@ -89,11 +88,11 @@ export default function ContactsPage() {
       };
       const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!r.ok) { toast.error("Error saving"); return; }
-      const data = await r.json();
+      const data = await readJsonResponse(r);
       if (data.merged) toast.success("Merged with existing person");
       else toast.success(editPerson ? "Contact updated!" : "Contact added!");
-      invalidate("/api/persons", "/api/contacts");
-      setModalOpen(false); refetch();
+      invalidate("/api/persons", "/api/contacts", "/api/clients");
+      setModalOpen(false); refetch(); refetchDirectory();
     } finally { setSaving(false); }
   };
 
@@ -101,7 +100,7 @@ export default function ContactsPage() {
     if (!confirm("Delete this person? They will be unlinked from all companies.")) return;
     await fetch(`/api/persons/${id}`, { method: "DELETE" });
     toast.success("Deleted");
-    invalidate("/api/persons", "/api/contacts", "/api/clients"); refetch();
+    invalidate("/api/persons", "/api/contacts", "/api/clients"); refetch(); refetchDirectory();
   };
 
   const toggleRow = (id: string) => {

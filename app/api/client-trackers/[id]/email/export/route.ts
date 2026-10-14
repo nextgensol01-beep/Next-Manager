@@ -1,3 +1,4 @@
+import { withTrackerApiErrors } from "@/lib/server/tracker-api-errors";
 import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { getServerSession } from "next-auth";
@@ -8,7 +9,7 @@ import ClientTracker from "@/models/ClientTracker";
 import EmailLog from "@/models/EmailLog";
 import { finaliseReadableReportSheet } from "@/lib/server/excel-report-style";
 
-export async function GET(
+export const GET = withTrackerApiErrors(async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -86,4 +87,4 @@ export async function GET(
       "Cache-Control": "no-store",
     },
   });
-}
+});

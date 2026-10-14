@@ -975,13 +975,11 @@ export async function executeReportStudio(rawConfig: unknown, options: { exportA
     sortDirection: "asc",
     page: 1,
     pageSize: 100,
-  }, { exportAll: true, sections, customFieldKeys });
+  }, { exportAll: true, sections, customFieldKeys, clientSearch: config.search, clientSearchFields: ["gstNumber", "registrationNumber"] });
 
   const sourceFieldIds = new Set(Array.from(referenced).filter((fieldId) => fieldMap.has(fieldId)));
   const relatedStats = await loadRelatedStats(report.rows.map((row) => row.clientId), config.financialYear, referenced, config.source);
-  const search = config.search.toLocaleLowerCase();
   const baseRows: StudioBaseRow[] = report.rows
-    .filter((row) => !search || [row.companyName, row.legalName, row.clientId, row.gstNumber, row.registrationNumber].some((value) => String(value || "").toLocaleLowerCase().includes(search)))
     .filter((row) => sourceMatches(row, config, relatedStats.get(row.clientId) || EMPTY_RELATED_STATS))
     .map((row) => {
       const related = relatedStats.get(row.clientId) || EMPTY_RELATED_STATS;

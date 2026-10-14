@@ -1,6 +1,7 @@
 "use client";
 import { Suspense } from "react";
 import SettingsShell from "./SettingsShell";
+import "@/components/client-trackers/email-delivery-security.css";
 
 export default function SettingsPage() {
   return (

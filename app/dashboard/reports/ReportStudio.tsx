@@ -1,5 +1,7 @@
 "use client";
 
+import { readJsonResponse } from "@/lib/http-response";
+
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { createPortal } from "react-dom";
@@ -382,7 +384,7 @@ export default function ReportStudio({
             })),
           }),
         } : { cache: "no-store" });
-        const body = await response.json().catch(() => null);
+        const body = await readJsonResponse(response).catch(() => null);
         if (!response.ok) throw new Error(body?.error || "Unable to load saved reports");
         if (legacyReports.length > 0) window.localStorage.removeItem(SAVED_REPORTS_KEY);
         setSavedReports(Array.isArray(body?.reports) ? body.reports : []);
@@ -630,7 +632,7 @@ export default function ReportStudio({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, config: { ...draft, name } }),
       });
-      const body = await response.json().catch(() => null);
+      const body = await readJsonResponse(response).catch(() => null);
       if (!response.ok) throw new Error(body?.error || "Unable to save report configuration");
       const created = body.report as SavedStudioReport;
       setSavedReports((current) => [created, ...current]);
@@ -658,7 +660,7 @@ export default function ReportStudio({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, config: { ...draft, name } }),
       });
-      const body = await response.json().catch(() => null);
+      const body = await readJsonResponse(response).catch(() => null);
       if (!response.ok) throw new Error(body?.error || "Unable to update saved report");
       const updated = body.report as SavedStudioReport;
       setSavedReports((current) => [updated, ...current.filter((entry) => entry.id !== updated.id)]);
@@ -678,7 +680,7 @@ export default function ReportStudio({
     setDeletingSavedReportId(id);
     try {
       const response = await fetch(`/api/reports/studio/saved/${encodeURIComponent(id)}`, { method: "DELETE" });
-      const body = await response.json().catch(() => null);
+      const body = await readJsonResponse(response).catch(() => null);
       if (!response.ok) throw new Error(body?.error || "Unable to delete saved report");
       setSavedReports((current) => current.filter((entry) => entry.id !== id));
       if (activeSavedReportId === id) {
@@ -746,7 +748,7 @@ export default function ReportStudio({
         body: JSON.stringify(applied),
       });
       if (!response.ok) {
-        const body = await response.json().catch(() => null);
+        const body = await readJsonResponse(response).catch(() => null);
         throw new Error(body?.error || "Unable to export report");
       }
       const blob = await response.blob();
@@ -2459,7 +2461,7 @@ function RelationshipDrawer({ clientId, financialYear, onClose }: { clientId: st
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/reports/studio/relationships/${encodeURIComponent(clientId)}?fy=${encodeURIComponent(financialYear)}`, { cache: "no-store" })
-      .then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body?.error || "Unable to load relationships"); return body; })
+      .then(async (response) => { const body = await readJsonResponse(response); if (!response.ok) throw new Error(body?.error || "Unable to load relationships"); return body; })
       .then((body) => { if (!cancelled) setData(body); })
       .catch((requestError) => { if (!cancelled) setError(requestError instanceof Error ? requestError.message : "Unable to load relationships"); });
     return () => { cancelled = true; };

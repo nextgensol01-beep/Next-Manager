@@ -5,6 +5,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import Modal from "@/components/ui/Modal";
 import { CURRENT_FY, FINANCIAL_YEARS } from "@/lib/utils";
 import { getFinancialYearPreferenceCacheKey } from "@/lib/financialYearPreferenceCache";
+import { setCacheScope } from "@/lib/cache";
 
 interface ThemeContextValue {
   dark: boolean;
@@ -120,6 +121,10 @@ function AppClientProviders({ children, dark }: { children: React.ReactNode; dar
     () => getSessionAccountKey(sessionUser),
     [sessionUser]
   );
+  const searchCacheScope = `${status}:${accountKey}:${(session?.user as { role?: string } | undefined)?.role || ""}`;
+  // Clear synchronously before children read cache entries from another account
+  // or permission level, and remount their per-hook request state on that change.
+  setCacheScope(searchCacheScope);
   const cacheKey = useMemo(
     () => getFinancialYearPreferenceCacheKey(accountKey),
     [accountKey]
@@ -265,6 +270,7 @@ function AppClientProviders({ children, dark }: { children: React.ReactNode; dar
 
   return (
     <FinancialYearCtx.Provider
+      key={searchCacheScope}
       value={{
         isLoaded: financialYearLoaded,
         currentFinancialYear: CURRENT_FY,

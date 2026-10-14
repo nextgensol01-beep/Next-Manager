@@ -22,6 +22,8 @@ interface ModalProps {
   backdropColor?: string;
   /** Opt in to the Reports workspace's fluid spring motion. */
   fluidMotion?: boolean;
+  /** Suspend this sheet while a separate authorization sheet owns interaction. */
+  inert?: boolean;
 }
 
 export default function Modal({
@@ -37,11 +39,16 @@ export default function Modal({
   backdropFilter,
   backdropColor,
   fluidMotion = false,
+  inert = false,
 }: ModalProps) {
   const [visible, setVisible] = useState(false);
   const [rendered, setRendered] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
+  // Capture the trigger before the parent makes its review sheet inert.
+  if (open && !wasOpenRef.current && typeof document !== "undefined") previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  wasOpenRef.current = open;
   const titleId = useId();
   const reduceMotion = useReducedMotion();
 
@@ -59,7 +66,7 @@ export default function Modal({
   // Escape key
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && !modalRef.current?.inert) onClose(); };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [open, onClose]);
@@ -68,19 +75,19 @@ export default function Modal({
   useEffect(() => {
     if (!open || !modalRef.current) return;
     const el = modalRef.current;
-    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const getFocusable = () => Array.from(el.querySelectorAll<HTMLElement>(
       'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
-    )).filter((entry) => entry.getClientRects().length > 0);
-    const frame = requestAnimationFrame(() => (getFocusable()[0] || el).focus());
+    )).filter((entry) => !entry.closest("[inert]") && entry.getClientRects().length > 0 && getComputedStyle(entry).visibility !== "hidden");
+    const frame = requestAnimationFrame(() => (getFocusable()[0] || el).focus({ preventScroll: true }));
     const trap = (e: KeyboardEvent) => {
+      if (el.inert) return;
       if (e.key !== "Tab") return;
       const focusable = getFocusable();
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (!first) { e.preventDefault(); el.focus(); return; }
+      if (!first) { e.preventDefault(); el.focus({ preventScroll: true }); return; }
       if (e.shiftKey) {
         if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
       } else {
@@ -92,7 +99,7 @@ export default function Modal({
       cancelAnimationFrame(frame);
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", trap);
-      previousFocusRef.current?.focus();
+      previousFocusRef.current?.focus({ preventScroll: true });
     };
   }, [open, rendered]);
 
@@ -109,6 +116,8 @@ export default function Modal({
     >
       <motion.div
         ref={modalRef}
+        inert={inert || undefined}
+        aria-hidden={inert || undefined}
         role="dialog"
         aria-modal="true"
         aria-labelledby={hideHeader ? undefined : titleId}

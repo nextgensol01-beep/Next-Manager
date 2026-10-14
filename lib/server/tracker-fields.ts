@@ -3,14 +3,13 @@ import {
   TRACKER_COMPUTED_KINDS,
   TRACKER_DATA_LINK_SOURCES,
   TRACKER_FIELD_TYPES,
-  TRACKER_OPTION_COLORS,
   trackerFieldKey,
   type TrackerComputed,
   type TrackerCondition,
   type TrackerDataLink,
   type TrackerField,
-  type TrackerOptionColor,
 } from "@/lib/clientTrackers";
+import { normalizeTrackerOptionColors } from "@/lib/tracker-option-colors";
 
 const DATA_LINK_DISPLAYS: Record<
   TrackerDataLink["source"],
@@ -236,16 +235,7 @@ export function cleanTrackerFields(
         : {};
     const optionColors =
       computedType === "select" || isChoiceField
-        ? Object.fromEntries(
-            options.map((option, index) => [
-              option,
-              TRACKER_OPTION_COLORS.includes(
-                sourceColors[option] as TrackerOptionColor,
-              )
-                ? (sourceColors[option] as TrackerOptionColor)
-                : TRACKER_OPTION_COLORS[index % TRACKER_OPTION_COLORS.length],
-            ]),
-          )
+        ? normalizeTrackerOptionColors(computedOptions || options, sourceColors)
         : undefined;
     usedKeys.add(key);
     fields.push({

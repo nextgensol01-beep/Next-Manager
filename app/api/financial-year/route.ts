@@ -121,7 +121,7 @@ export async function GET(req: NextRequest) {
   if (fy)       query.financialYear = fy;
 
   const records = await FinancialYear.find(query).sort({ financialYear: -1 }).lean() as Record<string, unknown>[];
-  if (records.length === 0) return NextResponse.json([]);
+  if (records.length === 0) return NextResponse.json([], { headers: { "Cache-Control": "private, no-store" } });
 
   const clientIds = [...new Set(records.map((r) => r.clientId as string))];
   const fys       = [...new Set(records.map((r) => r.financialYear as string))];
@@ -246,7 +246,7 @@ export async function GET(req: NextRequest) {
     };
   });
 
-    return NextResponse.json(enriched);
+    return NextResponse.json(enriched, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     console.error("GET /api/financial-year:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -261,6 +261,14 @@ export async function POST(req: NextRequest) {
   try {
   await connectDB();
   const body = await req.json();
+
+  if (body.createOnly === true) {
+    if (!body.clientId || !body.financialYear) return NextResponse.json({ error: "Client and financial year are required." }, { status: 400 });
+    for (const entries of [body.targets, body.generated]) {
+      const error = validateReviewedTargetImport(entries);
+      if (error) return NextResponse.json({ error }, { status: 400 });
+    }
+  }
 
   if (body.targetImportReviewConfirmed === true) {
     const validationError = validateReviewedTargetImport(body.targets);
@@ -303,7 +311,10 @@ export async function POST(req: NextRequest) {
     clientId: payload.clientId,
     financialYear: payload.financialYear,
   }).lean() as Record<string, unknown> | null;
-  const record = await FinancialYear.findOneAndUpdate(
+  if (body.createOnly === true && previous) {
+    return NextResponse.json({ error: "A record for this client and financial year was created while you were editing. Reload it before saving." }, { status: 409 });
+  }
+  const record = body.createOnly === true ? await FinancialYear.create(payload) : await FinancialYear.findOneAndUpdate(
     { clientId: payload.clientId, financialYear: payload.financialYear },
     payload,
     { upsert: true, new: true }
@@ -346,6 +357,9 @@ export async function POST(req: NextRequest) {
   }, session);
   return NextResponse.json(record, { status: 201 });
   } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === 11000) {
+      return NextResponse.json({ error: "A record already exists for this client and financial year. Reload it before saving." }, { status: 409 });
+    }
     console.error("POST /api/financial-year:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

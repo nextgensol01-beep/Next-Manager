@@ -1,5 +1,7 @@
 "use client";
 
+import { readJsonResponse } from "@/lib/http-response";
+
 import React, { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import Modal from "@/components/ui/Modal";
@@ -94,7 +96,7 @@ export default function PaymentModal({ target, clients, fy, effectiveFinancialYe
       });
       if (!response.ok) {
         rollback();
-        const data = await response.json().catch(() => ({}));
+        const data = await readJsonResponse(response).catch(() => ({}));
         toast.error(typeof data.error === "string" ? data.error : "Error saving payment");
         return;
       }

@@ -1,5 +1,7 @@
 "use client";
 
+import { readJsonResponse } from "@/lib/http-response";
+
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowDownLeft,
@@ -767,20 +769,26 @@ export function PersonSearch({
     }
 
     const query = value.trim();
+    const controller = new AbortController();
     timerRef.current = setTimeout(async () => {
       try {
-        const response = await fetch(`/api/persons?search=${encodeURIComponent(query)}`);
-        const data = await response.json();
+        const response = await fetch(`/api/persons?limit=5&search=${encodeURIComponent(query)}`, { signal: controller.signal });
+        const data = await readJsonResponse(response);
         const nextResults = (Array.isArray(data) ? data : []).slice(0, 5);
-        setResults(nextResults);
-        setOpen(nextResults.length > 0);
+        if (!controller.signal.aborted) {
+          setResults(nextResults);
+          setOpen(nextResults.length > 0);
+        }
       } catch {
-        setResults([]);
-        setOpen(false);
+        if (!controller.signal.aborted) {
+          setResults([]);
+          setOpen(false);
+        }
       }
     }, 250);
 
     return () => {
+      controller.abort();
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [value, isFocused]);
