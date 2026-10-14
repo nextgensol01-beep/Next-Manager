@@ -7,6 +7,11 @@
 # testing
 /coverage
 
+# generated test output and local design artifacts
+/tmp/
+/.artifacts/
+/outputs/
+
 # next.js
 /.next/
 /out/
@@ -23,6 +28,11 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+/*-dev-server.*.log
+
+# locally downloaded OCR language cache
+/*.traineddata
+/*.traineddata.gz
 
 # local env files
 .env*.local
