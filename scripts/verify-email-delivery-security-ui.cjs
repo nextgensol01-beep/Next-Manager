@@ -284,6 +284,7 @@ async function main() {
       );
       for (const node of await page.$$(scope + " button"))
         if ((await node.evaluate((node) => node.textContent)).trim() === text) {
+          await require('./fixtures/wait-for-stable-control.cjs')(node);
           await node.click();
           return;
         }
@@ -500,15 +501,15 @@ async function main() {
     await page.screenshot({ path: path.join(output, "pin-verification-dark.png") });
     await page.evaluate(() => document.documentElement.classList.remove("dark"));
     await button("Verify", modal);
-    await page.waitForFunction(() => document.querySelector(".email-authorization-processing")?.textContent.includes("Verifying identity…"));
+    await page.waitForFunction(() => document.querySelector(".email-authorization-modal [data-verifying]")?.textContent.includes("Verifying PIN…"));
     await page.screenshot({ path: path.join(output, "authorization-verifying-light.png") });
     await page.waitForSelector(`${modal} .email-security-hold`);
     await page.waitForSelector(`${modal} .email-authorization-processing`, { hidden: true });
     assert(await page.$eval(`${modal} .email-security-intro`, node => node.textContent.includes("1 personalised client email is ready to be sent.")));
-    assert(await page.$eval(`${modal} .email-security-summary`, node => node.textContent.includes("1 client") && node.textContent.includes("1 file")));
-    assert(await page.$eval(`${modal} .email-security-commit`, node => node.textContent.includes("1 email will be sent immediately.")));
+    assert(await page.$eval(`${modal} .email-security-summary`, node => node.textContent.includes("Client emails1") && node.textContent.includes("To / CC addresses1") && node.textContent.includes("1 file")));
+    assert(await page.$eval(`${modal} .email-security-commit`, node => node.textContent.includes("1 email will be sent in short batches.")));
     assert.equal(await page.$eval(modal, node => node.innerText.includes("Sending 1 email")), false, "No sending language before a completed hold");
-    assert.equal(await page.$eval(`${modal} .email-security-verified`, node => node.textContent), "Identity verified");
+    assert.equal(await page.$eval(`${modal} .email-security-verified`, node => node.textContent.trim()), "Identity verified");
     await page.screenshot({ path: path.join(output, "authorized-light.png") });
     await page.evaluate(() => document.documentElement.classList.add("dark"));
     await page.screenshot({ path: path.join(output, "authorized-dark.png") });
@@ -525,14 +526,14 @@ async function main() {
       const value = {
         progress: Number(node.style.getPropertyValue("--hold-progress")),
         label: node.textContent,
-        clip: node.querySelector(".email-security-hold-fill").style.clipPath,
+        offset: Number(node.querySelector(".hold-optical-path").style.strokeDashoffset),
       };
       node.dispatchEvent(new KeyboardEvent("keyup", { key: " ", bubbles: true }));
       return { ...value, draining: Number(node.style.getPropertyValue("--hold-progress")) };
     });
     assert(sample.progress > .3 && sample.progress < .85, `Fill follows elapsed hold time: ${sample.progress}`);
     assert.equal(sample.label, "Keep holding…");
-    assert(sample.clip.startsWith("polygon("), "Full material is revealed with a curved clip mask");
+    assert(Math.abs(sample.offset - (1 - sample.progress)) < .01, "Optical perimeter follows elapsed hold time");
     assert(sample.draining > 0, "Early release drains instead of snapping to zero");
     await wait(300);
     assert.equal(await page.$eval(hold, node => Number(node.style.getPropertyValue("--hold-progress"))), 0);
@@ -606,7 +607,7 @@ async function main() {
     await wait(1150);
     await page.keyboard.up("Enter");
     assert.equal(await page.$eval(hold, node => node === window.fixtureHold), true, "Same control survives the sending handoff");
-    assert.equal(await page.$eval(hold, node => node.textContent), "Sending 1 email…");
+    assert.equal(await page.$eval(hold, node => node.textContent), "Starting delivery…");
     assert.equal(await page.$eval(hold, node => node.disabled), true);
     assert.equal(await page.$$(".email-authorization-processing").then(nodes => nodes.length), 0, "No separate sending capsule");
     await page.screenshot({ path: path.join(output, "hold-sending-dark.png") });
@@ -622,16 +623,16 @@ async function main() {
       node.focus();
       node.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
       await new Promise(resolve => setTimeout(resolve, 550));
-      return { label: node.textContent, clip: node.querySelector(".email-security-hold-fill").style.clipPath,
+      return { label: node.textContent, offset: Number(node.querySelector(".hold-optical-path").style.strokeDashoffset),
         attempts: document.querySelector("#delivery-attempts").textContent };
     });
     assert.equal(reducedSample.label, "Keep holding…");
-    assert(reducedSample.clip.startsWith("inset("), "Reduced motion retains elapsed-time reveal without morphing");
+    assert(reducedSample.offset > .15 && reducedSample.offset < .7, "Reduced motion retains elapsed-time perimeter progress");
     assert.equal(reducedSample.attempts, "1", "Reduced motion cannot shorten the hold");
     await wait(650);
     await page.$eval(hold, node => node.dispatchEvent(new KeyboardEvent("keyup", { key: " ", bubbles: true })));
-    await page.waitForFunction(selector => document.querySelector(selector)?.dataset.state === "success", {}, hold);
-    assert.equal(await page.$eval(hold, node => node.textContent), "Email sent");
+    await page.waitForFunction(selector => document.querySelector(selector)?.dataset.state === "accepted", {}, hold);
+    assert.equal(await page.$eval(hold, node => node.textContent), "Delivery started");
     assert.equal(await page.$eval(hold, node => node === window.fixtureHold), true);
     assert.equal(await page.$eval("#delivery-attempts", node => node.textContent), "2", "Each completed hold commits exactly once, including retry");
     await page.screenshot({ path: path.join(output, "hold-success-reduced-motion.png") });

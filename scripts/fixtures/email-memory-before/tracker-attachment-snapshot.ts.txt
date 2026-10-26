@@ -1,0 +1,415 @@
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import Document from "@/models/Document";
+import type { DeliveryBatch } from "@/lib/email-delivery-security";
+import type { TrackerEmailWorkflow, TrackerValues } from "@/lib/clientTrackers";
+import { inspectDriveFile } from "./google-drive-documents";
+import { DeliverySecurityError } from "./email-delivery-crypto";
+import {
+  activeAttachmentRules,
+  attachmentIssue,
+  attachmentRuleMatches,
+  resolveTrackerAttachmentSelection,
+  TRACKER_ATTACHMENT_LIMITS,
+  type AttachmentInput,
+  type ManagedTrackerEmailDocument,
+  type TrackerEmailAttachmentPreview,
+} from "./tracker-attachment-matching";
+
+type RemoteFile = Awaited<ReturnType<typeof inspectDriveFile>>;
+type Pick = TrackerEmailAttachmentPreview & {
+  recordHash: string;
+  revision: string;
+  checksum: string;
+};
+type AttachmentSnapshot = {
+  version: 1;
+  trackerId: string;
+  workflowId: string;
+  entryId: string;
+  clientId: string;
+  kind: string;
+  policy: string;
+  activeRules: string[];
+  picks: Pick[];
+};
+type Context = {
+  trackerId: string;
+  workflow: TrackerEmailWorkflow;
+  entryId: string;
+  clientId: string;
+  kind: string;
+  financialYear?: string;
+};
+const stable = (value: unknown): string =>
+  JSON.stringify(value, (_key, item) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(
+          Object.keys(item)
+            .sort()
+            .map((key) => [key, item[key]]),
+        )
+      : item,
+  );
+const hash = (value: unknown) =>
+  createHash("sha256").update(stable(value)).digest("hex");
+const policyHash = (workflow: TrackerEmailWorkflow) =>
+  hash(workflow.attachments || []);
+const recordHash = (document: ManagedTrackerEmailDocument) =>
+  hash({
+    id: String(document._id),
+    clientId: document.clientId,
+    filename: document.documentName,
+    category: document.category || "",
+    kind: document.documentKind || "general",
+    year: document.financialYear || "",
+    driveFileId: document.driveFileId,
+    mimeType: document.mimeType,
+    fileSize: document.fileSize,
+    uploadedDate: document.uploadedDate
+      ? new Date(document.uploadedDate).toISOString()
+      : "",
+    updatedAt: document.updatedAt
+      ? new Date(document.updatedAt).toISOString()
+      : "",
+  });
+function secret() {
+  const value =
+    process.env.NEXTAUTH_SECRET || process.env.EMAIL_DELIVERY_OTP_SECRET;
+  if (!value)
+    throw new DeliverySecurityError(
+      "The server authentication secret is required to secure attachment review.",
+      503,
+      "ATTACHMENT_SECURITY_CONFIGURATION",
+    );
+  return value;
+}
+const signature = (payload: string) =>
+  createHmac("sha256", secret())
+    .update("tracker-attachments:v1:" + payload)
+    .digest();
+function seal(value: AttachmentSnapshot) {
+  const payload = Buffer.from(JSON.stringify(value)).toString("base64url");
+  return payload + "." + signature(payload).toString("base64url");
+}
+export function readTrackerAttachmentSnapshot(
+  token: string,
+): AttachmentSnapshot {
+  if (token.length > 48000)
+    throw new Error("Attachment review is invalid. Prepare the emails again.");
+  const parts = token.split("."),
+    expected = signature(parts[0] || ""),
+    actual = Buffer.from(parts[1] || "", "base64url");
+  if (
+    parts.length !== 2 ||
+    actual.length !== expected.length ||
+    !timingSafeEqual(expected, actual)
+  )
+    throw new Error("Attachment review has changed. Prepare the emails again.");
+  const value = JSON.parse(
+    Buffer.from(parts[0], "base64url").toString(),
+  ) as AttachmentSnapshot;
+  if (
+    value.version !== 1 ||
+    !Array.isArray(value.picks) ||
+    value.picks.length > TRACKER_ATTACHMENT_LIMITS.count ||
+    !Array.isArray(value.activeRules)
+  )
+    throw new Error("Attachment review is invalid. Prepare the emails again.");
+  return value;
+}
+
+/** Request-local deduplication, bounded to six metadata requests; never fetches file bytes. */
+export function createAttachmentMetadataReader() {
+  const files = new Map<string, Promise<RemoteFile>>(),
+    waiting: Array<() => void> = [];
+  let running = 0;
+  return (fileId: string) => {
+    let result = files.get(fileId);
+    if (!result) {
+      result = (async () => {
+        if (running >= 6)
+          await new Promise<void>((resolve) => waiting.push(resolve));
+        running++;
+        try {
+          return await inspectDriveFile(fileId, AbortSignal.timeout(12000));
+        } finally {
+          running--;
+          waiting.shift()?.();
+        }
+      })();
+      files.set(fileId, result);
+    }
+    return result;
+  };
+}
+export async function prepareTrackerAttachmentSelection(
+  input: AttachmentInput &
+    Omit<Context, "workflow" | "clientId" | "financialYear">,
+  inspect = createAttachmentMetadataReader(),
+) {
+  const selected = resolveTrackerAttachmentSelection(input),
+    picks: Pick[] = [];
+  for (const item of selected.attachments) {
+    const document = input.documents.find(
+      (doc) => String(doc._id) === item.documentId,
+    )!;
+    const rules = selected.rules.filter((rule) =>
+      item.ruleIds?.includes(rule.id),
+    );
+    try {
+      const remote = await inspect(document.driveFileId!);
+      if (
+        remote.fileSize <= 0 ||
+        remote.fileSize > TRACKER_ATTACHMENT_LIMITS.file ||
+        remote.mimeType !== item.mimeType ||
+        remote.fileSize !== item.fileSize
+      )
+        throw new Error(
+          "The document changed or exceeds the email attachment size limit.",
+        );
+      picks.push({
+        ...item,
+        recordHash: recordHash(document),
+        revision: remote.revision,
+        checksum: remote.checksum,
+      });
+    } catch (error) {
+      const status = Number(
+        (error as { code?: unknown; response?: { status?: number } })?.response
+          ?.status || (error as { code?: unknown })?.code,
+      );
+      const detail =
+        status === 404
+          ? "is no longer available in Google Drive"
+          : status === 403
+            ? "cannot be accessed in Google Drive"
+            : error instanceof Error && error.message.includes("size limit")
+              ? "changed or exceeds the allowed email attachment size"
+              : "could not be checked in Google Drive; try again";
+      rules.forEach((rule) =>
+        selected.issues.push(
+          attachmentIssue(
+            rule,
+            status === 404
+              ? "drive_file_unavailable"
+              : status === 403
+                ? "drive_file_inaccessible"
+                : "drive_check_failed",
+            detail,
+            input.financialYear,
+          ),
+        ),
+      );
+    }
+  }
+  return {
+    attachments: picks.map((item) => ({
+      documentId: item.documentId,
+      filename: item.filename,
+      mimeType: item.mimeType,
+      fileSize: item.fileSize,
+      category: item.category,
+      financialYear: item.financialYear,
+      required: item.required,
+      ruleIds: item.ruleIds,
+    })),
+    issues: selected.issues,
+    attachmentSnapshot:
+      !selected.issues.some((issue) => issue.required) &&
+      (input.workflow.attachments || []).length
+        ? seal({
+            version: 1,
+            trackerId: input.trackerId,
+            workflowId: input.workflow.id,
+            entryId: input.entryId,
+            clientId: input.clientId,
+            kind: input.kind,
+            policy: policyHash(input.workflow),
+            activeRules: selected.rules.map((rule) => rule.id),
+            picks,
+          })
+        : undefined,
+  };
+}
+
+/** Validates pinned references against rules/ownership. It never selects a newer file. */
+export function assertPinnedTrackerAttachments(
+  input: Context & {
+    attachments: Array<{ documentId: string }>;
+    attachmentSnapshot?: string;
+    documents: ManagedTrackerEmailDocument[];
+    values?: TrackerValues;
+  },
+) {
+  const ids = input.attachments.map((item) => item.documentId);
+  if (
+    new Set(ids).size !== ids.length ||
+    ids.length > TRACKER_ATTACHMENT_LIMITS.count
+  )
+    throw new Error("The attachment selection is invalid.");
+  const proof = input.attachmentSnapshot
+    ? readTrackerAttachmentSnapshot(input.attachmentSnapshot)
+    : undefined;
+  if (
+    proof &&
+    (proof.trackerId !== input.trackerId ||
+      proof.workflowId !== input.workflow.id ||
+      proof.clientId !== input.clientId ||
+      proof.entryId !== input.entryId ||
+      proof.kind !== input.kind ||
+      proof.policy !== policyHash(input.workflow) ||
+      stable([...ids].sort()) !==
+        stable(proof.picks.map((item) => item.documentId).sort()))
+  )
+    throw new Error(
+      "The approved attachment selection no longer matches this client/workflow. Prepare the emails again.",
+    );
+  if (
+    !proof &&
+    (input.workflow.attachments || []).some((rule) => rule.required === true)
+  )
+    throw new Error(
+      "Required attachments must be prepared and reviewed before delivery.",
+    );
+  const rules = input.values
+    ? activeAttachmentRules({ ...input, values: input.values })
+    : (input.workflow.attachments || []).filter(
+        (rule) => !proof || proof.activeRules.includes(rule.id),
+      );
+  if (
+    proof &&
+    input.values &&
+    stable(rules.map((rule) => rule.id).sort()) !==
+      stable([...proof.activeRules].sort())
+  )
+    throw new Error(
+      "Attachment conditions changed. Prepare this client again.",
+    );
+  for (const rule of rules)
+    if (
+      rule.required &&
+      !proof?.picks.some((item) => item.ruleIds?.includes(rule.id))
+    )
+      throw new Error(
+        attachmentIssue(
+          rule,
+          "missing_required",
+          "missing",
+          input.financialYear,
+        ).message,
+      );
+  const byId = new Map(input.documents.map((doc) => [String(doc._id), doc]));
+  const documents = ids.map((id) => {
+    const document = byId.get(id),
+      approved = proof?.picks.find((item) => item.documentId === id);
+    if (
+      !document ||
+      !rules.some(
+        (rule) =>
+          (!approved || approved.ruleIds?.includes(rule.id)) &&
+          attachmentRuleMatches(
+            rule,
+            document,
+            input.clientId,
+            input.financialYear,
+          ),
+      )
+    )
+      throw new Error(
+        "A selected document is unavailable or does not belong to this client/approved shared rule.",
+      );
+    if (approved && recordHash(document) !== approved.recordHash)
+      throw new Error(
+        "An approved document's metadata or Drive reference changed. Prepare this client again.",
+      );
+    return document;
+  });
+  if (
+    documents.some(
+      (doc) =>
+        !Number.isFinite(Number(doc.fileSize)) ||
+        Number(doc.fileSize) <= 0 ||
+        Number(doc.fileSize) > TRACKER_ATTACHMENT_LIMITS.file,
+    ) ||
+    documents.reduce((sum, doc) => sum + Number(doc.fileSize || 0), 0) >
+      TRACKER_ATTACHMENT_LIMITS.total
+  )
+    throw new Error(
+      "The selected documents exceed email attachment size limits.",
+    );
+  return { proof, documents };
+}
+export async function validateTrackerAttachmentBatch(input: {
+  trackerId: string;
+  batch: DeliveryBatch;
+  workflow: TrackerEmailWorkflow;
+  financialYear?: string;
+}) {
+  if (
+    !input.workflow.attachments?.length &&
+    !input.batch.messages.some(
+      (message) => message.attachments.length || message.attachmentSnapshot,
+    )
+  )
+    return;
+  const ids = [
+    ...new Set(
+      input.batch.messages.flatMap((message) =>
+        message.attachments.map((item) => item.documentId),
+      ),
+    ),
+  ];
+  const documents = ids.length
+    ? ((await Document.find({
+        _id: { $in: ids },
+      }).lean()) as unknown as ManagedTrackerEmailDocument[])
+    : [];
+  const inspect = createAttachmentMetadataReader();
+  await Promise.all(
+    input.batch.messages.map(async (message) => {
+      let pinned: ReturnType<typeof assertPinnedTrackerAttachments>;
+      try {
+        pinned = assertPinnedTrackerAttachments({
+          ...input,
+          ...message,
+          entryId: message.entryId,
+          kind: input.batch.kind,
+          documents,
+        });
+      } catch (error) {
+        throw new DeliverySecurityError(
+          error instanceof Error
+            ? error.message
+            : "Attachment review is unavailable.",
+          409,
+          "ATTACHMENT_REVIEW_INVALID",
+        );
+      }
+      for (const doc of pinned.documents) {
+        let remote: RemoteFile;
+        try {
+          remote = await inspect(doc.driveFileId!);
+        } catch {
+          throw new DeliverySecurityError(
+            "The selected document is inaccessible or could not be checked in Google Drive. Try again before authorizing.",
+            409,
+            "ATTACHMENT_UNAVAILABLE",
+          );
+        }
+        const approved = pinned.proof?.picks.find(
+          (item) => item.documentId === String(doc._id),
+        );
+        if (
+          remote.fileSize !== Number(doc.fileSize) ||
+          remote.mimeType !== doc.mimeType ||
+          (approved && remote.revision !== approved.revision)
+        )
+          throw new DeliverySecurityError(
+            "An attachment changed since review. Prepare the emails again.",
+            409,
+            "ATTACHMENT_CHANGED",
+          );
+      }
+    }),
+  );
+}

@@ -5,6 +5,7 @@ import { isAdminSession } from "@/lib/authUsers";
 import { connectDB } from "@/lib/mongoose";
 import Document from "@/models/Document";
 import { recordActivityEvent } from "@/lib/server/activity-events";
+import { normalizeDocumentFinancialYear } from "@/lib/document-financial-year";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -39,7 +40,9 @@ export async function POST(req: NextRequest) {
       : body.documentKind === "target-screenshot"
         ? "target-screenshot"
         : "general";
-    const financialYear = typeof body.financialYear === "string" ? body.financialYear.trim() : "";
+    let financialYear: string | undefined;
+    try { financialYear = normalizeDocumentFinancialYear(body.financialYear); }
+    catch { return NextResponse.json({ error: "Choose a valid financial year (for example, 2025-26)." }, { status: 400 }); }
     if (documentKind === "target-screenshot") {
       if (!financialYear) {
         return NextResponse.json({ error: "Financial year is required for a target screenshot." }, { status: 400 });
@@ -59,7 +62,7 @@ export async function POST(req: NextRequest) {
       driveLink,
       category: allowedCategories.has(body.category) ? body.category : "other",
       documentKind,
-      financialYear: documentKind === "target-screenshot" ? financialYear : undefined,
+      financialYear,
       storageType: "legacy-link",
       source: "manual-link",
       migrationStatus: "legacy",

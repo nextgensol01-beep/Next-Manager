@@ -35,6 +35,18 @@
 .tracker-configure-modal .create-client-row { padding-top: 9px; padding-bottom: 9px; }
 .tracker-configure-modal .create-client-row.is-selected .create-client-name { font-weight: 550; }
 .configure-removal-note, .configure-sync-note { font-size: 11px; line-height: 1.7; color: var(--color-text-muted); margin-top: 10px; }
+.configure-sync-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.configure-sync-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 5px 10px; border: 1px solid rgba(120,120,128,.3); border-radius: 7px; background: rgba(120,120,128,.06); color: var(--color-text); font-size: 11px; font-weight: 600; line-height: 18px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.05); transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
+.configure-sync-button > svg { width: 12px; height: 12px; flex-shrink: 0; }
+.configure-sync-preview { margin-top: 8px; }
+.configure-sync-button:hover:not(:disabled) { background: rgba(120,120,128,.13); border-color: rgba(120,120,128,.5); }
+.configure-sync-button:active:not(:disabled) { box-shadow: inset 0 1px 3px rgba(0,0,0,.12); }
+.configure-sync-button:focus-visible { outline: 2px solid #0a84ff; outline-offset: 3px; }
+.configure-sync-button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.dark .configure-sync-button { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.22); }
+.dark .configure-sync-button:hover:not(:disabled) { background: rgba(255,255,255,.11); border-color: rgba(255,255,255,.36); }
+.configure-sync-button.configure-sync-primary { background: linear-gradient(180deg,#0a84ff,#0071e3); border-color: #0071e3; color: #fff; box-shadow: 0 3px 9px rgba(0,113,227,.2), inset 0 1px 0 rgba(255,255,255,.18); }
+.configure-sync-button.configure-sync-primary:hover:not(:disabled) { background: linear-gradient(180deg,#087bf0,#0066ce); border-color: #0066ce; }
 .create-detail-label { margin: 9px 0 7px; font-size: 10px; }
 .create-detail-label:first-child { margin-top: 0; }
 .configure-system-label { font-size: 9px; color: var(--color-text-faint); font-weight: 450; margin-left: 3px; }

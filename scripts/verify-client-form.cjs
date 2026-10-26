@@ -9,17 +9,19 @@ const root = path.resolve(__dirname, '..');
 let db = {};
 let nextId = 1;
 let failContactWrite = false;
+let failTrackerWrite = false;
 let transactions = 0;
 const copy = value => structuredClone(value);
 const matches = (record, query) => Object.entries(query).every(([key, value]) => {
   if (key === '$or') return value.some(item => matches(record, item));
+  if (key === '$and') return value.every(item => matches(record, item));
   const actual = record[key];
   if (value && typeof value === 'object') {
     if ('$in' in value) return (Array.isArray(actual) ? actual : [actual]).some(item => value.$in.includes(item));
     if ('$regex' in value) return new RegExp(value.$regex, value.$options).test(actual);
     if ('$ne' in value) return actual !== value.$ne;
   }
-  return actual === value;
+  return value == null ? actual == null : Array.isArray(actual) ? actual.includes(value) : actual === value;
 });
 function model(name) {
   const rows = () => db[name] ||= [];
@@ -51,6 +53,7 @@ function model(name) {
     async deleteMany(filter) { db[name] = rows().filter(row => !matches(row, filter)); },
     async findOneAndUpdate(filter, update, options = {}) {
       if (name === 'ClientContact' && failContactWrite) throw new Error('Injected contact write failure');
+      if (name === 'ClientTracker' && failTrackerWrite) throw new Error('Injected tracker sync failure');
       let row = rows().find(row => matches(row, filter));
       if (!row && !options.upsert) return null;
       if (!row) { row = { _id: `${name}-${nextId++}`, ...copy(filter), ...copy(update.$setOnInsert || {}) }; rows().push(row); }
@@ -58,10 +61,21 @@ function model(name) {
         Object.assign(row, copy(update.$set || {}));
         for (const [key, value] of Object.entries(update.$max || {})) row[key] = Math.max(row[key] || 0, value);
         for (const [key, value] of Object.entries(update.$inc || {})) row[key] = (row[key] || 0) + value;
+        for (const [key, value] of Object.entries(update.$addToSet || {})) row[key] = [...new Set([...(row[key] || []), ...(value.$each || [value])])];
       } else Object.assign(row, copy(update));
       return document(row);
     },
     async findByIdAndUpdate(id, update, options) { return this.findOneAndUpdate({ _id: id }, update, options); },
+    async updateOne(filter, update, options) { const row = await this.findOneAndUpdate(filter, update, options); return { matchedCount: row ? 1 : 0, modifiedCount: row ? 1 : 0 }; },
+    async bulkWrite(operations) {
+      let upsertedCount = 0;
+      for (const { updateOne: operation } of operations) {
+        const existed = rows().some(row => matches(row, operation.filter));
+        await this.findOneAndUpdate(operation.filter, operation.update, { upsert: operation.upsert });
+        if (!existed) upsertedCount++;
+      }
+      return { upsertedCount };
+    },
   };
 }
 const models = {};
@@ -143,16 +157,24 @@ async function main() {
   console.log('PASS: encrypted round trip, tamper rejection, legacy read, admin/non-admin access');
 
   const service = load('lib/server/client-contact-service.ts');
+  db.ClientTracker = [
+    { _id: 'auto-pwp', status: 'active', clientScope: 'categories', clientMembershipMode: 'categorySync', clientCategories: ['PWP'], clientIds: [], fields: [{ key: 'ready', type: 'toggle' }] },
+    { _id: 'manual-pwp', status: 'active', clientScope: 'categories', clientMembershipMode: 'snapshot', clientCategories: ['PWP'], clientIds: [], fields: [] },
+    { _id: 'archived-pwp', status: 'archived', clientScope: 'categories', clientMembershipMode: 'categorySync', clientCategories: ['PWP'], clientIds: [], fields: [] },
+  ];
   const input = { category: 'PWP', companyName: 'Test', state: 'Gujarat', cpcbPassword: plaintext, customFields: { secret: plaintext, quantity: '0' }, persons: [
     { name: 'Asha', phoneNumbers: ['1111111111', '2222222222'], emails: [], selectedPhones: ['1111111111'], selectedEmails: [], isPrimaryContact: true },
   ] };
   const saved = await service.createClientRecord(input);
+  assert.deepEqual(db.ClientTrackerEntry.map(row => ({ trackerId: row.trackerId, clientId: row.clientId, values: row.values })), [{ trackerId: 'auto-pwp', clientId: saved.clientId, values: { ready: false } }]);
+  assert.deepEqual(db.ClientTracker[0].clientIds, [saved.clientId]);
   assert.equal(saved.contacts.length, 1, 'Create response includes contacts');
   assert.notEqual(db.Client[0].cpcbPassword, plaintext);
   assert.equal(admin.read(saved).customFields.secret, plaintext);
   const clientId = saved.clientId;
   const personId = saved.contacts[0].personId;
   await service.updateClientRecord(clientId, { companyName: 'Edited', persons: [{ ...input.persons[0], personId, name: 'Asha Patel', phoneNumbers: ['2222222222'], selectedPhones: ['2222222222'] }] });
+  assert.equal(db.ClientTrackerEntry.length, 1, 'Ordinary client updates cannot duplicate tracker rows');
   assert.equal(db.Person.length, 1, 'Renaming preserves identity');
   assert.equal(db.Person[0].name, 'Asha Patel');
   assert.deepEqual(db.Person[0].phoneNumbers, ['2222222222'], 'Removed phones stay removed');
@@ -165,6 +187,10 @@ async function main() {
   await assert.rejects(service.createClientRecord(input), /Injected/);
   assert.deepEqual(db, beforeFailure, 'Failed add rolls back client, counter, and contacts');
   failContactWrite = false;
+  failTrackerWrite = true;
+  await assert.rejects(service.createClientRecord(input), /tracker sync failure/);
+  assert.deepEqual(db, beforeFailure, 'Client, counter, contacts and memberships roll back together if Auto Sync fails');
+  failTrackerWrite = false;
   await assert.rejects(service.updateClientRecord(clientId, { persons: [{ ...input.persons[0], personId }, { ...input.persons[0], personId }] }), /linked only once/);
   assert.deepEqual(db, beforeFailure, 'Duplicate contact rejection leaves the saved state intact');
   await service.updateClientRecord(clientId, { persons: [], removedPersonIds: [personId] });
@@ -172,5 +198,6 @@ async function main() {
   assert.equal(db.Person.length, 1, 'Unlinking does not delete the shared person');
   assert.ok(transactions >= 6);
   console.log('PASS: create/edit, identity, phone removal, credential preservation, rollback fault injection, duplicate rejection, last unlink');
+  console.log('PASS: real client-creation transaction adds only relevant active Auto Sync trackers, update is idempotent, sync failure rolls back all records.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

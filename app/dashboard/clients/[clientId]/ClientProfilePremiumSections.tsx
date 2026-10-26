@@ -1474,7 +1474,7 @@ function DocumentCard({
         <p className="truncate text-sm font-semibold text-default">{document.documentName}</p>
         <div className="client-profile-document-meta">
           <span>{document.category || "Other"}</span>
-          {document.documentKind === "target-screenshot" && document.financialYear ? <span>FY {document.financialYear}</span> : null}
+          {document.financialYear ? <span>FY {document.financialYear}</span> : null}
           {document.fileSize ? <span>{document.fileSize < 1048576 ? `${Math.round(document.fileSize / 1024)} KB` : `${(document.fileSize / 1048576).toFixed(1)} MB`}</span> : null}
           <span>{formatDate(document.uploadedDate)}</span>
         </div>
@@ -1624,7 +1624,7 @@ export function DocumentsSection({
   const filteredDocuments = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return documents;
-    return documents.filter((document) => document.documentName.toLowerCase().includes(query));
+    return documents.filter((document) => [document.documentName, document.category, document.financialYear].filter(Boolean).join(" ").toLowerCase().includes(query));
   }, [documents, search]);
 
   return (

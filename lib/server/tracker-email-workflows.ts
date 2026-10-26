@@ -1,32 +1,22 @@
 import type {
-  TrackerCondition,
   TrackerConditionGroup,
   TrackerEmailAttachment,
   TrackerEmailContentRule,
   TrackerEmailWorkflow,
   TrackerField,
   TrackerRecipientStrategy,
-  TrackerRuleOperator,
 } from "@/lib/clientTrackers";
+import { normalizeDocumentFinancialYear } from "@/lib/document-financial-year";
+import { TRACKER_EMAIL_CONTENT_RULE_LIMIT } from "@/lib/clientTrackers";
+
+import { emailConditionFields, emailConditionGroupIssue } from "@/lib/tracker-email-context";
+import { sanitizeEmailMarkup } from "@/lib/tracker-email-renderer";
 
 const MAX_WORKFLOWS = 8;
 const MAX_POINTS = 16;
-const MAX_CONDITIONS = 12;
 const MAX_ATTACHMENTS = 4;
 // Supports migration of up to 16 legacy matching messages alongside 24 rules.
-const MAX_CONTENT_RULES = 40;
-const OPERATORS = new Set<TrackerRuleOperator>([
-  "equals",
-  "not_equals",
-  "is_empty",
-  "is_not_empty",
-  "contains",
-  "not_contains",
-  "greater_than",
-  "greater_than_or_equal",
-  "less_than",
-  "less_than_or_equal",
-]);
+const MAX_CONTENT_RULES = TRACKER_EMAIL_CONTENT_RULE_LIMIT;
 const ATTACHMENT_CATEGORIES = new Set<
   NonNullable<TrackerEmailAttachment["category"]>
 >(["compliance", "financial", "invoices", "certificates", "other"]);
@@ -44,104 +34,15 @@ function text(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-/** Keep email rich text deliberately small, semantic, and safe to render in outbound HTML. */
 function richText(value: unknown, max: number) {
-  const source = typeof value === "string" ? value.slice(0, max) : "";
-  return source
-    .replace(/<[^>]*>/g, (tag) => {
-      const match = tag.match(
-        /^<\s*(\/?)\s*(strong|b|em|i|u|br|div|p|ul|ol|li|blockquote|a)(?:\s+([^>]*?))?\s*\/?\s*>$/i,
-      );
-      if (!match) return "";
-      const [, closing, rawName, rawAttributes = ""] = match;
-      const name = rawName.toLowerCase();
-      if (name === "br") return "<br>";
-      if (name === "div") return closing ? "</p>" : "<p>";
-      if (name === "a") {
-        if (closing) return "</a>";
-        const href = rawAttributes.match(
-          /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i,
-        );
-        const value = (href?.[1] || href?.[2] || href?.[3] || "").trim();
-        if (!/^(https?:\/\/|mailto:)/i.test(value)) return "";
-        const safeHref = value
-          .replace(/&/g, "&amp;")
-          .replace(/"/g, "&quot;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;");
-        return `<a href="${safeHref}">`;
-      }
-      const canonical = name === "b" ? "strong" : name === "i" ? "em" : name;
-      return `<${closing ? "/" : ""}${canonical}>`;
-    })
-    .replace(/(?:<br>\s*){3,}/g, "<br><br>")
-    .trim();
+  return sanitizeEmailMarkup(typeof value === "string" ? value.slice(0, max) : "").replace(/(?:<br>\s*){3,}/g, "<br><br>").trim();
 }
-
-function supportsEmailOperator(field: TrackerField, operator: TrackerRuleOperator) {
-  const equality = new Set<TrackerRuleOperator>([
-    "equals",
-    "not_equals",
-    "is_empty",
-    "is_not_empty",
-  ]);
-  if (equality.has(operator)) return true;
-  if (field.type === "number" || field.type === "date")
-    return [
-      "greater_than",
-      "greater_than_or_equal",
-      "less_than",
-      "less_than_or_equal",
-    ].includes(operator);
-  if (["text", "longText", "tags", "multiSelect"].includes(field.type))
-    return operator === "contains" || operator === "not_contains";
-  return false;
-}
-
-function cleanConditionGroup(
-  value: unknown,
-  fieldsByKey: Map<string, TrackerField>,
-): TrackerConditionGroup | null | undefined {
-  if (typeof value === "undefined") return undefined;
+function cleanConditionGroup(value: unknown, fieldsByKey: Map<string, TrackerField>): TrackerConditionGroup | null | undefined {
+  if (value === undefined) return undefined;
   if (!value || typeof value !== "object") return null;
-  const source = value as Record<string, unknown>;
-  const mode =
-    source.mode === "ANY" ? "ANY" : source.mode === "ALL" ? "ALL" : null;
-  const rawConditions = Array.isArray(source.conditions)
-    ? source.conditions
-    : [];
-  if (!mode || !rawConditions.length || rawConditions.length > MAX_CONDITIONS)
-    return null;
-  const conditions: TrackerCondition[] = [];
-  for (const item of rawConditions) {
-    if (!item || typeof item !== "object") return null;
-    const condition = item as Record<string, unknown>;
-    const fieldKey = text(condition.fieldKey, 80);
-    const operator = condition.operator as TrackerRuleOperator;
-    const rawValue = condition.value;
-    const field = fieldsByKey.get(fieldKey);
-    if (!field || !OPERATORS.has(operator) || !supportsEmailOperator(field, operator))
-      return null;
-    if (
-      !["is_empty", "is_not_empty"].includes(operator) &&
-      !(
-        typeof rawValue === "string" ||
-        typeof rawValue === "number" ||
-        typeof rawValue === "boolean"
-      )
-    )
-      return null;
-    conditions.push({
-      fieldKey,
-      operator,
-      ...(typeof rawValue === "string" ||
-      typeof rawValue === "number" ||
-      typeof rawValue === "boolean"
-        ? { value: rawValue }
-        : {}),
-    });
-  }
-  return { mode, conditions };
+  const group = value as TrackerConditionGroup;
+  if (emailConditionGroupIssue(group, [...fieldsByKey.values()])) return null;
+  return { mode: group.mode, conditions: group.conditions.map(c => ({ fieldKey: c.fieldKey, operator: c.operator, fieldType: fieldsByKey.get(c.fieldKey)!.type, ...(c.value !== undefined ? { value: Array.isArray(c.value) ? [...c.value] : c.value } : {}) })) };
 }
 
 export function cleanTrackerEmailWorkflows(
@@ -150,7 +51,8 @@ export function cleanTrackerEmailWorkflows(
 ): TrackerEmailWorkflow[] | null {
   if (!Array.isArray(raw)) return [];
   if (raw.length > MAX_WORKFLOWS) return null;
-  const fieldsByKey = new Map(fields.map((field) => [field.key, field]));
+  const fieldsByKey = new Map(emailConditionFields(fields).map((field) => [field.key, field]));
+  const attachmentFieldsByKey = new Map(fields.map(field => [field.key, field]));
   const seen = new Set<string>();
   const workflows: TrackerEmailWorkflow[] = [];
   for (const item of raw) {
@@ -170,6 +72,7 @@ export function cleanTrackerEmailWorkflows(
       source.contentMode === "points"
         ? source.contentMode
         : undefined;
+    if (source.combinationMatchingMode !== undefined && !["first", "combine"].includes(String(source.combinationMatchingMode))) return null;
     const mainFieldKey = text(source.mainFieldKey, 80);
     const mainValue = text(source.mainValue, 400);
     const subject = text(source.subject, 200);
@@ -235,6 +138,7 @@ export function cleanTrackerEmailWorkflows(
       const rule = rawRule as Record<string, unknown>;
       const ruleId = text(rule.id, 64);
       const type = rule.type;
+      if (rule.legacyPoint !== undefined && (rule.legacyPoint !== true || type === "combination")) return null;
       const action = rule.action === "skip" ? "skip" : "include";
       const content = richText(rule.content, 1800);
       const ruleConditions = cleanConditionGroup(
@@ -253,7 +157,9 @@ export function cleanTrackerEmailWorkflows(
       contentRuleIds.add(ruleId);
       contentRules.push({
         id: ruleId,
+        ...(text(rule.name, 100) ? { name: text(rule.name, 100) } : {}),
         type: type as TrackerEmailContentRule["type"],
+        ...(rule.legacyPoint === true ? { legacyPoint: true as const } : {}),
         conditionGroup: ruleConditions,
         action,
         ...(content ? { content } : {}),
@@ -284,15 +190,18 @@ export function cleanTrackerEmailWorkflows(
       const documentKind = attachment.documentKind as
         | TrackerEmailAttachment["documentKind"]
         | undefined;
-      const financialYear =
-        attachment.financialYear === "any" ? "any" : "tracker";
+      let financialYear: string;
+      try { financialYear = attachment.financialYear === "any" ? "any" : !attachment.financialYear || attachment.financialYear === "tracker"
+        ? "tracker" : normalizeDocumentFinancialYear(attachment.financialYear)!; } catch { return null; }
+      if (!financialYear) return null;
       const attachmentConditions = cleanConditionGroup(
         attachment.conditionGroup,
-        fieldsByKey,
+        attachmentFieldsByKey,
       );
       if (
         !attachmentId ||
         attachmentIds.has(attachmentId) ||
+        (attachment.required !== undefined && typeof attachment.required !== "boolean") ||
         (source === "shared" && !documentId) ||
         (category && !ATTACHMENT_CATEGORIES.has(category)) ||
         (documentKind && !ATTACHMENT_KINDS.has(documentKind)) ||
@@ -307,6 +216,7 @@ export function cleanTrackerEmailWorkflows(
         ...(category ? { category } : {}),
         ...(documentKind ? { documentKind } : {}),
         financialYear,
+        ...(attachment.required !== undefined ? { required: attachment.required === true } : {}),
         ...(attachmentConditions
           ? { conditionGroup: attachmentConditions }
           : {}),
@@ -317,6 +227,7 @@ export function cleanTrackerEmailWorkflows(
       name,
       ...(description ? { description } : {}),
       ...(contentMode ? { contentMode } : {}),
+      ...(source.combinationMatchingMode ? { combinationMatchingMode: source.combinationMatchingMode as "first" | "combine" } : {}),
       mainFieldKey,
       mainValue,
       subject,

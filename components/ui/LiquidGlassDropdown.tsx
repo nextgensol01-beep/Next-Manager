@@ -11,6 +11,8 @@ import { GlassSurface } from "@/components/ui/liquid-glass/GlassSurface";
 export interface LiquidGlassDropdownOption {
   label: string;
   value: string;
+  /** Optional headings; callers that do not supply groups render unchanged. */
+  group?: string;
 }
 
 interface LiquidGlassDropdownProps {
@@ -264,7 +266,9 @@ export default function LiquidGlassDropdown({
     const active = conditionStyle
       ? hoveredIndex === index || (keyboardHighlight && index === activeIndex)
       : index === activeIndex;
-    return <button key={option.value} id={optionIds[index]} type="button" role="option"
+    return <React.Fragment key={option.value}>
+      {option.group && option.group !== options[index - 1]?.group && <div role="presentation" className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-faint">{option.group}</div>}
+      <button id={optionIds[index]} type="button" role="option"
       tabIndex={conditionStyle ? -1 : undefined} aria-selected={selected}
       onMouseEnter={conditionStyle ? undefined : () => setActiveIndex(index)}
       onPointerEnter={conditionStyle ? event => {
@@ -283,7 +287,7 @@ export default function LiquidGlassDropdown({
       <span className="min-w-0 flex-1 truncate">{option.label}</span>
       {conditionStyle ? <span className="condition-select-check" aria-hidden="true">{selected && <Check className="h-4 w-4 shrink-0" />}</span>
         : selected && <Check className="h-4 w-4 shrink-0" />}
-    </button>;
+    </button></React.Fragment>;
   });
 
   const dropdownMenu = open ? (

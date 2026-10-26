@@ -2,6 +2,7 @@ import { buildSearchFieldConditions, clientSearchStages, contactSearchStages, cl
 import { escapeSearchRegex as escapeRegex } from "@/lib/search/client-search";
 import mongoose from "mongoose";
 import { decryptClientSecret, encryptClientSecret } from "@/lib/server/client-credentials";
+import { syncClientIntoAutoTrackers } from "@/lib/server/tracker-membership";
 import DeletedRecord from "@/models/DeletedRecord";
 import Client from "@/models/Client";
 import ClientContact from "@/models/ClientContact";
@@ -903,6 +904,7 @@ async function createClientRecordInTransaction(body: Record<string, unknown>, ex
     []
   );
 
+  await syncClientIntoAutoTrackers({ clientId: client.clientId, category: clientCategory });
   return getClientWithContacts(client.clientId);
 }
 
@@ -951,6 +953,7 @@ async function updateClientRecordInTransaction(clientId: string, body: Record<st
     Array.isArray(removedPersonIds) ? removedPersonIds.filter((value): value is string => typeof value === "string") : []
   );
 
+  await syncClientIntoAutoTrackers({ clientId, category: existingClient.category });
   return getClientWithContacts(clientId);
 }
 
@@ -1127,4 +1130,5 @@ export async function restoreClientAggregate(data: RestorableClientAggregate) {
   await restoreMany(Invoice, data.invoices);
   await restoreMany(AppDocument, data.documents);
   await restoreMany(EmailLog, data.emailLogs);
+  await syncClientIntoAutoTrackers({ clientId: nextClientId, category: clientCategory });
 }

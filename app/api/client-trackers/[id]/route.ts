@@ -9,7 +9,6 @@ import Client from "@/models/Client";
 import ClientTracker from "@/models/ClientTracker";
 import ClientTrackerEntry from "@/models/ClientTrackerEntry";
 import {
-  CLIENT_TRACKER_CATEGORIES,
   CLIENT_TRACKER_DETAIL_OPTIONS,
   initialTrackerValues,
   type ClientTrackerCategory,
@@ -23,8 +22,9 @@ import { isAdminSession } from "@/lib/authUsers";
 import { cleanTrackerEmailWorkflows } from "@/lib/server/tracker-email-workflows";
 import { resolveTrackerLinkedValues } from "@/lib/server/tracker-linked-data";
 import { resolveTrackerComputedValues } from "@/lib/server/tracker-computed-values";
-import { resolveTrackerOverview } from "@/lib/server/tracker-overview";
-import { syncCategoryTrackerMembership } from "@/lib/server/tracker-membership";
+import { resolveTrackerOverview, resolveTrackerOverviewSnapshot } from "@/lib/server/tracker-overview";
+import { syncCategoryTrackerMembership, proposedTrackerAudience, confirmTrackerSync, applyTrackerSync } from "@/lib/server/tracker-membership";
+import { trackerClientScope, type TrackerClientScope } from "@/lib/tracker-sync";
 import { evaluateTrackerConditionGroup } from "@/lib/server/tracker-conditions";
 import { recordActivityEvent } from "@/lib/server/activity-events";
 import { matchesTrackerFieldFilter, trackerFieldFilterQuery } from "@/lib/tracker-filters";
@@ -65,6 +65,8 @@ export const GET = withTrackerApiErrors(async function GET(
     fields: TrackerField[];
     clientMembershipMode?: "snapshot" | "categorySync";
     clientCategories?: ClientTrackerCategory[];
+    clientScope?: TrackerClientScope;
+    status?: string;
     clientIds?: string[];
     createdBy?: string;
     save: () => Promise<unknown>;
@@ -81,8 +83,11 @@ export const GET = withTrackerApiErrors(async function GET(
   const searchParams = new URL(req.url).searchParams;
   const freshHeaders = { "Cache-Control": "private, no-store" };
   if (searchParams.get("overviewOnly") === "1") {
-    const overviewCounts = await resolveTrackerOverview(tracker);
-    return NextResponse.json({ overviewCounts, liveDataAsOf: new Date().toISOString() }, { headers: freshHeaders });
+    const requestedKeys = searchParams.has("overviewFields") ? searchParams.get("overviewFields")!.split(",").filter(Boolean) : undefined;
+    if (requestedKeys && (!requestedKeys.length || requestedKeys.length > 100 || requestedKeys.some(key => !tracker.fields.some(field => field.key === key && ["status", "select", "toggle"].includes(field.type)))))
+      return NextResponse.json({ error: "Choose valid summary fields." }, { status: 400 });
+    const snapshot = await resolveTrackerOverviewSnapshot(tracker, requestedKeys);
+    return NextResponse.json({ ...snapshot, liveDataAsOf: new Date().toISOString() }, { headers: freshHeaders });
   }
   const requestedLimit = Number(searchParams.get("limit") || 100);
   const limit = Number.isFinite(requestedLimit)
@@ -117,8 +122,9 @@ export const GET = withTrackerApiErrors(async function GET(
     const valuePath = `values.${field.key}`;
     entryFilter[valuePath] = trackerFieldFilterQuery(field, fieldValue);
   }
-  const totalCount = Promise.resolve(ClientTrackerEntry.countDocuments({ trackerId: tracker._id, inScope: { $ne: false } }));
-  const [totalEntryCount, matchingEntryCount] = await Promise.all([
+  const openingPage = !dynamicFilter && !searchStages.length && Object.keys(entryFilter).length === 2;
+  const totalCount = openingPage ? Promise.resolve(0) : Promise.resolve(ClientTrackerEntry.countDocuments({ trackerId: tracker._id, inScope: { $ne: false } }));
+  const countsPromise = Promise.all([
     totalCount,
     dynamicFilter ? Promise.resolve(undefined)
       : !searchStages.length
@@ -162,10 +168,28 @@ export const GET = withTrackerApiErrors(async function GET(
     [key: string]: unknown;
   }> = [];
   let hasMore = false;
+  let openingCount = 0;
+  const entryProjection = { clientId: 1, values: 1, fieldRevisions: 1, trackerId: 1, inScope: 1, updatedBy: 1, createdAt: 1, updatedAt: 1 };
   const findEntryPage = (start: number, size: number) => searchStages.length
-    ? ClientTrackerEntry.aggregate([{ $match: entryFilter }, ...searchStages, { $sort: { updatedAt: -1, _id: -1 } }, { $skip: start }, { $limit: size }])
-    : ClientTrackerEntry.find(entryFilter).sort({ updatedAt: -1, _id: -1 }).skip(start).limit(size).lean();
-  if (dynamicFilter) {
+    ? ClientTrackerEntry.aggregate([{ $match: entryFilter }, ...searchStages, { $sort: { updatedAt: -1, _id: -1 } }, { $skip: start }, { $limit: size },
+      { $project: entryProjection }])
+    : ClientTrackerEntry.find(entryFilter).select("clientId values fieldRevisions trackerId inScope updatedBy createdAt updatedAt").sort({ updatedAt: -1, _id: -1 }).skip(start).limit(size).lean();
+  const loadPage = async () => {
+  if (openingPage) {
+    // Both branches receive the same matched stream: a concurrent insertion or
+    // exclusion cannot produce a page/count pair from two separate reads.
+    const [result] = await ClientTrackerEntry.aggregate([
+      { $match: entryFilter }, { $sort: { updatedAt: -1, _id: -1 } },
+      { $facet: {
+        total: [{ $count: "value" }],
+        entries: [{ $skip: offset }, { $limit: limit + 1 }, { $project: entryProjection }],
+      } },
+    ]);
+    openingCount = Number(result?.total[0]?.value || 0);
+    const entries = (result?.entries || []) as typeof pageEntries;
+    hasMore = entries.length > limit;
+    pageEntries = entries.slice(0, limit);
+  } else if (dynamicFilter) {
     const batchSize = Math.min(Math.max(limit * 2, 250), 1000);
     const matched: Array<{
       clientId: string;
@@ -192,25 +216,32 @@ export const GET = withTrackerApiErrors(async function GET(
   } else {
     const entries = await findEntryPage(offset, limit + 1);
     hasMore = entries.length > limit;
-    pageEntries = await resolveEntryValues(
-      entries.slice(0, limit) as unknown as Array<{
+    pageEntries = entries.slice(0, limit) as unknown as Array<{
         clientId: string;
-        values: unknown;
+        values: TrackerValues;
         [key: string]: unknown;
-      }>,
-    );
+      }>;
   }
-  const clients = await Client.find({
+  };
+  // Counts and the bounded page query are independent after membership catch-up.
+  // Await them together so a slow count never serializes the first page query.
+  const [[countedTotal, countedMatches]] = await Promise.all([countsPromise, loadPage()]);
+  const totalEntryCount = openingPage ? openingCount : countedTotal;
+  const matchingEntryCount = openingPage ? openingCount : countedMatches;
+  const [resolvedPageEntries, clients] = await Promise.all([
+    dynamicFilter ? Promise.resolve(pageEntries) : resolveEntryValues(pageEntries),
+    Client.find({
     clientId: { $in: pageEntries.map((entry) => entry.clientId) },
   })
     .select(
       "clientId companyName category state legalName gstNumber registrationNumber address",
     )
-    .lean();
+    .lean(),
+  ]);
   const clientsById = new Map(
     clients.map((client) => [client.clientId, client]),
   );
-  const resolvedEntries = pageEntries.map((entry) => ({
+  const resolvedEntries = resolvedPageEntries.map((entry) => ({
     ...entry,
     client: clientsById.get(entry.clientId) || null,
   }));
@@ -255,9 +286,13 @@ export const PATCH = withTrackerApiErrors(async function PATCH(
     description?: string;
     financialYear?: string;
     clientIds?: string[];
+    clientScope?: TrackerClientScope;
+    clientCategories?: ClientTrackerCategory[];
+    clientMembershipMode?: "snapshot" | "categorySync";
     status: "active" | "archived";
     emailEnabled?: boolean;
     emailWorkflows?: unknown[];
+    toObject?: () => Record<string, unknown>;
   } | null;
   if (!current)
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -268,6 +303,8 @@ export const PATCH = withTrackerApiErrors(async function PATCH(
     );
   const update: Record<string, unknown> = {};
   const entryUpdates: Array<() => Promise<unknown>> = [];
+  let membershipAddIds: string[] = [], membershipRemoveIds: string[] = [];
+  const hasMembershipUpdate = typeof body.clientIds !== "undefined";
   if (typeof body.name !== "undefined") {
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (!name)
@@ -365,6 +402,7 @@ export const PATCH = withTrackerApiErrors(async function PATCH(
           $unset: Object.fromEntries(
             removedFields.map((field) => [`values.${field.key}`, ""]),
           ),
+          $inc: Object.fromEntries(removedFields.map(field => [`fieldRevisions.${field.key}`, 1])),
         },
       ));
   }
@@ -483,40 +521,18 @@ export const PATCH = withTrackerApiErrors(async function PATCH(
         ]
       : [];
   }
-  if (typeof body.clientCategories !== "undefined") {
-    const allowed = new Set<string>(CLIENT_TRACKER_CATEGORIES);
-    update.clientCategories = Array.isArray(body.clientCategories)
-      ? [
-          ...new Set(
-            body.clientCategories.filter(
-              (category: unknown): category is ClientTrackerCategory =>
-                typeof category === "string" && allowed.has(category),
-            ),
-          ),
-        ]
-      : [];
+  const hasAudienceUpdate = ["clientCategories", "clientMembershipMode", "clientScope"].some(key => key in body);
+  const audience = proposedTrackerAudience({ ...(current.toObject ? current.toObject() : current), _id: current._id, fields: (update.fields as TrackerField[] | undefined) || current.fields }, body);
+  if (hasAudienceUpdate) {
+    update.clientScope = audience.clientScope;
+    update.clientCategories = audience.clientCategories;
+    update.clientMembershipMode = audience.clientMembershipMode;
   }
-  if (typeof body.clientMembershipMode !== "undefined") {
-    if (
-      body.clientMembershipMode !== "snapshot" &&
-      body.clientMembershipMode !== "categorySync"
-    )
-      return NextResponse.json(
-        { error: "Choose a valid client membership mode." },
-        { status: 400 },
-      );
-    const categories = update.clientCategories ||
-      (current as unknown as { clientCategories?: string[] }).clientCategories || [];
-    if (
-      body.clientMembershipMode === "categorySync" &&
-      (!Array.isArray(categories) || !categories.length)
-    )
-      return NextResponse.json(
-        { error: "Choose categories before enabling automatic membership." },
-        { status: 400 },
-      );
-    update.clientMembershipMode = body.clientMembershipMode;
-  }
+  const audienceChanged = trackerClientScope(current) !== audience.clientScope ||
+    JSON.stringify([...(current.clientCategories || [])].sort()) !== JSON.stringify([...(audience.clientCategories || [])].sort());
+  const enablingAuto = audience.clientMembershipMode === "categorySync" && (current.clientMembershipMode !== "categorySync" || audienceChanged);
+  const syncIds = enablingAuto || body.syncRequested === true
+    ? await confirmTrackerSync(audience, session.user?.email?.toLowerCase() || "", body.syncPreviewToken) : [];
   if (typeof body.clientIds !== "undefined") {
     const requestedIds = Array.isArray(body.clientIds)
       ? [
@@ -534,16 +550,19 @@ export const PATCH = withTrackerApiErrors(async function PATCH(
     const clients = await Client.find({ clientId: { $in: requestedIds } })
       .select("clientId")
       .lean();
-    const clientIds = clients.map((client) => client.clientId);
+    const previousIds = new Set(current.clientIds || []);
+    const available = new Set(clients.map(client => client.clientId));
+    const clientIds = requestedIds.filter(clientId => available.has(clientId) || previousIds.has(clientId));
     if (!clientIds.length)
       return NextResponse.json(
         { error: "Keep at least one client in this tracker." },
         { status: 400 },
       );
-    const previousIds = new Set(
-      (current as unknown as { clientIds?: string[] }).clientIds || [],
-    );
-    const addedIds = clientIds.filter((clientId) => !previousIds.has(clientId));
+    const baselineIds = Array.isArray(body.clientIdsBaseline) ? body.clientIdsBaseline.filter((id): id is string => typeof id === "string") : [...previousIds];
+    const baseline = new Set(baselineIds);
+    const addedIds = clientIds.filter(clientId => !baseline.has(clientId));
+    membershipAddIds = addedIds;
+    membershipRemoveIds = baselineIds.filter(clientId => previousIds.has(clientId) && !clientIds.includes(clientId));
     const entryFields =
       (update.fields as TrackerField[] | undefined) || current.fields;
     if (addedIds.length)
@@ -566,7 +585,7 @@ export const PATCH = withTrackerApiErrors(async function PATCH(
     entryUpdates.push(() => ClientTrackerEntry.updateMany(
       {
         trackerId: current._id,
-        clientId: { $nin: clientIds },
+        clientId: { $in: membershipRemoveIds },
         inScope: { $ne: false },
       },
       {
@@ -577,22 +596,25 @@ export const PATCH = withTrackerApiErrors(async function PATCH(
         },
       },
     ));
-    update.clientIds = clientIds;
+    // Membership arrays are changed atomically below; never overwrite a concurrent addition.
   }
-  if (!Object.keys(update).length)
+  if (!Object.keys(update).length && !hasMembershipUpdate && body.syncRequested !== true)
     return NextResponse.json(
       { error: "No tracker changes supplied" },
       { status: 400 },
     );
   // Finish validating the complete configuration before changing client marks.
   for (const applyEntryUpdate of entryUpdates) await applyEntryUpdate();
-  const tracker = await ClientTracker.findByIdAndUpdate(
+  const syncAddedCount = enablingAuto || body.syncRequested === true ? await applyTrackerSync(audience, syncIds) : 0;
+  let tracker = await ClientTracker.findByIdAndUpdate(
     id,
-    { $set: update },
+    { $set: update, ...(membershipRemoveIds.length ? { $pull: { clientIds: { $in: membershipRemoveIds } } } : {}) },
     { new: true },
   );
   if (!tracker)
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (membershipAddIds.length) tracker = await ClientTracker.findByIdAndUpdate(id,
+    { $addToSet: { clientIds: { $each: membershipAddIds } } }, { new: true });
   const auditEvents = [];
   if (typeof update.emailWorkflows !== "undefined") {
     const workflowCount = Array.isArray(update.emailWorkflows)
@@ -679,7 +701,7 @@ export const PATCH = withTrackerApiErrors(async function PATCH(
     );
   }
   await Promise.all(auditEvents);
-  return NextResponse.json(tracker);
+  return NextResponse.json({ ...(typeof tracker.toObject === "function" ? tracker.toObject() : tracker), ...(enablingAuto || body.syncRequested === true ? { syncAddedCount } : {}) });
 });
 
 export const DELETE = withTrackerApiErrors(async function DELETE(

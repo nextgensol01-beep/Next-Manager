@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { google } from "googleapis";
+import { auth as googleAuth } from "googleapis/build/src/apis/drive";
 import { authOptions } from "@/lib/auth";
 import { isAdminSession } from "@/lib/authUsers";
 
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
       error: "Set GMAIL_OAUTH_CLIENT_ID and GMAIL_OAUTH_CLIENT_SECRET (or the Drive-specific equivalents) first.",
     }, { status: 503 });
   }
-  const oauth = new google.auth.OAuth2(clientId, clientSecret, REDIRECT_URI);
+  const oauth = new googleAuth.OAuth2(clientId, clientSecret, REDIRECT_URI);
   const code = new URL(req.url).searchParams.get("code");
   if (code) {
     try {

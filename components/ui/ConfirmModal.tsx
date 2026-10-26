@@ -1,10 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface ConfirmModalProps {
+  /** Optional presentation hooks; omitted by existing consumers. */
+  className?: string;
+  panelRef?: Ref<HTMLDivElement>;
   open: boolean;
   onClose: () => void;
   onConfirm: () => void | Promise<void>;
@@ -37,6 +40,8 @@ export default function ConfirmModal({
   variant = "danger",
   loading = false,
   confirmText,
+  className,
+  panelRef,
 }: ConfirmModalProps) {
   const [visible, setVisible] = useState(false);
   const [rendered, setRendered] = useState(false);
@@ -100,7 +105,8 @@ export default function ConfirmModal({
       onClick={(e) => e.target === e.currentTarget && !isLoading && onClose()}
     >
       <div
-        className="w-full max-w-sm overflow-hidden rounded-[22px] border shadow-2xl"
+        ref={panelRef}
+        className={cn("w-full max-w-sm overflow-hidden rounded-[22px] border shadow-2xl", className)}
         style={{
           backgroundColor: "color-mix(in srgb, var(--color-card) 92%, transparent)",
           borderColor: "var(--color-border)",

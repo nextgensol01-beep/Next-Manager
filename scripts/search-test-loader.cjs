@@ -3,7 +3,7 @@ const path = require('node:path');
 const Module = require('node:module');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '..');
-module.exports = function createLoader(mocks = {}) {
+module.exports = function createLoader(mocks = {}, sourceOverrides = {}) {
   const cache = new Map();
   function load(file) {
     const filename = path.resolve(root, file);
@@ -22,7 +22,8 @@ module.exports = function createLoader(mocks = {}) {
       }
       return Module.createRequire(filename)(request);
     };
-    const source = fs.readFileSync(filename, 'utf8');
+    const relative = path.relative(root, filename).replaceAll('\\', '/');
+    const source = sourceOverrides[relative] ?? fs.readFileSync(filename, 'utf8');
     loaded._compile(ts.transpileModule(source, { compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
       jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,

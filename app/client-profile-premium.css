@@ -9601,6 +9601,57 @@ button.client-profile-metric-card:hover,
 .workflow-message-empty > svg { opacity: .38; }
 .workflow-message-empty h4 { color: var(--color-text); font-size: 13px; font-weight: 500; }
 .workflow-message-empty p { max-width: 380px; font-size: 12px; line-height: 19px; opacity: .75; }
+.workflow-message-limit { margin: 8px 0; color: var(--color-text-muted); font-size: 11px; line-height: 18px; }
+.workflow-scenario-name { display: grid; gap: 7px; color: var(--color-text); font-size: 11px; }
+.workflow-scenario-name > span { color: var(--color-text-muted); }
+.workflow-scenario-name input,.workflow-client-test-controls :is(input,select) { width: 100%; min-width: 0; padding: 9px 11px; border-radius: 10px; border: 1px solid rgba(120,120,128,.16); background: rgba(120,120,128,.035); color: var(--color-text); font: inherit; }
+.workflow-scenario-issue { margin: 7px 0; color: var(--color-text-muted); font-size: 11px; line-height: 18px; }
+.workflow-scenario-issue strong { color: var(--color-text); font-weight: 500; }
+.workflow-message-expander strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.workflow-client-test { padding: 20px; font-size: 12px; line-height: 1.6; color: var(--color-text); }
+.workflow-client-test-counts { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 16px 0; }
+.workflow-client-test-counts dt { color: var(--color-text-muted); font-size: 10px; }
+.workflow-client-test-counts dd { font-size: 17px; font-weight: 500; }
+.workflow-client-test-scenarios { margin: 12px 0; }
+.workflow-client-test-scenarios summary { cursor: pointer; font-weight: 500; }
+.workflow-client-test-scenarios > button { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px 14px; width: 100%; padding: 8px 0; border-bottom: 1px solid rgba(120,120,128,.1); text-align: left; }
+.workflow-client-test-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 14px 0; }
+.workflow-client-test-controls label { display: grid; gap: 5px; flex: 1; min-width: 160px; }
+.workflow-client-test-list > button { display: flex; justify-content: space-between; gap: 12px; width: 100%; padding: 12px; text-align: left; border-bottom: 1px solid rgba(120,120,128,.12); border-radius: 10px; }
+.workflow-client-test-list > button[aria-pressed="true"],.workflow-client-test-list > button:hover { background: rgba(120,120,128,.06); }
+.workflow-client-test-list > button:disabled { opacity: .55; }
+.workflow-client-test-list > button > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.workflow-client-test-list small { display: block; color: var(--color-text-muted); font-size: 10px; }
+.workflow-client-test-pagination { display: flex; justify-content: space-between; gap: 10px; margin: 14px 0; }
+.workflow-client-test-pagination button:disabled { opacity: .4; }
+.workflow-client-test-detail { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(120,120,128,.14); overflow-wrap: anywhere; }
+.workflow-client-test-detail h4 { font-size: 14px; font-weight: 500; }
+.workflow-client-test-detail p { margin: 7px 0; }
+.workflow-client-test-detail iframe { width: 100%; min-height: 260px; border-radius: 12px; margin-top: 12px; background: white; }
+@media (max-width: 640px) { .workflow-client-test { padding: 14px; } .workflow-client-test-list > button { flex-direction: column; gap: 4px; } }
+.workflow-message-add:disabled { opacity: .45; cursor: not-allowed; }
+.workflow-message-surface[data-draft-highlight="true"] { animation: workflow-message-added 1.4s ease-out both; }
+@keyframes workflow-message-added {
+  0%, 35% { box-shadow: 0 0 0 2px rgba(0,113,227,.19),0 3px 14px rgba(0,113,227,.05); }
+  100% { box-shadow: 0 0 0 0 rgba(0,113,227,0); }
+}
+.workflow-message-delete-popover {
+  position: fixed; margin: 0; max-width: calc(100vw - 24px); box-sizing: border-box;
+  padding: 14px; border: 1px solid rgba(120,120,128,.18); border-radius: 14px;
+  color: var(--color-text); background: var(--color-card); font: inherit;
+  box-shadow: 0 12px 36px rgba(0,0,0,.14),inset 0 1px 0 rgba(255,255,255,.18);
+}
+.workflow-message-delete-popover::backdrop { background: transparent; }
+.workflow-message-delete-popover > strong { font-size: 12px; font-weight: 600; }
+.workflow-message-delete-popover > p { margin: 6px 0 12px; font-size: 11px; line-height: 17px; color: var(--color-text-muted); }
+.workflow-message-delete-popover > div { display: flex; justify-content: flex-end; gap: 6px; }
+.workflow-message-delete-popover button { padding: 7px 10px; border: 1px solid rgba(120,120,128,.12); border-radius: 9px; font-size: 11px; color: var(--color-text); background: rgba(120,120,128,.06); }
+.workflow-message-delete-popover button.is-destructive { color: var(--color-danger,#dc3545); }
+.workflow-message-delete-popover button:focus-visible { outline: 2px solid rgba(0,113,227,.5); outline-offset: 2px; }
+.workflow-message-feedback { position: absolute; z-index: 45; bottom: calc(var(--workflow-footer-height,65px) + 14px); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; width: max-content; max-width: calc(100% - 32px); padding: 9px 12px; border: 1px solid rgba(120,120,128,.16); border-radius: 12px; background: var(--color-card); color: var(--color-text-muted); box-shadow: 0 6px 22px rgba(0,0,0,.1); font-size: 11px; line-height: 17px; }
+.workflow-message-feedback button { flex: none; padding: 3px; color: var(--color-text); font-size: 11px; font-weight: 500; }
+.workflow-messages-workspace > .workflow-message-feedback { position: sticky; transform: none; margin: 12px auto; left: auto; bottom: 12px; }
+@media (prefers-reduced-motion: reduce) { .workflow-message-surface[data-draft-highlight="true"] { animation-duration: .01s; } }
 .tracker-email-modal.is-workflow-editing .workflow-messages-workspace button:focus-visible { outline: 2px solid color-mix(in srgb,var(--color-text-muted) 45%,transparent); outline-offset: 3px; }
 .tracker-email-modal.is-workflow-editing .workflow-messages-workspace button:active { transform: none; }
 .tracker-email-modal.is-workflow-editing .workflow-messages-workspace :is(.workflow-message-add,.workflow-message-priority button):active { transform: scale(.97); }

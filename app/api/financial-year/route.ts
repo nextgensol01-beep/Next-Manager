@@ -7,6 +7,7 @@ import CreditTransaction from "@/models/CreditTransaction";
 import { recordActivityEvent } from "@/lib/server/activity-events";
 import type { ITargetEntry, IGeneratedEntry } from "@/models/FinancialYear";
 import { validateReviewedTargetImport } from "@/lib/server/financial-year-entry-validation";
+import { targetTrackingProvenance } from "@/lib/financial-year-coverage";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -94,8 +95,8 @@ function migrateGenerated(r: Record<string, unknown>): IGeneratedEntry[] {
 function migrateTargets(r: Record<string, unknown>): ITargetEntry[] {
   const existing = r.targets as ITargetEntry[] | undefined;
   if (Array.isArray(existing) && existing.length > 0) {
-    const normalised = normaliseEntries(existing);
-    if (normalised.length > 0) return normalised;
+    // Explicit structured zero/invalid entries must not revive stale legacy targets.
+    return normaliseEntries(existing);
   }
   const entries: ITargetEntry[] = [];
   for (let i = 1; i <= 4; i++) {
@@ -139,18 +140,16 @@ export async function GET(req: NextRequest) {
           fy: "$financialYear",
           from: "$fromClientId",
           to: "$toClientId",
-          type: {
-            $cond: [
-              { $eq: [{ $toUpper: { $ifNull: ["$creditType", "RECYCLING"] } }, "EOL"] },
-              "EOL",
-              "RECYCLING",
-            ],
-          },
+          type: { $toUpper: { $ifNull: ["$creditType", ""] } },
         },
-        q1: { $sum: { $cond: [{ $gt: ["$cat1Qty", 0] }, "$cat1Qty", "$cat1"] } },
-        q2: { $sum: { $cond: [{ $gt: ["$cat2Qty", 0] }, "$cat2Qty", "$cat2"] } },
-        q3: { $sum: { $cond: [{ $gt: ["$cat3Qty", 0] }, "$cat3Qty", "$cat3"] } },
-        q4: { $sum: { $cond: [{ $gt: ["$cat4Qty", 0] }, "$cat4Qty", "$cat4"] } },
+        q1: { $sum: { $ifNull: ["$cat1Qty", { $ifNull: ["$cat1", 0] }] } },
+        q2: { $sum: { $ifNull: ["$cat2Qty", { $ifNull: ["$cat2", 0] }] } },
+        q3: { $sum: { $ifNull: ["$cat3Qty", { $ifNull: ["$cat3", 0] }] } },
+        q4: { $sum: { $ifNull: ["$cat4Qty", { $ifNull: ["$cat4", 0] }] } },
+        invalidQuantities: { $sum: { $cond: [{ $or: CAT_KEYS.map(id => {
+          const value = { $ifNull: [`$cat${id}Qty`, { $ifNull: [`$cat${id}`, 0] }] };
+          return { $or: [{ $not: [{ $isNumber: value }] }, { $lt: [value, 0] }] };
+        }) }, 1, 0] } },
       },
     },
   ]);
@@ -160,6 +159,7 @@ export async function GET(req: NextRequest) {
   const achMap:  Record<string, CatTotals> = {};
   const soldTypedMap: Record<string, Record<string, number>> = {};
   const achTypedMap: Record<string, Record<string, number>> = {};
+  const achievementIssues: Record<string, string[]> = {};
 
   const addTypedTotals = (
     map: Record<string, Record<string, number>>,
@@ -186,10 +186,13 @@ export async function GET(req: NextRequest) {
     }
     if (to && clientIds.includes(to)) {
       const k = `${to}|${tFy}`;
+      if (!VALID_TYPES.has(String(tx._id.type).toUpperCase()) || tx.invalidQuantities > 0) {
+        (achievementIssues[k] ??= []).push("Incoming credit transactions contain an unsupported type or invalid quantity; review allocation.");
+      }
       if (!achMap[k]) achMap[k] = { c1: 0, c2: 0, c3: 0, c4: 0 };
       achMap[k].c1 += tx.q1; achMap[k].c2 += tx.q2;
       achMap[k].c3 += tx.q3; achMap[k].c4 += tx.q4;
-      addTypedTotals(achTypedMap, k, txType, tx);
+      if (VALID_TYPES.has(String(tx._id.type).toUpperCase())) addTypedTotals(achTypedMap, k, txType, tx);
     }
   }
 
@@ -212,10 +215,11 @@ export async function GET(req: NextRequest) {
     // Migrate and derive flat values for targets
     const migratedTargets = migrateTargets(r);
     const flatTgt = deriveFlat(migratedTargets, "cat");
-    const tgt1 = flatTgt.cat1 || g(r, "cat1Target", "targetCat1");
-    const tgt2 = flatTgt.cat2 || g(r, "cat2Target", "targetCat2");
-    const tgt3 = flatTgt.cat3 || g(r, "cat3Target", "targetCat3");
-    const tgt4 = flatTgt.cat4 || g(r, "cat4Target", "targetCat4");
+    const hasStructuredTargets = Array.isArray(r.targets) && r.targets.length > 0;
+    const tgt1 = hasStructuredTargets ? flatTgt.cat1 : g(r, "cat1Target", "targetCat1");
+    const tgt2 = hasStructuredTargets ? flatTgt.cat2 : g(r, "cat2Target", "targetCat2");
+    const tgt3 = hasStructuredTargets ? flatTgt.cat3 : g(r, "cat3Target", "targetCat3");
+    const tgt4 = hasStructuredTargets ? flatTgt.cat4 : g(r, "cat4Target", "targetCat4");
 
     const totalGenerated = gen1 + gen2 + gen3 + gen4;
     const totalSold      = sold.c1 + sold.c2 + sold.c3 + sold.c4;
@@ -224,6 +228,7 @@ export async function GET(req: NextRequest) {
 
     return {
       ...r,
+      targetTracking: { ...targetTrackingProvenance(r), usageIssues: achievementIssues[k] ?? [] },
       generated: migratedGenerated,
       targets:   migratedTargets,
       cat1Generated: gen1, cat2Generated: gen2, cat3Generated: gen3, cat4Generated: gen4,

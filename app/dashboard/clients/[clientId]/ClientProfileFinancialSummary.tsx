@@ -2,6 +2,8 @@
 
 import { BarChart2, Leaf, Pencil, Recycle } from "lucide-react";
 import { formatDateTime, type FYRecord } from "./ClientProfileSupport";
+import { useMemo } from "react";
+import { calculateTargetCoverage, coveragePercentageText, coverageQuantityText as quantity } from "@/lib/financial-year-coverage";
 
 type CreditType = "RECYCLING" | "EOL";
 
@@ -48,19 +50,20 @@ export default function ClientProfileFinancialSummary({
   openFYModal,
   setBreakdownRec,
 }: ClientProfileFinancialSummaryProps) {
-  const baseTotal = fyCategoryRows.reduce((sum, row) => sum + row.base, 0);
-  const usedTotal = fyCategoryRows.reduce((sum, row) => sum + row.used, 0);
-  const remainingTotal = baseTotal - usedTotal;
-  const percentage = baseTotal > 0 ? Math.round((usedTotal / baseTotal) * 100) : 0;
-  const safePercentage = Math.max(0, Math.min(100, percentage));
+  const coverage = useMemo(() => calculateTargetCoverage(fyData, { clientId: fyData.clientId, financialYear: selectedFy }), [fyData, selectedFy]);
+  const baseTotal = isPWP ? fyCategoryRows.reduce((sum, row) => sum + row.base, 0) : coverage.target;
+  const usedTotal = isPWP ? fyCategoryRows.reduce((sum, row) => sum + row.used, 0) : coverage.covered;
+  const remainingTotal = isPWP ? (baseTotal ?? 0) - (usedTotal ?? 0) : coverage.pending;
+  const percentage = isPWP ? (baseTotal ? Math.round(((usedTotal ?? 0) / baseTotal) * 100) : 0) : coverage.percentage;
+  const safePercentage = Math.max(0, Math.min(100, percentage ?? 0));
 
   return (
     <div className="client-profile-card client-profile-fy-progress">
       <div className="client-profile-card-header">
         <div>
           <p className="client-profile-kicker">{isPWP ? "FY Credits" : "FY Targets"}</p>
-          <h2>{isPWP ? "Generated and sold credits" : "Target achievement"} · FY {selectedFy}</h2>
-          <span>{isPWP ? "Generated credits are compared only with sold or used credits." : "Targets are compared only with achieved quantities."}</span>
+          <h2>{isPWP ? "Generated and sold credits" : "Overall Target Achievement"} · FY {selectedFy}</h2>
+          <span>{isPWP ? "Generated credits are compared only with sold or used credits." : "Recorded target coverage (MT), capped per category and type; eligibility is not verified."}</span>
         </div>
         <div className="client-profile-fy-actions">
           <button
@@ -83,57 +86,67 @@ export default function ClientProfileFinancialSummary({
       <div className="client-profile-fy-hero">
         <div
           className="client-profile-fy-ring"
-          data-exceeded={percentage > 100 ? "true" : "false"}
-          style={{ background: `conic-gradient(${percentage > 100 ? "#ff3b30" : "#14a39a"} ${safePercentage * 3.6}deg, rgba(120,120,128,0.14) 0)` }}
+          data-exceeded={isPWP && (percentage ?? 0) > 100 ? "true" : "false"}
+          title={isPWP ? "Credit utilisation" : [coverage.status, ...coverage.issues].join(" ")}
+          style={{ background: `conic-gradient(${isPWP && (percentage ?? 0) > 100 ? "#ff3b30" : "#14a39a"} ${safePercentage * 3.6}deg, rgba(120,120,128,0.14) 0)` }}
         >
-          <div><strong>{percentage}%</strong><span>{isPWP ? "utilised" : "achieved"}</span></div>
+          <div><strong>{isPWP ? `${percentage}%` : coveragePercentageText(percentage)}</strong><span>{isPWP ? "utilised" : coverage.status === "No target" ? "No target" : percentage === null ? "Unavailable" : "achieved"}</span></div>
         </div>
         <div className="client-profile-fy-total">
-          <small>{isPWP ? "Generated" : "Target"}</small>
-          <strong>{baseTotal.toLocaleString("en-IN")}</strong>
+          <small>{isPWP ? "Generated" : "Total Target"}</small>
+          <strong>{quantity(baseTotal)}</strong>
         </div>
         <div className="client-profile-fy-total" data-tone="used">
-          <small>{isPWP ? "Sold / Used" : "Achieved"}</small>
-          <strong>{usedTotal.toLocaleString("en-IN")}</strong>
+          <small>{isPWP ? "Sold / Used" : "Target Achieved"}</small>
+          <strong>{quantity(usedTotal)}</strong>
         </div>
-        <div className="client-profile-fy-total" data-tone={remainingTotal < 0 ? "danger" : "remaining"}>
-          <small>Remaining</small>
-          <strong>{remainingTotal.toLocaleString("en-IN")}</strong>
+        <div className="client-profile-fy-total" data-tone={remainingTotal !== null && remainingTotal < 0 ? "danger" : "remaining"}>
+          <small>{isPWP ? "Remaining" : "Remaining Target"}</small>
+          <strong>{quantity(remainingTotal)}</strong>
         </div>
       </div>
 
       <div className="client-profile-fy-categories">
         {fyCategoryRows.map((row) => {
-          const rowPercentage = row.base > 0 ? Math.round((row.used / row.base) * 100) : 0;
+          const category = coverage.categories.find(item => item.categoryId === row.categoryId)!;
+          const base = isPWP ? row.base : category.target;
+          const used = isPWP ? row.used : category.covered;
+          const remaining = isPWP ? row.remaining : category.pending;
+          const rowPercentage = isPWP ? (row.base > 0 ? Math.round((row.used / row.base) * 100) : 0) : category.percentage;
+          const state = isPWP ? `${rowPercentage}% utilised` : base === null ? "Target unavailable" : base === 0 ? "No target" : rowPercentage === null ? "Needs verification" : `${coveragePercentageText(rowPercentage)} achieved`;
           return (
             <div
               key={row.categoryId}
-              data-empty={row.base === 0 && row.used === 0 ? "true" : "false"}
-              data-exceeded={row.remaining < 0 ? "true" : "false"}
+              data-empty={base === 0 && (used ?? 0) === 0 ? "true" : "false"}
+              data-exceeded={isPWP && row.remaining < 0 ? "true" : "false"}
             >
               <div className="client-profile-fy-category-head">
-                <div><strong>{row.label}</strong><span>{rowPercentage}% {isPWP ? "utilised" : "achieved"}</span></div>
-                <strong>{row.remaining.toLocaleString("en-IN")} remaining</strong>
+                <div><strong>{row.label}</strong><span>{state}</span></div>
+                <strong>{quantity(remaining)} remaining</strong>
               </div>
-              <div className="client-profile-fy-category-track"><span style={{ width: `${Math.max(0, Math.min(100, rowPercentage))}%` }} /></div>
+              <div className="client-profile-fy-category-track"><span style={{ width: `${Math.max(0, Math.min(100, rowPercentage ?? 0))}%` }} /></div>
               <div className="client-profile-fy-category-values">
-                <span>{isPWP ? "Generated" : "Target"} <strong>{row.base.toLocaleString("en-IN")}</strong></span>
-                <span>{isPWP ? "Sold / Used" : "Achieved"} <strong>{row.used.toLocaleString("en-IN")}</strong></span>
+                <span>{isPWP ? "Generated" : "Target"} <strong>{quantity(base)}</strong></span>
+                <span>{isPWP ? "Sold / Used" : "Target Achieved"} <strong>{quantity(used)}</strong></span>
               </div>
               {fyHasTypedSplit && (
                 <div className="client-profile-fy-types">
-                  {row.typedRows.map((item) => (
+                  {row.typedRows.map((item) => {
+                    const bucket = category.buckets.find(bucket => bucket.type === item.type)!;
+                    return (
                     <span key={item.type}>
                       {item.type === "RECYCLING" ? <Recycle className="h-3.5 w-3.5" /> : <Leaf className="h-3.5 w-3.5" />}
-                      {item.type === "RECYCLING" ? "Recycling" : "EOL"} · {item.used.toLocaleString("en-IN")} / {item.base.toLocaleString("en-IN")}
+                      {item.type === "RECYCLING" ? "Recycling" : "EOL"} · {quantity(isPWP ? item.used : bucket.covered)} / {quantity(isPWP ? item.base : bucket.target)}
+                      {!isPWP && <>{" · "}{bucket.target === 0 ? "No target" : bucket.percentage === null ? "Unavailable" : coveragePercentageText(bucket.percentage)}{" · "}{quantity(bucket.pending)} pending</>}
                     </span>
-                  ))}
+                  ); })}
                 </div>
               )}
             </div>
           );
         })}
       </div>
+      {!isPWP && <p className="client-profile-fy-updated" role="status">{coverage.status}{coverage.issues.length ? ` · ${coverage.issues[0]} See Breakdown for details.` : " · Recorded quantities do not certify statutory compliance."}</p>}
       {fyLastUpdated && <p className="client-profile-fy-updated">Last updated {formatDateTime(fyLastUpdated)}</p>}
     </div>
   );

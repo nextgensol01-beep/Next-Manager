@@ -1,16 +1,17 @@
 "use client";
 
 import { readJsonResponse } from "@/lib/http-response";
-import Link from "next/link";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { TrackerTransitionLink, useTrackerNavigation } from "@/components/client-trackers/TrackerNavigationTransition";
 import { useSession } from "next-auth/react";
 import toast from "react-hot-toast";
 import { Archive, CheckCircle2, ClipboardList, Plus, Search, Users } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import TrackerModal from "@/components/client-trackers/TrackerModal";
-import CreateTrackerBuilder from "@/components/client-trackers/create/CreateTrackerBuilder";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { useCache, invalidate } from "@/lib/useCache";
+import { useFreshTrackerData } from "@/lib/useFreshTrackerData";
 import type { ClientTrackerDetailKey, TrackerField } from "@/lib/clientTrackers";
 import { emptyTrackerDraft, trackerCreateErrors, trackerCreatePayload, type TrackerBuilderClient } from "@/lib/tracker-create";
 
@@ -27,15 +28,18 @@ type Tracker = {
   updatedAt: string;
 };
 
+const CreateTrackerBuilder = dynamic(() => import("@/components/client-trackers/create/CreateTrackerBuilder"), { loading: () => <LoadingSpinner /> });
+
 export default function ClientTrackersPage() {
+  const navigation = useTrackerNavigation();
   const { data: session } = useSession();
   const isAdmin =
     session?.user && (session.user as { role?: string }).role === "admin";
-  const { data: rawClients, loading: loadingClients, error: clientLoadError } = useCache<TrackerBuilderClient[]>("/api/clients");
-  const clients = useMemo(() => Array.isArray(rawClients) ? rawClients : [], [rawClients]);
   const [createOpen, setCreateOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [showArchived, setShowArchived] = useState(false);
+  const { data: rawClients, loading: loadingClients, error: clientLoadError } = useCache<TrackerBuilderClient[]>("/api/clients", { enabled: createOpen });
+  const clients = useMemo(() => Array.isArray(rawClients) ? rawClients : [], [rawClients]);
+  const [query, setQuery] = useState(() => navigation?.restoredList()?.query || "");
+  const [showArchived, setShowArchived] = useState(() => navigation?.restoredList()?.showArchived || false);
   const [form, setForm] = useState(emptyTrackerDraft);
   const [attempted, setAttempted] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
@@ -48,9 +52,27 @@ export default function ClientTrackersPage() {
     : "/api/client-trackers";
   const {
     data: trackerData,
-    loading: trackerLoading,
+    loading: trackerRefreshing,
+    error: trackerError,
     refetch: refetchTrackerData,
-  } = useCache<Tracker[]>(trackerUrl);
+  } = useFreshTrackerData<Tracker[]>(trackerUrl, trackerUrl, { retainCached: true });
+  const trackerLoading = trackerRefreshing && !trackerData;
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState !== "hidden") void refetchTrackerData(); };
+    const timer = window.setInterval(refresh, 30000);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [trackerUrl, refetchTrackerData]);
+  useEffect(() => {
+    if (trackerError) toast.error("Tracker cards could not be refreshed. Please retry when the server is available.", { id: "tracker-list-refresh" });
+  }, [trackerError]);
   const displayedTrackers = Array.isArray(trackerData) ? trackerData : [];
 
   const visibleTrackers = displayedTrackers.filter((tracker) =>
@@ -58,6 +80,10 @@ export default function ClientTrackersPage() {
       .toLowerCase()
       .includes(query.toLowerCase().trim()),
   );
+  useLayoutEffect(() => {
+    navigation?.saveList({ query, showArchived });
+    if (!trackerLoading) navigation?.listReady();
+  }, [navigation, query, showArchived, trackerLoading, trackerData]);
 
   const openCreate = () => {
     setForm(emptyTrackerDraft());
@@ -110,12 +136,12 @@ export default function ClientTrackersPage() {
   };
 
   return (
-    <div className="client-trackers-page space-y-5">
+    <div className="client-trackers-page space-y-5" data-tracker-list-ready={trackerLoading ? undefined : "true"}>
       <PageHeader
         title="Client Trackers"
         description="Mark and monitor a task across every selected client."
       >
-        <div className="flex gap-2">
+        <div className="tracker-list-actions flex gap-2">
           <button
             className="glass-pill"
             onClick={() => setShowArchived((current) => !current)}
@@ -134,7 +160,7 @@ export default function ClientTrackersPage() {
         </div>
       </PageHeader>
 
-      <section className="tracker-premium-intro">
+      <section className="tracker-premium-intro" data-tracker-list-chrome>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <span className="rounded-xl bg-blue-50 p-2 text-blue-600 dark:bg-blue-950/40">
@@ -190,19 +216,22 @@ export default function ClientTrackersPage() {
           )}
         </section>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="tracker-card-grid grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {visibleTrackers.map((tracker) => (
-            <Link
+            <TrackerTransitionLink
               key={tracker._id}
+              trackerId={tracker._id}
+              seed={{ id: tracker._id, name: tracker.name, description: tracker.description, financialYear: tracker.financialYear, entryCount: tracker.entryCount, fields: tracker.fields, clientColumns: tracker.clientColumns }}
+              data-tracker-transition-id={tracker._id}
               href={`/dashboard/client-trackers/${tracker._id}`}
               className="tracker-premium-card group"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="truncate font-semibold text-default group-hover:text-blue-600">
+                  <h2 data-tracker-title className="truncate font-semibold text-default group-hover:text-blue-600">
                     {tracker.name}
                   </h2>
-                  <p className="mt-1 line-clamp-2 min-h-10 text-sm text-muted">
+                  <p data-tracker-description className="mt-1 line-clamp-2 min-h-10 text-sm text-muted">
                     {tracker.description || "No description"}
                   </p>
                 </div>
@@ -226,7 +255,7 @@ export default function ClientTrackersPage() {
                   year: "numeric",
                 })}
               </p>
-            </Link>
+            </TrackerTransitionLink>
           ))}
         </div>
       )}

@@ -177,18 +177,19 @@ export default function ClientProfileModals({
               <option value="target-screenshot">Target screenshot</option>
             </select>
           </div>
-          {docForm.documentKind === "target-screenshot" && (
+          {(
             <div>
-              <label className="label">Target financial year *</label>
+              <label className="label">{docForm.documentKind === "target-screenshot" ? "Target financial year *" : "Financial year"}</label>
               <select
                 className="input-field"
                 value={docForm.financialYear}
                 onChange={(e) => setDocForm({ ...docForm, financialYear: e.target.value })}
-                required
+                required={docForm.documentKind === "target-screenshot"}
               >
-                {FINANCIAL_YEARS.map((year) => <option key={year} value={year}>FY {year}</option>)}
+                {docForm.documentKind !== "target-screenshot" && <option value="">Not applicable</option>}
+                {[...new Set([...FINANCIAL_YEARS, ...(docForm.financialYear ? [docForm.financialYear] : [])])].map((year) => <option key={year} value={year}>FY {year}</option>)}
               </select>
-              <p className="mt-1 text-xs text-faint">This updates the target-screenshot requirement card for the selected FY.</p>
+              {docForm.documentKind === "target-screenshot" && <p className="mt-1 text-xs text-faint">This updates the target-screenshot requirement card for the selected FY.</p>}
             </div>
           )}
           <div><label className="label">Google Drive Link *</label><input className="input-field" type="url" value={docForm.driveLink} onChange={(e) => setDocForm({ ...docForm, driveLink: e.target.value })} required placeholder="https://drive.google.com/..." /></div>
@@ -377,6 +378,7 @@ export default function ClientProfileModals({
             const breakdownProps = makeBreakdownProps(breakdownRec);
             return (
               <CategoryBreakdown
+                record={breakdownRec}
                 clientType={isPWP ? "PWP" : "PIBO"}
                 entries={breakdownProps.entries}
                 achievedMap={breakdownProps.achievedMap}

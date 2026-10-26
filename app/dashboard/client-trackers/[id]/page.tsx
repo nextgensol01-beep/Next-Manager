@@ -1,5 +1,10 @@
 "use client";
 
+import { addDraftRule, moveDraftRule, removeDraftRule, restoreDraftRule, updateDraftRule, type DraftRuleChange, type WorkflowDraftChange } from "@/lib/tracker-email-draft-rules";
+import type { DraftScenarioAnalysis } from "@/components/client-trackers/WorkflowTrackerClientPreview";
+
+import { emailEditorVariables } from "@/lib/tracker-email-renderer";
+
 import { readJsonResponse } from "@/lib/http-response";
 
 import Link from "next/link";
@@ -23,6 +28,8 @@ import {
   ArrowRight,
   ChevronDown,
   CircleAlert,
+  Check,
+  LoaderCircle,
   Download,
   FileText,
   Filter,
@@ -38,7 +45,8 @@ import {
 } from "lucide-react";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import EmailDeliveryReviewWorkspace from "@/components/client-trackers/EmailDeliveryReviewWorkspace";
-import EmailDeliveryAuthorizationModal from "@/components/client-trackers/EmailDeliveryAuthorizationModal";
+import { useOptionalEmailDeliveryActions } from "@/components/client-trackers/EmailDeliveryActivityProvider";
+import type { DeliveryJobAcceptance, DeliveryJobSummary } from "@/lib/email-delivery-jobs";
 import { canonicalDeliveryBatch, type DeliveryBatch } from "@/lib/email-delivery-security";
 import { buildDeliveryMessages, validateRecipientDrafts, SecurityRequestError } from "@/lib/email-delivery-security-client";
 import { previewWithGmailSignature, type EmailPreview, type RecipientDraft, type EmailPreparationPhase } from "@/lib/tracker-email-delivery-review";
@@ -50,13 +58,18 @@ import StyleToStepperHandoff from "@/components/client-trackers/StyleToStepperHa
 import { handoffReceive } from "@/lib/workflow-style-handoff";
 import { emailOperatorsForField, emailWorkflowValidationIssues, validateEmailWorkflowDrafts, type EmailWorkflowIssue } from "@/lib/tracker-email-validation";
 import TrackerPageLoading from "@/components/client-trackers/TrackerPageLoading";
+import { TrackerTransitionLink, useTrackerNavigation } from "@/components/client-trackers/TrackerNavigationTransition";
 import { useFreshTrackerData } from "@/lib/useFreshTrackerData";
 import { draftField, type TrackerDraftField } from "@/lib/tracker-create";
-import { configurationChanges, configurationFields, configurationSnapshot, configurationNeedsFinancialYear, type TrackerConfiguration } from "@/lib/tracker-configuration";
-import ConfirmModal from "@/components/ui/ConfirmModal";
+import { configurationChanges, configurationFields, configurationSnapshot, configurationNeedsFinancialYear, configurationSyncDraft, type TrackerConfiguration } from "@/lib/tracker-configuration";
+import type { TrackerClientScope, TrackerSyncDraft } from "@/lib/tracker-sync";
+import type { ClientTrackerCategory } from "@/lib/clientTrackers";
+import ConfirmModal from "@/components/client-trackers/TrackerConfirmModal";
 import { GlassToggle } from "@/components/ui/liquid-glass";
 import { invalidate, useCache } from "@/lib/useCache";
 import { useTrackerQuery } from "@/lib/useTrackerQuery";
+import { adjustTrackerOverview, sameTrackerValue } from "@/lib/tracker-editing";
+import { trackerMarkRevision } from "@/lib/tracker-revisions";
 import {
   CLIENT_TRACKER_CATEGORIES,
   CLIENT_TRACKER_DETAIL_OPTIONS,
@@ -74,11 +87,13 @@ import {
 import { TRACKER_OPTION_PALETTE, trackerHasOptionColors, trackerOptionColor, trackerOptionTone } from "@/lib/tracker-option-colors";
 
 const ConfigureTrackerWorkspace = dynamic(() => import("@/components/client-trackers/configure/ConfigureTrackerWorkspace"), { loading: () => <LoadingSpinner /> });
+const EmailDeliveryAuthorizationModal = dynamic(() => import("@/components/client-trackers/EmailDeliveryAuthorizationModal"), { loading: () => <LoadingSpinner /> });
 const WorkflowTemplateWorkspace = dynamic(() => import("@/components/client-trackers/WorkflowTemplateWorkspace"), { loading: () => <LoadingSpinner /> });
 const WorkflowDeliveryWorkspace = dynamic(() => import("@/components/client-trackers/WorkflowDeliveryWorkspace"), { loading: () => <LoadingSpinner /> });
 const WorkflowReviewWorkspace = dynamic(() => import("@/components/client-trackers/WorkflowReviewWorkspace"), { loading: () => <LoadingSpinner /> });
 const WorkflowMessagesWorkspace = dynamic(() => import("@/components/client-trackers/WorkflowMessagesWorkspace"), { loading: () => <LoadingSpinner /> });
 const WorkflowCombinationPreview = dynamic(() => import("@/components/client-trackers/WorkflowCombinationPreview"), { loading: () => <LoadingSpinner /> });
+const WorkflowTrackerClientPreview = dynamic(() => import("@/components/client-trackers/WorkflowTrackerClientPreview"), { loading: () => <LoadingSpinner /> });
 
 type Client = {
   clientId: string;
@@ -103,9 +118,33 @@ type Entry = {
   _id: string;
   clientId: string;
   values: TrackerValues;
+  fieldRevisions?: Record<string, number>;
   updatedAt: string;
   client: Client | null;
 };
+type SaveTrackerValue = (entry: Entry, field: TrackerField, value: TrackerValue, options?: { expectedRevision?: number; undo?: boolean; retry?: boolean }) => void;
+type CellFeedback = "saved" | "failed" | "conflict";
+function navigateTrackerSwitch(event: React.KeyboardEvent<HTMLTableSectionElement>) {
+  const target = event.target as HTMLElement;
+  if (target.getAttribute("role") !== "switch" || !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+  const cell = target.closest<HTMLTableCellElement>("td[data-tracker-field]"), row = cell?.parentElement;
+  if (!cell || !row) return;
+  let destination: Element | undefined | null;
+  if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+    const sibling = event.key === "ArrowUp" ? row.previousElementSibling : row.nextElementSibling;
+    destination = [...(sibling?.querySelectorAll<HTMLTableCellElement>("td[data-tracker-field]") || [])].find(item => item.dataset.trackerField === cell.dataset.trackerField);
+  } else destination = event.key === "ArrowLeft" ? cell.previousElementSibling : cell.nextElementSibling;
+  const control = destination?.querySelector<HTMLElement>('button:not(:disabled),select:not(:disabled),input:not(:disabled),textarea:not(:disabled)');
+  if (control) {
+    event.preventDefault();
+    const focus = () => { control.focus({ preventScroll: true }); control.scrollIntoView({ block: "nearest", inline: "nearest" }); };
+    const disclosure = control.closest("tr")?.querySelector<HTMLButtonElement>('.tracker-mobile-toggle[aria-expanded="false"]');
+    // The same keyboard path must reveal a collapsed phone row before focusing
+    // its existing editor. Desktop controls keep their immediate focus behavior.
+    if (disclosure?.getClientRects().length) { disclosure.click(); requestAnimationFrame(focus); }
+    else focus();
+  }
+}
 type TrackerDetail = {
   _id: string;
   name: string;
@@ -118,7 +157,8 @@ type TrackerDetail = {
   entries: Entry[];
   clientIds: string[];
   clientMembershipMode?: "snapshot" | "categorySync";
-  clientCategories?: string[];
+  clientCategories?: ClientTrackerCategory[];
+  clientScope?: TrackerClientScope;
   entryCount?: number;
   totalEntryCount?: number;
   offset?: number;
@@ -195,6 +235,7 @@ function newWorkflow(fields: TrackerField[]): TrackerEmailWorkflow {
     body: "Dear Team,\n\n{{points}}\n\nRegards,\nNextgen Solutions",
     points: [],
     contentMode: "points",
+    combinationMatchingMode: "first",
     signatureGap: 2,
     recipientStrategy: "selected",
   };
@@ -227,6 +268,7 @@ function migrateLegacyMatchingMessages(workflows: TrackerEmailWorkflow[]) {
         ...contentRules,
         ...workflow.points.map((point, index) => ({
           id: `legacy-point-${point.id}`,
+          legacyPoint: true as const,
           type: (point.format === "statement"
             ? "statement"
             : "point") as TrackerEmailContentRule["type"],
@@ -259,6 +301,7 @@ export default function ClientTrackerDetailPage({
   const isAdmin =
     session?.user && (session.user as { role?: string }).role === "admin";
   const resolved = React.use(params);
+  const trackerNavigation = useTrackerNavigation();
   const entryLimit = 100;
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState(ALL_FILTER);
@@ -278,29 +321,44 @@ export default function ClientTrackerDetailPage({
   const pendingCells = useRef(new Set<string>());
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [emailHistoryOpen, setEmailHistoryOpen] = useState(false);
   const writesPending = savingCells.size > 0 || bulkSaving;
-  const { data, loading, error, refetch: refetchCurrentPage, mutate } =
-    useFreshTrackerData<TrackerDetail>(url, resolved.id, { paused: writesPending });
-  const { data: overview, loading: overviewLoading, error: overviewError, refetch: refetchOverview } =
-    useFreshTrackerData<Pick<TrackerDetail, "overviewCounts">>(
+  const { data, loading, refreshing, error, backgroundError, refetch: refetchCurrentPage, mutate } =
+    useFreshTrackerData<TrackerDetail>(url, resolved.id, { paused: writesPending, retainCached: true, revalidateOnResume: false });
+  const { data: overview, loading: overviewLoading, refreshing: overviewRefreshing, error: overviewError, refetch: refetchOverview, mutate: mutateOverview } =
+    useFreshTrackerData<Pick<TrackerDetail, "overviewCounts" | "totalEntryCount">>(
       `/api/client-trackers/${resolved.id}?overviewOnly=1`, resolved.id,
-      { enabled: Boolean(data), paused: writesPending },
+      // A cached shell is not a validated membership snapshot. Start totals only
+      // after the opening table read has finished its database reconciliation.
+      { enabled: Boolean(data) && !loading, paused: writesPending, retainCached: true, revalidateOnResume: false },
     );
   const refetch = useCallback(() => {
     invalidate(`/api/client-trackers/${resolved.id}`);
     void refetchCurrentPage();
     void refetchOverview();
   }, [resolved.id, refetchCurrentPage, refetchOverview]);
-  const { data: emailActivity, refetch: refetchEmailActivity } =
-    useCache<TrackerEmailActivity>(`/api/client-trackers/${resolved.id}/email`, { enabled: data?.emailEnabled === true });
+  const emailSummaryUrl = `/api/client-trackers/${resolved.id}/email?compact=1&clientIds=${encodeURIComponent(JSON.stringify((data?.entries || []).map(entry => entry.clientId)))}`;
+  const { data: emailActivity, loading: emailSummaryLoading, refreshing: emailSummaryRefreshing, error: emailSummaryError, refetch: refetchEmailSummary } =
+    useFreshTrackerData<TrackerEmailActivity>(emailSummaryUrl, resolved.id, { enabled: data?.emailEnabled === true && !loading, retainCached: true });
+  const { data: emailHistory, loading: emailHistoryLoading, error: emailHistoryError, refetch: refetchEmailHistory } =
+    useFreshTrackerData<TrackerEmailActivity>(`/api/client-trackers/${resolved.id}/email`, resolved.id, { enabled: emailHistoryOpen });
+  const refetchEmailActivity = useCallback(() => { void refetchEmailSummary(); void refetchEmailHistory(); }, [refetchEmailSummary, refetchEmailHistory]);
   const { data: trackerActivity, refetch: refetchTrackerActivity } =
     useCache<TrackerActivity>(`/api/client-trackers/${resolved.id}/activity`);
   const tracker = data;
+  const trackerReady = Boolean(tracker);
+  useLayoutEffect(() => { if (trackerReady) trackerNavigation?.workspaceReady(); }, [trackerNavigation, trackerReady, resolved.id]);
   const overviewCounts = overview?.overviewCounts;
+  const summaryMembershipMismatch = overview?.totalEntryCount !== undefined && data?.totalEntryCount !== undefined && overview.totalEntryCount !== data.totalEntryCount;
   const [archiving, setArchiving] = useState(false);
   const [selectedEntries, setSelectedEntries] = useState<Set<string>>(
     new Set(),
   );
+  const selectedMarkRevisions = useRef(new Map<string, Record<string, number>>());
+  useEffect(() => {
+    for (const id of selectedMarkRevisions.current.keys()) if (!selectedEntries.has(id)) selectedMarkRevisions.current.delete(id);
+    for (const entry of data?.entries || []) if (selectedEntries.has(entry._id)) selectedMarkRevisions.current.set(entry._id, { ...entry.fieldRevisions });
+  }, [selectedEntries, data?.entries]);
   const [bulkField, setBulkField] = useState("status");
   const [bulkValue, setBulkValue] = useState("Done");
   const [configurationOpen, setConfigurationOpen] = useState(false);
@@ -316,24 +374,24 @@ export default function ClientTrackerDetailPage({
   const [columnDraft, setColumnDraft] = useState<ClientTrackerDetailKey[]>([]);
   const [savingConfiguration, setSavingConfiguration] = useState(false);
   const [participantDraft, setParticipantDraft] = useState<string[]>([]);
+  const [syncDraft, setSyncDraft] = useState<TrackerSyncDraft>({ clientScope: "selected", clientCategories: [], clientMembershipMode: "snapshot" });
   const [basicDraft, setBasicDraft] = useState({
     name: "",
     description: "",
     financialYear: "",
   });
   const configurationDiff = useMemo(() => configurationBaseline ? configurationChanges(configurationBaseline, {
-    fields: fieldDraft, clientColumns: columnDraft, clientIds: participantDraft, financialYear: basicDraft.financialYear,
-  }) : [], [configurationBaseline, fieldDraft, columnDraft, participantDraft, basicDraft.financialYear]);
+    fields: fieldDraft, clientColumns: columnDraft, clientIds: participantDraft, financialYear: basicDraft.financialYear, ...syncDraft,
+  }) : [], [configurationBaseline, fieldDraft, columnDraft, participantDraft, basicDraft.financialYear, syncDraft]);
   const [basicsOpen, setBasicsOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<
     "archive" | "delete" | "configuration" | "bulk" | null
   >(null);
   const [lastBulkChange, setLastBulkChange] = useState<{
     key: string;
-    values: Array<{ id: string; value: TrackerValue }>;
+    values: Array<{ id: string; value: TrackerValue; revision: number }>;
   } | null>(null);
   const [emailConfigOpen, setEmailConfigOpen] = useState(false);
-  const [emailHistoryOpen, setEmailHistoryOpen] = useState(false);
   const [emailComposeOpen, setEmailComposeOpen] = useState(false);
   const [emailEnabledDraft, setEmailEnabledDraft] = useState(false);
   const [workflowDraft, setWorkflowDraft] = useState<TrackerEmailWorkflow[]>(
@@ -360,7 +418,12 @@ export default function ClientTrackerDetailPage({
   const [emailDeliveryMode, setEmailDeliveryMode] = useState<"draft" | "send" | null>(null);
   const emailExpandFocusRef = useRef<HTMLElement | null>(null);
   const [combinationPreviewOpen, setCombinationPreviewOpen] = useState(false);
+  const [trackerPreviewOpen, setTrackerPreviewOpen] = useState(false);
+  const [trackerPreviewRuleId, setTrackerPreviewRuleId] = useState("");
+  const [scenarioAnalysis, setScenarioAnalysis] = useState<DraftScenarioAnalysis | null>(null);
+  const [scenarioValidationTarget, setScenarioValidationTarget] = useState<{ workflowId: string; ruleId: string; conditionIndex?: number; request: number } | null>(null);
   const [authorizationBatch, setAuthorizationBatch] = useState<{ batch: DeliveryBatch; revision: string } | null>(null);
+  const emailDeliveryActivity = useOptionalEmailDeliveryActions();
   const emailOperationRef = useRef<{ batch: DeliveryBatch; revision: string; attempted: boolean; approvalId?: string } | null>(null);
   const emailDeliveryInFlight = useRef(false);
   const [recipientDrafts, setRecipientDrafts] = useState<
@@ -383,7 +446,7 @@ export default function ClientTrackerDetailPage({
     document => document.storageType === "google-drive" && Boolean(document.driveFileId) && Boolean(document.mimeType),
   ), [rawDocuments]);
   const resultsUpdating = loading || filtersPending;
-  const resultsUnavailable = resultsUpdating || Boolean(error);
+  const resultsUnavailable = resultsUpdating || Boolean(error && !backgroundError);
 
   const signaturePreviewOpen = Boolean((emailComposeOpen && emailPreview) || previewMessage);
   const emailClientCategories = useMemo(() => Object.fromEntries((tracker?.entries || []).map(entry => [entry.clientId, entry.client?.category || ""])), [tracker?.entries]);
@@ -426,6 +489,10 @@ export default function ClientTrackerDetailPage({
   // The API filters the complete tracker before pagination; do not re-filter a
   // stale page locally while a new search is still loading.
   const visibleEntries = tracker?.entries || [];
+  useEffect(() => {
+    if (!loading && !writesPending && !error && tracker?.entryCount !== undefined && entryOffset > 0 && entryOffset >= tracker.entryCount)
+      setEntryOffset(Math.max(0, Math.floor((tracker.entryCount - 1) / entryLimit) * entryLimit));
+  }, [loading, writesPending, error, tracker?.entryCount, entryOffset, setEntryOffset]);
   const deleteActiveSavedView = async () => {
     if (!tracker || !activeSavedView) return;
     try {
@@ -587,66 +654,189 @@ export default function ClientTrackerDetailPage({
     setSelectedEntries(new Set());
   }, [entryOffset]);
 
-  const saveValue = async (
+  const cellQueues = useRef(new Map<string, { confirmed: TrackerValue | undefined; desired: TrackerValue; revision: number; serverRevision: number }>());
+  const editingAlive = useRef(true);
+  const [cellFeedback, setCellFeedback] = useState<Map<string, CellFeedback>>(new Map());
+  const feedbackTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const showCellFeedback = useCallback((id: string, status?: CellFeedback) => {
+    clearTimeout(feedbackTimers.current.get(id)); feedbackTimers.current.delete(id);
+    setCellFeedback(previous => {
+      if (!status && !previous.has(id)) return previous;
+      const next = new Map(previous); next.delete(id);
+      if (status) next.set(id, status);
+      while (next.size > 64) next.delete(next.keys().next().value!);
+      return next;
+    });
+    if (status === "saved") feedbackTimers.current.set(id, setTimeout(() => {
+      feedbackTimers.current.delete(id);
+      if (editingAlive.current) setCellFeedback(previous => { const next = new Map(previous); next.delete(id); return next; });
+    }, 1400));
+    while (feedbackTimers.current.size > 64) { const key = feedbackTimers.current.keys().next().value!; clearTimeout(feedbackTimers.current.get(key)); feedbackTimers.current.delete(key); }
+  }, []);
+  const reconcileNeeded = useRef({ overview: false, table: false, activity: false });
+  const reconcilingTable = useRef(false);
+  const mismatchAttempts = useRef({ at: 0, count: 0 });
+  const editingContext = useRef({ data, url, bulkSaving, scope: resolved.id });
+  editingContext.current = { data, url, bulkSaving, scope: resolved.id };
+  const reconcileEdits = useCallback(() => {
+    if (!editingAlive.current || pendingCells.current.size || editingContext.current.bulkSaving) return;
+    const flags = reconcileNeeded.current;
+    const refreshTotals = () => {
+      if (!flags.overview) return;
+      flags.overview = false;
+      // A full snapshot also observes other employees' changes to different
+      // fields; never merge counters confirmed against different revisions.
+      void refetchOverview();
+    };
+    // Let the employee finish a text draft before replacing a filtered page.
+    const typing = document.activeElement?.matches('tbody input:not([type="checkbox"]), tbody textarea');
+    if (flags.table) {
+      if (typing || reconcilingTable.current) return;
+      flags.table = false; reconcilingTable.current = true;
+      const { scope, url: requestUrl } = editingContext.current;
+      void refetchCurrentPage().then(() => {
+        if (editingAlive.current && editingContext.current.scope === scope && editingContext.current.url === requestUrl && !pendingCells.current.size && !editingContext.current.bulkSaving) refreshTotals();
+      }).finally(() => { reconcilingTable.current = false; });
+    } else refreshTotals();
+    if (flags.activity) { flags.activity = false; void refetchTrackerActivity(); }
+  }, [refetchOverview, refetchCurrentPage, refetchTrackerActivity]);
+  useEffect(() => { if (!writesPending) reconcileEdits(); }, [writesPending, reconcileEdits]);
+  useEffect(() => {
+    if (!summaryMembershipMismatch) { mismatchAttempts.current.count = 0; return; }
+    if (!summaryMembershipMismatch || loading || overviewLoading || overviewRefreshing) return;
+    if (Date.now() - mismatchAttempts.current.at > 30000) mismatchAttempts.current = { at: Date.now(), count: 0 };
+    if (mismatchAttempts.current.count >= 2) return; // The regular visible-page reconciliation remains the fallback.
+    mismatchAttempts.current.count += 1;
+    reconcileNeeded.current.table = true; reconcileNeeded.current.overview = true;
+    reconcileEdits();
+  }, [summaryMembershipMismatch, loading, overviewLoading, overviewRefreshing, reconcileEdits]);
+  useEffect(() => {
+    editingAlive.current = true;
+    setSavingCells(new Set()); setBulkSaving(false);
+    setSelectedEntries(new Set()); setLastBulkChange(null);
+    setCellFeedback(new Map());
+    reconcileNeeded.current = { overview: false, table: false, activity: false };
+    const queues = cellQueues.current, pending = pendingCells.current, timers = feedbackTimers.current;
+    // Authoritative periodic/focus reads also pick up other employees' edits.
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      reconcileNeeded.current.overview = true;
+      reconcileNeeded.current.table = true;
+      reconcileNeeded.current.activity = true;
+      refetchEmailActivity();
+      reconcileEdits();
+    };
+    const afterBlur = () => { queueMicrotask(reconcileEdits); };
+    const timer = window.setInterval(refresh, 30000);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    document.addEventListener("focusout", afterBlur);
+    return () => {
+      editingAlive.current = false;
+      toast.dismiss("tracker-edit-undo");
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      queues.clear(); pending.clear();
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      document.removeEventListener("focusout", afterBlur);
+    };
+  }, [resolved.id, reconcileEdits, refetchEmailActivity]);
+  useEffect(() => {
+    if (overviewError) toast.error("Totals could not be refreshed. Showing the last known counts; refresh the tracker to retry.", { id: `tracker-totals-${resolved.id}` });
+  }, [overviewError, resolved.id]);
+  useEffect(() => {
+    if (emailSummaryError) toast.error("Email statistics could not be refreshed. Please retry when the server is available.", { id: `tracker-email-${resolved.id}` });
+  }, [emailSummaryError, resolved.id]);
+
+  const saveValue = useCallback(async function saveCell(
     entry: Entry,
     field: TrackerField,
     value: TrackerValue,
-  ) => {
+    options?: { expectedRevision?: number; undo?: boolean; retry?: boolean },
+  ): Promise<void> {
     const cellId = `${entry._id}-${field.key}`;
-    if (pendingCells.current.has(cellId)) return;
+    if (!editingAlive.current || editingContext.current.scope !== resolved.id) return;
+    if (editingContext.current.bulkSaving) return;
+    const existing = cellQueues.current.get(cellId);
+    if (existing && (options?.undo || options?.retry)) { toast.error("This field is still saving. Wait for it to finish before Undo or Retry."); return; }
+    const previous = existing?.desired ?? editingContext.current.data?.entries.find(item => item._id === entry._id)?.values[field.key] ?? entry.values[field.key];
+    if (sameTrackerValue(previous, value)) return;
+    const latest = editingContext.current.data?.entries.find(item => item._id === entry._id) || entry;
+    const queue = existing || { confirmed: previous, desired: value, revision: 0, serverRevision: options?.expectedRevision ?? trackerMarkRevision(latest.fieldRevisions, field.key) };
+    queue.desired = value; queue.revision++;
+    cellQueues.current.set(cellId, queue);
+    const apply = (oldValue: TrackerValue | undefined, newValue: TrackerValue | undefined, updatedAt?: string, serverRevision?: number) => {
+      mutate(current => current ? { ...current, entries: current.entries.map(item => item._id === entry._id
+        ? { ...item, updatedAt: updatedAt || item.updatedAt, values: { ...item.values, [field.key]: newValue ?? "" },
+          ...(serverRevision !== undefined ? { fieldRevisions: { ...item.fieldRevisions, [field.key]: serverRevision } } : {}) } : item) } : current);
+      // This also cancels pre-write overview reads, even for a non-summary field.
+      mutateOverview(current => current ? { ...current, overviewCounts: adjustTrackerOverview(current.overviewCounts, field, oldValue, newValue) } : current);
+    };
+    apply(previous, value);
+    showCellFeedback(cellId);
+    const currentData = editingContext.current.data;
+    for (const summary of currentData?.fields || []) if (["status", "select", "toggle"].includes(summary.type) && (summary.key === field.key || summary.computed)) {
+      reconcileNeeded.current.overview = true;
+    }
+    const query = new URL(editingContext.current.url, window.location.origin).searchParams;
+    if (query.has("field") || query.has("view") || currentData?.fields.some(item => item.computed)) reconcileNeeded.current.table = true;
+    if (existing) return; // Its worker will submit the latest intent after the in-flight PATCH.
     pendingCells.current.add(cellId);
     setSavingCells(new Set(pendingCells.current));
-    mutate((current) =>
-      current
-        ? {
-            ...current,
-            entries: current.entries.map((item) =>
-              item._id === entry._id
-                ? { ...item, values: { ...item.values, [field.key]: value } } : item,
-            ),
-          }
-        : (current as unknown as TrackerDetail),
-    );
-    try {
-      const response = await fetch(
-        `/api/client-trackers/${resolved.id}/entries/${entry._id}`,
-        {
+    while (editingAlive.current && cellQueues.current.get(cellId) === queue) {
+      const revision = queue.revision, requested = queue.desired;
+      try {
+        const response = await fetch(`/api/client-trackers/${resolved.id}/entries/${entry._id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key: field.key, value }),
-        },
-      );
-      const saved = await readJsonResponse(response);
-      if (!response.ok)
-        throw new Error(saved.error || "Unable to save change.");
-      mutate((current) =>
-        current
-          ? {
-              ...current,
-              entries: current.entries.map((item) =>
-                item._id === entry._id
-                  ? { ...item, updatedAt: saved.updatedAt || item.updatedAt,
-                    values: { ...item.values, [field.key]: saved.values[field.key] } }
-                  : item,
-              ),
-            }
-          : (current as unknown as TrackerDetail),
-      );
-      void refetchTrackerActivity();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to save change.",
-      );
-      mutate(current => current ? { ...current, entries: current.entries.map(item =>
-        item._id === entry._id ? { ...item, values: { ...item.values, [field.key]: entry.values[field.key] } } : item,
-      ) } : current);
-    } finally {
-      pendingCells.current.delete(cellId);
-      setSavingCells(new Set(pendingCells.current));
-      // The hooks resume with a fresh read only after all outstanding cell writes settle.
-      invalidate(`/api/client-trackers/${resolved.id}`);
+          body: JSON.stringify({ key: field.key, value: requested, expectedRevision: queue.serverRevision }),
+        });
+        const saved = await readJsonResponse(response);
+        if (!editingAlive.current || cellQueues.current.get(cellId) !== queue) return;
+        if (!response.ok) {
+          if (saved.code === "MARK_CONFLICT" && saved.current) {
+            apply(queue.desired, saved.current.value, saved.current.updatedAt, saved.current.revision);
+            showCellFeedback(cellId, "conflict");
+            toast.error(`${field.label} · ${entry.client?.companyName || entry.clientId}: ${saved.error}`);
+            reconcileNeeded.current.table = true; reconcileNeeded.current.overview = true;
+            break; // A conflict cancels queued intent; never retry it against a newer employee's revision.
+          }
+          throw new Error(saved.error || "Unable to save change.");
+        }
+        queue.confirmed = saved.values[field.key];
+        queue.serverRevision = trackerMarkRevision(saved.fieldRevisions, field.key);
+        reconcileNeeded.current.activity = true;
+        if (revision === queue.revision) {
+          apply(queue.desired, queue.confirmed, saved.updatedAt, queue.serverRevision);
+          showCellFeedback(cellId, "saved");
+          if (!options?.undo) toast(notice => <span>{field.label} updated <button className="ml-2 font-semibold underline"
+            aria-label={`Undo ${field.label} for ${entry.client?.companyName || entry.clientId}`}
+            onClick={() => { toast.dismiss(notice.id); void saveCell({ ...entry, values: { ...entry.values, [field.key]: saved.values[field.key] } }, field, saved.previousValue ?? "", { expectedRevision: queue.serverRevision, undo: true }); }}>Undo</button></span>,
+            { id: "tracker-edit-undo", duration: 5000, ariaProps: { role: "status", "aria-live": "off" } });
+        }
+      } catch (error) {
+        if (!editingAlive.current || cellQueues.current.get(cellId) !== queue) return;
+        const desired = queue.desired, expectedRevision = queue.serverRevision;
+        toast.error(notice => <span>{field.label} · {entry.client?.companyName || entry.clientId}: {error instanceof Error ? error.message : "Unable to save change."}
+          <button className="ml-2 font-semibold underline" onClick={() => { toast.dismiss(notice.id); void saveCell(entry, field, desired, { expectedRevision, retry: true }); }}>Retry</button></span>);
+        apply(queue.desired, queue.confirmed, undefined, queue.serverRevision);
+        showCellFeedback(cellId, "failed");
+        // A network failure can follow a committed write; resolve that ambiguity by reading.
+        reconcileNeeded.current.table = true;
+        reconcileNeeded.current.overview = true;
+        break;
+      }
+      if (revision === queue.revision) break;
     }
-  };
+    if (cellQueues.current.get(cellId) !== queue) return;
+    cellQueues.current.delete(cellId); pendingCells.current.delete(cellId);
+    setSavingCells(new Set(pendingCells.current));
+    invalidate(`/api/client-trackers/${resolved.id}?`);
+  }, [resolved.id, mutate, mutateOverview, showCellFeedback]);
   const archive = async () => {
     if (!tracker) return;
     const restoring = tracker.status === "archived";
@@ -690,6 +880,7 @@ export default function ClientTrackerDetailPage({
     setFieldDraft(openingFields);
     setColumnDraft([...(tracker.clientColumns || ["state"])]);
     setParticipantDraft([...tracker.clientIds]);
+    setSyncDraft(configurationSyncDraft(tracker));
     setBasicDraft({
       name: tracker.name,
       description: tracker.description || "",
@@ -820,6 +1011,8 @@ export default function ClientTrackerDetailPage({
       emailConfigSnapshot(Boolean(tracker.emailEnabled), workflows),
     );
     setEmailConfigError(null);
+    setScenarioValidationTarget(null);
+    setScenarioAnalysis(null);
     setActiveWorkflowId(workflows[0]?.id || "");
     setEmailSetupScreen("library");
     setNewWorkflowDetails({ name: "", description: "" });
@@ -845,6 +1038,10 @@ export default function ClientTrackerDetailPage({
     );
     if (validationError) {
       setEmailConfigError(validationError);
+      for (const workflow of workflowDraft) {
+        const issue = emailWorkflowValidationIssues(workflow, tracker.fields).find(item => item.message === validationError);
+        if (issue?.ruleId) { setActiveWorkflowId(workflow.id); setEmailSetupScreen("builder"); setBuilderStartPage(3); setScenarioValidationTarget({ workflowId: workflow.id, ruleId: issue.ruleId, conditionIndex: issue.conditionIndex, request: Date.now() }); break; }
+      }
       return;
     }
     setEmailConfigError(null);
@@ -885,11 +1082,11 @@ export default function ClientTrackerDetailPage({
       setEmailLoading(false);
     }
   };
-  const updateWorkflow = (id: string, patch: Partial<TrackerEmailWorkflow>) => {
+  const updateWorkflow = (id: string, patch: WorkflowDraftChange) => {
     setEmailConfigError(null);
     setWorkflowDraft((current) =>
       current.map((workflow) =>
-        workflow.id === id ? { ...workflow, ...patch } : workflow,
+        workflow.id === id ? { ...workflow, ...(typeof patch === "function" ? patch(workflow) : patch) } : workflow,
       ),
     );
   };
@@ -948,6 +1145,8 @@ export default function ClientTrackerDetailPage({
       setExportingEmailHistory,
     );
   const openEmailComposer = () => {
+    // Warm the optional authorization UI only after explicit email intent.
+    void import("@/components/client-trackers/EmailDeliveryAuthorizationModal");
     if (!tracker?.emailEnabled || !tracker.emailWorkflows?.length) {
       toast.error("Set up an email workflow first.");
       return;
@@ -1043,71 +1242,47 @@ export default function ClientTrackerDetailPage({
       toast.error(error instanceof Error ? error.message : "Check the recipients before continuing.");
     }
   };
-  const deliverPreparedBatch = async (batch: DeliveryBatch, approvalId?: string) => {
+  const deliverPreparedBatch = async (batch: DeliveryBatch, approvalId?: string): Promise<DeliveryJobAcceptance> => {
     const operation = emailOperationRef.current;
     if (!operation || operation.batch.campaignId !== batch.campaignId || emailDeliveryInFlight.current) throw new Error("This delivery changed or is already processing.");
     emailDeliveryInFlight.current = true;
     const resume = operation.attempted;
     operation.attempted = true; operation.approvalId = approvalId;
-    const mode = batch.mode;
-    setEmailLoading(true);
-    setEmailDeliveryMode(mode);
+    setEmailLoading(true); setEmailDeliveryMode(batch.mode);
+    let ambiguous = false;
     try {
-      const response = await fetch(
-        `/api/client-trackers/${resolved.id}/email/deliver`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...batch,
-            approvalId,
-            resume,
-            confirmed: true,
-          }),
-        },
-      );
-      const result = await readJsonResponse(response);
-      if (!response.ok)
-        throw new SecurityRequestError(result.error || "Unable to deliver tracker emails.", result.code);
-      const deliveryMessage =
-        mode === "draft"
-          ? `${result.completed} Gmail drafts created.`
-          : `${result.completed} emails sent.`;
-      if (result.status === "paused_daily_limit") {
-        toast(
-          `${deliveryMessage} ${result.pending} remain unsent until the 24-hour allowance is available. You can safely close this window; prepare the campaign again later and only unsent clients will be eligible.`,
-          { duration: 12000 },
-        );
-        void refetchEmailActivity();
-        void refetchTrackerActivity();
-        setAuthorizationBatch(null);
-        return;
+      let response: Response;
+      try {
+        response = await fetch('/api/client-trackers/' + resolved.id + '/email/deliver', {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...batch, approvalId, resume, confirmed: true }), signal: AbortSignal.timeout(20000),
+        });
+      } catch (failure) { ambiguous = true; throw failure; }
+      let result: DeliveryJobAcceptance & { error?: string; code?: string };
+      try { result = await readJsonResponse(response); }
+      catch (failure) { ambiguous = true; throw failure; }
+      if (!response.ok) { ambiguous = response.status >= 500; throw new SecurityRequestError(result.error || 'Unable to start email delivery.', result.code); }
+      if (!['accepted', 'already_accepted'].includes(result.outcome) || result.campaignId !== batch.campaignId || result.job?.executionMode !== "browser")
+        throw new Error('The server did not confirm campaign acceptance. Retry this same campaign.');
+      return result;
+    } catch (failure) {
+      if (ambiguous) {
+        try {
+          const response = await fetch('/api/email-delivery/jobs/' + encodeURIComponent(batch.campaignId), { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+          const known = await readJsonResponse<{ job?: DeliveryJobSummary }>(response);
+          if (response.ok && known.job?.executionMode === "browser" && known.job.campaignId === batch.campaignId) return { outcome: 'already_accepted', campaignId: batch.campaignId, job: known.job };
+        } catch { /* Keep the same operation ID for an explicit safe retry. */ }
       }
-      if (result.status === "processing") throw new Error("This campaign is still processing. Retry the same action to resume pending recipients.");
-      if (result.failed) toast.error(
-            `${deliveryMessage} ${result.failed} failed; they are recorded in email history.`,
-          );
-      else toast.success(deliveryMessage);
-      emailOperationRef.current = null;
-      const dismissDelivery = () => {
-        setEmailComposeOpen(false);
-        setSelectedEntries(new Set());
-        setAuthorizationBatch(null);
-      };
-      if (result.uncertain) toast(`${result.uncertain} delivery outcome(s) need review in Gmail before those clients can be sent another email.`, { duration: 12000 });
-      void refetchEmailActivity();
-      void refetchTrackerActivity();
-      // Let the authorization control acknowledge a confirmed send before closing the sheets.
-      if (mode === "send" && !result.failed && !result.uncertain)
-        return { completed: result.completed, dismiss: dismissDelivery };
-      dismissDelivery();
-    } catch (error) {
-      throw error;
-    } finally {
-      setEmailLoading(false);
-      setEmailDeliveryMode(null);
-      emailDeliveryInFlight.current = false;
-    }
+      throw failure;
+    } finally { setEmailLoading(false); setEmailDeliveryMode(null); emailDeliveryInFlight.current = false; }
+  };
+  const deliveryAccepted = (result: DeliveryJobAcceptance) => {
+    emailDeliveryActivity?.watch(result.job);
+    emailOperationRef.current = null;
+    void refetchEmailActivity(); void refetchTrackerActivity();
+  };
+  const deliveryHandoffComplete = () => {
+    setAuthorizationBatch(null); setEmailComposeOpen(false); setSelectedEntries(new Set());
   };
   useEffect(() => {
     const operation = emailOperationRef.current;
@@ -1161,6 +1336,15 @@ export default function ClientTrackerDetailPage({
     if (!participantDraft.length) {
       setConfigurationError("Keep at least one client in this tracker."); return;
     }
+    if (syncDraft.clientScope === "categories" && !syncDraft.clientCategories.length) {
+      setConfigurationError("Choose at least one client category."); return;
+    }
+    const enablingAuto = syncDraft.clientMembershipMode === "categorySync" &&
+      (configurationBaseline?.clientMembershipMode !== "categorySync" || configurationBaseline?.clientScope !== syncDraft.clientScope ||
+        JSON.stringify([...(configurationBaseline?.clientCategories || [])].sort()) !== JSON.stringify([...syncDraft.clientCategories].sort()));
+    if (enablingAuto && !syncDraft.syncPreviewToken) {
+      setConfigurationError("Preview sync and confirm the eligible additions before saving Auto Sync."); return;
+    }
     const removedFields =
       tracker?.fields.filter(
         (field) => !fieldDraft.some((draft) => draft.key === field.key),
@@ -1185,16 +1369,18 @@ export default function ClientTrackerDetailPage({
           includeStatus: fieldDraft.some((field) => field.type === "status"),
           clientColumns: columnDraft,
           clientIds: participantDraft,
+          clientIdsBaseline: configurationBaseline?.clientIds,
+          ...syncDraft,
         }),
       });
       const result = await readJsonResponse(response);
       if (!response.ok)
         throw new Error(result.error || "Unable to update tracker.");
       setConfigurationSaved(true);
-      setConfigurationBaseline({ financialYear: basicDraft.financialYear, fields: configurationFields(fieldDraft), clientColumns: [...columnDraft], clientIds: [...participantDraft] });
+      setConfigurationBaseline({ financialYear: basicDraft.financialYear, fields: configurationFields(fieldDraft), clientColumns: [...columnDraft], clientIds: [...participantDraft], ...syncDraft, syncRequested: false });
       setConfigurationOpen(false);
       await refetch();
-      toast.success("Tracker columns updated.");
+      toast.success(typeof result.syncAddedCount === "number" ? `${enablingAuto ? "Auto Sync enabled. " : ""}${result.syncAddedCount ? `${result.syncAddedCount} clients added to this tracker.` : "Tracker is already up to date."}` : "Tracker columns updated.");
     } catch (error) {
       setConfigurationError(error instanceof Error ? error.message : "Unable to update tracker.");
       toast.error(
@@ -1205,13 +1391,13 @@ export default function ClientTrackerDetailPage({
       setSavingConfiguration(false);
     }
   };
-  const toggleEntry = (entryId: string) =>
+  const toggleEntry = useCallback((entryId: string) =>
     setSelectedEntries((current) => {
       const next = new Set(current);
       if (next.has(entryId)) next.delete(entryId);
       else next.add(entryId);
       return next;
-    });
+    }), []);
   const selectVisible = () =>
     setSelectedEntries((current) => {
       const allVisibleSelected =
@@ -1225,56 +1411,69 @@ export default function ClientTrackerDetailPage({
     });
   const bulkUpdate = async (
     confirmed = false,
-    replacement?: { ids: string[]; value: TrackerValue },
+    replacement?: { ids: string[]; value: TrackerValue; revisions: Record<string, number> },
   ) => {
-    if (pendingCells.current.size > 0) return;
+    if (!editingAlive.current || editingContext.current.scope !== resolved.id) return false;
+    if (pendingCells.current.size > 0) { if (replacement) toast.error("Wait for the pending cell saves before Undo."); return false; }
     if (!selectedBulkField || (!replacement && selectedEntries.size === 0))
       return;
     if (!confirmed) {
       setConfirmation("bulk");
       return;
     }
+    if (editingContext.current.bulkSaving) return false;
+    editingContext.current.bulkSaving = true;
     setBulkSaving(true);
     const entryIds = replacement?.ids || [...selectedEntries];
+    const field = selectedBulkField;
+    const bulkScope = resolved.id;
     const value: TrackerValue =
       replacement?.value ??
-      (selectedBulkField.type === "toggle" ? bulkValue === "Yes" : bulkValue);
+      (field.type === "toggle" ? bulkValue === "Yes" : bulkValue);
+    const known = (editingContext.current.data?.entries || []).filter(entry => entryIds.includes(entry._id));
+    const previousValues = new Map(known.map(entry => [entry._id, entry.values[field.key]]));
+    const expectedRevisions = replacement?.revisions || Object.fromEntries(entryIds.filter(id => selectedMarkRevisions.current.has(id)).map(id =>
+      [id, trackerMarkRevision(selectedMarkRevisions.current.get(id), field.key)]));
+    const allKnown = known.length === entryIds.length;
+    const applyBulk = (nextValue: (id: string) => TrackerValue, ids: Set<string>, oldValue: (id: string) => TrackerValue, adjustCounts: boolean) => {
+      mutate(current => current ? { ...current, entries: current.entries.map(entry => ids.has(entry._id)
+        ? { ...entry, values: { ...entry.values, [field.key]: nextValue(entry._id) } } : entry) } : current);
+      mutateOverview(current => {
+        if (!current) return current;
+        let counts = current.overviewCounts;
+        if (adjustCounts) for (const id of ids) counts = adjustTrackerOverview(counts, field, oldValue(id), nextValue(id));
+        return { ...current, overviewCounts: counts };
+      });
+    };
+    applyBulk(() => value, new Set(previousValues.keys()), id => previousValues.get(id)!, allKnown);
+    reconcileNeeded.current.overview = true;
+    // Includes partial writes, filters, pagination, live/computed dependencies, and other employees.
+    reconcileNeeded.current.table = true;
     try {
       const response = await fetch(
         `/api/client-trackers/${resolved.id}/entries/bulk`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entryIds, key: selectedBulkField.key, value }),
+          body: JSON.stringify({ entryIds, key: field.key, value, expectedRevisions }),
         },
       );
       const result = await readJsonResponse(response);
+      if (!editingAlive.current || editingContext.current.scope !== bulkScope) return false;
       if (!response.ok)
         throw new Error(result.error || "Unable to apply update.");
-      mutate((current) =>
-        current
-          ? {
-              ...current,
-              entries: current.entries.map((entry) =>
-                entryIds.includes(entry._id)
-                  ? {
-                      ...entry,
-                      values: {
-                        ...entry.values,
-                        [selectedBulkField.key]: value,
-                      },
-                      updatedAt: new Date().toISOString(),
-                    }
-                  : entry,
-              ),
-            }
-          : (current as unknown as TrackerDetail),
-      );
-      if (!replacement) {
+      const appliedIds = Array.isArray(result.appliedIds) ? new Set<string>(result.appliedIds) : new Set<string>();
+      const persisted = Object.prototype.hasOwnProperty.call(result, "value") ? result.value as TrackerValue : value;
+      applyBulk(id => appliedIds.has(id) ? persisted : previousValues.get(id)!, new Set(previousValues.keys()), () => value, allKnown);
+      mutate(current => current ? { ...current, entries: current.entries.map(entry => appliedIds.has(entry._id)
+        ? { ...entry, fieldRevisions: { ...entry.fieldRevisions, [field.key]: result.revisions?.[entry._id] ?? expectedRevisions[entry._id] + 1 } } : entry) } : current);
+      if (result.complete === false || appliedIds.size !== entryIds.length) toast.error(result.conflicts?.length
+        ? "Some fields changed elsewhere and were left untouched. Refreshing saved results." : "Some clients could not be updated. Refreshing the saved results.");
+      if (!replacement && appliedIds.size > 0) {
         const previous = Array.isArray(result.previous)
-          ? (result.previous as Array<{ id: string; value: TrackerValue }>)
+          ? (result.previous as Array<{ id: string; value: TrackerValue; revision: number }>)
           : [];
-        setLastBulkChange({ key: selectedBulkField.key, values: previous });
+        setLastBulkChange({ key: field.key, values: previous });
         toast(
           (notice) => (
             <span>
@@ -1283,56 +1482,69 @@ export default function ClientTrackerDetailPage({
                 className="ml-2 font-semibold underline"
                 onClick={() => {
                   toast.dismiss(notice.id);
-                  void undoBulk();
+                  void undoBulk({ key: field.key, values: previous });
                 }}
               >
                 Undo
               </button>
             </span>
           ),
-          { duration: 10000 },
+          { id: "tracker-edit-undo", duration: 10000, ariaProps: { role: "status", "aria-live": "off" } },
         );
-      } else
+      } else if (replacement && appliedIds.size > 0)
         toast.success(
           `Restored ${result.updated} client${result.updated === 1 ? "" : "s"}.`,
         );
-      setSelectedEntries(new Set());
-      void refetch();
-      void refetchTrackerActivity();
+      if (!replacement) setSelectedEntries(new Set(entryIds.filter(id => !appliedIds.has(id))));
+      reconcileNeeded.current.activity = true;
+      return { complete: result.complete !== false && appliedIds.size === entryIds.length, appliedIds: [...appliedIds] };
     } catch (error) {
+      if (!editingAlive.current || editingContext.current.scope !== bulkScope) return false;
       toast.error(
         error instanceof Error ? error.message : "Unable to apply update.",
       );
+      applyBulk(id => previousValues.get(id)!, new Set(previousValues.keys()), () => value, allKnown);
+      return false;
     } finally {
-      setBulkSaving(false);
+      if (editingAlive.current && editingContext.current.scope === bulkScope) {
+        editingContext.current.bulkSaving = false;
+        invalidate(`/api/client-trackers/${resolved.id}?`);
+        setBulkSaving(false);
+      }
     }
   };
-  const undoBulk = async () => {
+  const undoBulk = async (change = lastBulkChange) => {
     if (
-      !lastBulkChange ||
+      !change ||
       !selectedBulkField ||
-      lastBulkChange.key !== selectedBulkField.key
+      change.key !== selectedBulkField.key
     )
       return;
-    const groups = new Map<string, { value: TrackerValue; ids: string[] }>();
-    lastBulkChange.values.forEach(({ id, value }) => {
+    const groups = new Map<string, { value: TrackerValue; ids: string[]; revisions: Record<string, number> }>();
+    change.values.forEach(({ id, value, revision }) => {
       const groupKey = JSON.stringify(value);
-      const group = groups.get(groupKey) || { value, ids: [] };
+      const group = groups.get(groupKey) || { value, ids: [], revisions: {} };
       group.ids.push(id);
+      group.revisions[id] = revision;
       groups.set(groupKey, group);
     });
     try {
-      for (const group of groups.values()) await bulkUpdate(true, group);
+      const remaining = [...change.values];
+      for (const group of groups.values()) {
+        const result = await bulkUpdate(true, group);
+        if (result) for (let i = remaining.length - 1; i >= 0; i--) if (result.appliedIds.includes(remaining[i].id)) remaining.splice(i, 1);
+        if (!result || !result.complete) { setLastBulkChange({ ...change, values: remaining }); return; }
+      }
       setLastBulkChange(null);
     } catch {
       toast.error("Unable to undo this bulk update.");
     }
   };
 
-  if (loading && !tracker) return <TrackerPageLoading />;
+  if (loading && !tracker) return <TrackerPageLoading trackerId={resolved.id} hasActivity={Boolean(trackerActivity?.events?.length)} />;
   if (!tracker)
     return (
-      <div className="rounded-2xl border border-base bg-card p-8 text-center">
+      <div data-tracker-route-error className="rounded-2xl border border-base bg-card p-8 text-center">
         <CircleAlert className="mx-auto mb-2 h-7 w-7 text-rose-500" />
         <p className="font-semibold text-default">
           {error ? "Unable to load tracker" : "Tracker not found"}
@@ -1450,14 +1662,14 @@ export default function ClientTrackerDetailPage({
           </label>
         </div>
       </Modal>
-      <div className="client-trackers-page space-y-5">
-        <header className="tracker-page-header">
+      <div className="client-trackers-page space-y-5" data-tracker-workspace-shell={resolved.id}>
+        <header className="tracker-page-header" data-tracker-detail-heading={resolved.id}>
           <div className="min-w-0">
-            <Link href="/dashboard/client-trackers" className="tracker-back-link">
+            <TrackerTransitionLink trackerId={resolved.id} direction="close" href="/dashboard/client-trackers" className="tracker-back-link">
               <ArrowLeft className="h-3.5 w-3.5" /> All trackers
-            </Link>
-            <h1>{tracker.name}</h1>
-            <p>{tracker.description || "Client task worklist"}</p>
+            </TrackerTransitionLink>
+            <h1 data-tracker-title tabIndex={-1}>{tracker.name}</h1>
+            <p data-tracker-description>{tracker.description || "Client task worklist"}</p>
           </div>
           {isAdmin && (
             <div className="tracker-header-actions">
@@ -1509,7 +1721,7 @@ export default function ClientTrackerDetailPage({
             </div>
           )}
         </header>
-        <section className="tracker-premium-summary">
+        <section className="tracker-premium-summary" data-tracker-reveal="1">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted">
             <span className="inline-flex items-center gap-1.5">
               <Users className="h-4 w-4" />{" "}
@@ -1537,12 +1749,12 @@ export default function ClientTrackerDetailPage({
               </span>
             )}
             {tracker.emailEnabled && (
-              <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-1.5" aria-busy={emailSummaryLoading || emailSummaryRefreshing} title={emailSummaryError ? "Email statistics may be out of date." : undefined}>
                 <Mail className="h-4 w-4" />{" "}
                 {emailActivity?.summary?.draft || 0} drafts ·{" "}
                 {emailActivity?.summary?.sent || 0} sent
                 {(emailActivity?.summary?.sent || 0) > 0 &&
-                  ` · ${(emailActivity?.logs || []).filter((log) => log.mailKind === "reminder").length} reminders`}
+                  ` · ${emailActivity?.summary?.reminders ?? (emailActivity?.logs || []).filter((log) => log.mailKind === "reminder").length} reminders`}
               </span>
             )}
             {tracker.status === "archived" && (
@@ -1553,7 +1765,7 @@ export default function ClientTrackerDetailPage({
           </div>
         </section>
         {(trackerActivity?.events || []).length > 0 && (
-          <section className="tracker-activity-panel">
+          <section className="tracker-activity-panel" data-tracker-reveal="2">
             <button
               type="button"
               className="tracker-activity-trigger"
@@ -1602,19 +1814,19 @@ export default function ClientTrackerDetailPage({
           </section>
         )}
 
-        <section className="tracker-status-strip">
+        <section className="tracker-status-strip" data-tracker-reveal="3" aria-busy={loading || refreshing || overviewLoading || overviewRefreshing || writesPending || summaryMembershipMismatch}>
           {overviewFields.map((field) => {
             const values =
               field.type === "toggle" ? ["Yes", "No"] : field.options || [];
             return (
-              <article key={field.key} className="tracker-status-card">
+              <article key={field.key} className="tracker-status-card" title={overviewError ? "Totals may be out of date. Reconciliation failed; the last known counts are shown." : undefined}>
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted">
                   {field.label}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {values.map((value) => {
                     const count =
-                      overviewLoading || overviewError || writesPending || !overviewCounts ? "—" : overviewCounts.find(
+                      !overviewCounts ? "—" : overviewCounts.find(
                         (item) =>
                           item.key === field.key &&
                           valueText(item.value) === value,
@@ -1634,14 +1846,12 @@ export default function ClientTrackerDetailPage({
                     );
                   })}
                 </div>
-                {(overviewLoading || writesPending) && <p className="mt-2 text-xs text-muted" role="status">Updating totals…</p>}
-                {overviewError && <button className="mt-2 text-xs text-muted underline" onClick={() => void refetchOverview()}>Retry totals</button>}
               </article>
             );
           })}
         </section>
 
-        <section className="overflow-hidden rounded-2xl border border-base bg-card">
+        <section className="tracker-marks-panel overflow-hidden rounded-2xl border border-base bg-card" data-tracker-reveal="4">
           <div className="flex flex-col gap-3 border-b border-base p-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="font-semibold text-default">Client marks</h2>
@@ -1655,7 +1865,7 @@ export default function ClientTrackerDetailPage({
                   : ""}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="tracker-marks-actions flex flex-wrap gap-2">
               <details className="tracker-views-menu">
                 <summary>
                   <List className="h-3.5 w-3.5" />
@@ -1837,13 +2047,14 @@ export default function ClientTrackerDetailPage({
           {tracker.status === "active" &&
             selectedEntries.size > 0 &&
             bulkFields.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-3 text-sm dark:border-blue-900/50 dark:bg-blue-950/30">
+              <div className="tracker-bulk-actions flex flex-wrap items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-3 text-sm dark:border-blue-900/50 dark:bg-blue-950/30">
                 <strong className="text-blue-800 dark:text-blue-200">
                   {selectedEntries.size} selected
                 </strong>
                 <span className="text-blue-700 dark:text-blue-300">Set</span>
                 <select
                   value={bulkField}
+                  aria-label="Bulk marker"
                   onChange={(event) => {
                     const next = tracker.fields.find(
                       (field) => field.key === event.target.value,
@@ -1899,7 +2110,7 @@ export default function ClientTrackerDetailPage({
           )}
           <fieldset disabled={resultsUnavailable} aria-busy={resultsUpdating}>
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
+            <table role="table" className="tracker-marks-table min-w-full text-left text-sm">
               <thead className="bg-surface text-xs uppercase tracking-wide text-muted">
                 <tr>
                   <th className="w-10 px-3 py-3">
@@ -1918,6 +2129,7 @@ export default function ClientTrackerDetailPage({
                       onChange={selectVisible}
                       aria-label="Select displayed clients"
                     />
+                    <span className="tracker-mobile-only hidden">Select page</span>
                   </th>
                   <th className="sticky left-0 z-10 bg-surface px-4 py-3 font-semibold">
                     Client
@@ -1956,87 +2168,13 @@ export default function ClientTrackerDetailPage({
                   <th className="px-4 py-3 font-semibold">Updated</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-base">
-                {visibleEntries.map((entry) => (
-                  <tr key={entry._id} className="hover:bg-surface/60">
-                    <td className="px-3 py-3">
-                      <input
-                        disabled={
-                          tracker.status !== "active" ||
-                          (bulkFields.length === 0 && !tracker.emailEnabled)
-                        }
-                        type="checkbox"
-                        checked={selectedEntries.has(entry._id)}
-                        onChange={() => toggleEntry(entry._id)}
-                        aria-label={`Select ${entry.client?.companyName || entry.clientId}`}
-                      />
-                    </td>
-                    <td className="sticky left-0 z-[1] bg-card px-4 py-3">
-                      <Link
-                        href={`/dashboard/clients/${entry.clientId}`}
-                        className="font-medium text-default hover:text-blue-600"
-                      >
-                        {entry.client?.companyName || entry.clientId}
-                      </Link>
-                      <p className="text-xs text-faint">{entry.clientId}</p>
-                    </td>
-                    <td className="px-4 py-3 text-muted">
-                      {entry.client?.category || "—"}
-                    </td>
-                    {tracker.emailEnabled &&
-                      (() => {
-                        const status =
-                          communicationByClient.get(entry.clientId) ||
-                          "Not Contacted";
-                        const tone =
-                          status === "Replied"
-                            ? "bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-200"
-                            : status === "Sent" || status === "Reminder Sent"
-                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
-                              : status === "Draft Created"
-                                ? "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
-                                : status === "Failed"
-                                  ? "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200"
-                                  : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
-                        return (
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${tone}`}
-                            >
-                              {status}
-                            </span>
-                          </td>
-                        );
-                      })()}
-                    {(tracker.clientColumns || ["state"]).map((column) => (
-                      <td
-                        key={column}
-                        className="max-w-52 truncate px-4 py-3 text-muted"
-                        title={clientDetailValue(entry.client, column)}
-                      >
-                        {clientDetailValue(entry.client, column)}
-                      </td>
-                    ))}
-                    {tracker.fields.map((field) => (
-                      <td key={field.key} className="px-4 py-3">
-                        {renderEditor(
-                          entry,
-                          field,
-                          savingCells.has(`${entry._id}-${field.key}`) ||
-                            bulkSaving ||
-                            tracker.status !== "active",
-                          saveValue,
-                        )}
-                      </td>
-                    ))}
-                    <td className="whitespace-nowrap px-4 py-3 text-xs text-faint">
-                      {new Date(entry.updatedAt).toLocaleDateString("en-IN", {
-                        day: "numeric",
-                        month: "short",
-                      })}
-                    </td>
-                  </tr>
-                ))}
+              <tbody className="divide-y divide-base" aria-busy={bulkSaving} onKeyDown={navigateTrackerSwitch}>
+                {visibleEntries.map(entry => <TrackerRow key={entry._id}
+                  entry={entry} fields={tracker.fields} clientColumns={tracker.clientColumns}
+                  active={tracker.status === "active"} bulkSaving={bulkSaving}
+                  canSelect={bulkFields.length > 0 || Boolean(tracker.emailEnabled)} selected={selectedEntries.has(entry._id)}
+                  emailEnabled={tracker.emailEnabled} communicationStatus={communicationByClient.get(entry.clientId) || "Not Contacted"}
+                  savingCells={savingCells} feedback={cellFeedback} onDraftStart={showCellFeedback} onToggle={toggleEntry} onSave={saveValue} />)}
                 {visibleEntries.length === 0 && (
                   <tr>
                     <td
@@ -2087,6 +2225,7 @@ export default function ClientTrackerDetailPage({
         </section>
         <Modal
           open={emailConfigOpen}
+          inert={trackerPreviewOpen}
           onClose={requestCloseEmailConfig}
           title="Email updates"
           subtitle="Create and manage reusable client-email workflows"
@@ -2315,6 +2454,14 @@ export default function ClientTrackerDetailPage({
                   startPage={builderStartPage}
                   onBack={() => setEmailSetupScreen("library")}
                   onPreviewCombinations={() => setCombinationPreviewOpen(true)}
+                  analysis={scenarioAnalysis}
+                  analysisCurrent={scenarioAnalysis?.fingerprint === JSON.stringify([activeWorkflow, tracker.fields])}
+                  validationTarget={scenarioValidationTarget?.workflowId === activeWorkflow.id ? scenarioValidationTarget : null}
+                  onTestClients={ruleId => {
+                    const issue = emailWorkflowValidationIssues(activeWorkflow, tracker.fields)[0];
+                    if (issue) { setEmailConfigError(issue.message); if (issue.ruleId) setScenarioValidationTarget({ workflowId: activeWorkflow.id, ruleId: issue.ruleId, conditionIndex: issue.conditionIndex, request: Date.now() }); return; }
+                    setTrackerPreviewRuleId(ruleId || ""); setTrackerPreviewOpen(true);
+                  }}
                   onChange={(patch) => updateWorkflow(activeWorkflow.id, patch)}
                   onRemove={() => {
                     if (workflowDraft.length < 2) return;
@@ -2352,6 +2499,8 @@ export default function ClientTrackerDetailPage({
           workflow={activeWorkflow || null}
           fields={tracker.fields}
         />
+        {activeWorkflow && <WorkflowTrackerClientPreview open={trackerPreviewOpen} onClose={() => setTrackerPreviewOpen(false)} trackerId={String(tracker._id)} workflow={activeWorkflow}
+          fingerprint={JSON.stringify([activeWorkflow, tracker.fields])} analysis={scenarioAnalysis} onAnalysis={setScenarioAnalysis} initialRuleId={trackerPreviewRuleId} />}
         <EmailDeliveryReviewWorkspace
           open={emailComposeOpen}
           onClose={() => !emailLoading && !previewMessage && !authorizationBatch && setEmailComposeOpen(false)}
@@ -2409,6 +2558,8 @@ export default function ClientTrackerDetailPage({
         >
           <div className="max-h-[70vh] space-y-2 overflow-y-auto p-5">
             <div className="mb-2 flex flex-wrap gap-2">
+              {emailDeliveryActivity && <button type="button" className="rounded-lg border border-base px-3 py-2 text-sm text-blue-600"
+                onClick={() => { setEmailHistoryOpen(false); emailDeliveryActivity.showHistory(); }}>Delivery campaigns</button>}
               <button
                 onClick={async () => {
                   try {
@@ -2441,8 +2592,8 @@ export default function ClientTrackerDetailPage({
                 {exportingEmailHistory ? "Preparing Excel…" : "Export Excel"}
               </button>
             </div>
-            {emailActivity?.logs?.length ? (
-              emailActivity.logs.map((log) => (
+            {emailHistoryLoading && !emailHistory ? <LoadingSpinner /> : emailHistoryError ? <p className="py-10 text-center text-sm text-muted">Unable to load email history. Close and reopen to retry.</p> : emailHistory?.logs?.length ? (
+              emailHistory.logs.map((log) => (
                 <details
                   key={log._id}
                   className="rounded-xl border border-base bg-surface p-3"
@@ -2516,7 +2667,7 @@ export default function ClientTrackerDetailPage({
           </div>
         </Modal>
         {authorizationBatch && <EmailDeliveryAuthorizationModal key={authorizationBatch.batch.campaignId} trackerId={resolved.id} batch={authorizationBatch.batch} workflowName={activeWorkflow?.name || "Workflow"} resuming={emailOperationRef.current?.attempted}
-          onClose={() => setAuthorizationBatch(null)} onCommit={deliverPreparedBatch} />}
+          onClose={() => setAuthorizationBatch(null)} onCommit={deliverPreparedBatch} onAccepted={deliveryAccepted} onHandoffComplete={deliveryHandoffComplete} />}
         <Modal
           open={configurationOpen}
           onClose={requestConfigurationClose}
@@ -2528,6 +2679,7 @@ export default function ClientTrackerDetailPage({
           footer={configurationFooter}
         >
           {configurationBaseline && <ConfigureTrackerWorkspace key={configurationSession}
+            trackerId={resolved.id} syncDraft={syncDraft} onSyncChange={setSyncDraft}
             baseline={configurationBaseline} fields={fieldDraft} clientColumns={columnDraft}
             clientIds={participantDraft} financialYear={basicDraft.financialYear}
             clients={allClients} entries={tracker.entries} saving={savingConfiguration}
@@ -2843,7 +2995,23 @@ function FluidStepNavigation({
   styleReceive: MotionValue<number>;
 }) {
   const [hoveredPage, setHoveredPage] = useState<number | null>(null);
+  const stepScroll = useRef<HTMLDivElement>(null);
   const reduceMotion = useReducedMotion();
+  useEffect(() => {
+    const viewport = stepScroll.current;
+    const selected = viewport?.querySelector<HTMLElement>('[aria-current="step"]');
+    if (!viewport || !selected) return;
+    // Scroll only the stepper, never its modal or the page behind it.
+    const reveal = () => {
+      if (viewport.scrollWidth <= viewport.clientWidth) return;
+      const outer = viewport.getBoundingClientRect(), pill = selected.getBoundingClientRect();
+      if (pill.left < outer.left + 12 || pill.right > outer.right - 12)
+        viewport.scrollTo({ left: viewport.scrollLeft + pill.left - outer.left - (outer.width - pill.width) / 2, behavior: reduceMotion ? "instant" : "smooth" });
+    };
+    reveal();
+    const observer = new ResizeObserver(reveal); observer.observe(selected); observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [currentPage, reduceMotion]);
   const pointerX = useMotionValue(0);
   const pointerY = useMotionValue(0);
   const pointerScale = useMotionValue(1);
@@ -2875,7 +3043,7 @@ function FluidStepNavigation({
     event: React.PointerEvent<HTMLButtonElement>,
     index: number,
   ) => {
-    if (index !== currentPage || reduceMotion) return;
+    if (index !== currentPage || reduceMotion || event.pointerType === "touch") return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const x = Math.max(-1, Math.min(1, (event.clientX - bounds.left) / bounds.width * 2 - 1));
     const y = Math.max(-1, Math.min(1, (event.clientY - bounds.top) / bounds.height * 2 - 1));
@@ -2901,7 +3069,7 @@ function FluidStepNavigation({
   return (
     <LayoutGroup id="email-workflow-stepper">
       <nav className="fluid-step-navigation" aria-label="Email workflow setup">
-        <div className="fluid-step-scroll">
+        <div ref={stepScroll} className="fluid-step-scroll">
           <div className="fluid-step-track">
           {pages.map((page, index) => {
             const selected = index === currentPage;
@@ -3062,6 +3230,10 @@ function TrackerEmailWorkflowEditor({
   startPage,
   onBack,
   onPreviewCombinations,
+  onTestClients,
+  analysis,
+  analysisCurrent,
+  validationTarget,
   onChange,
   onRemove,
 }: {
@@ -3073,7 +3245,11 @@ function TrackerEmailWorkflowEditor({
   startPage: number;
   onBack: () => void;
   onPreviewCombinations: () => void;
-  onChange: (patch: Partial<TrackerEmailWorkflow>) => void;
+  onTestClients: (ruleId?: string) => void;
+  analysis: DraftScenarioAnalysis | null;
+  analysisCurrent: boolean;
+  validationTarget: { ruleId: string; conditionIndex?: number; request: number } | null;
+  onChange: (patch: WorkflowDraftChange) => void;
   onRemove: () => void;
 }) {
   const fieldValues = (field?: TrackerField) =>
@@ -3089,7 +3265,7 @@ function TrackerEmailWorkflowEditor({
     ],
   };
   const updateConditions = (patch: Partial<TrackerConditionGroup>) =>
-    onChange({ conditionGroup: { ...conditionGroup, ...patch } });
+    onChange(current => ({ conditionGroup: { ...(current.conditionGroup || conditionGroup), ...patch } }));
   const attachments = workflow.attachments || [];
   const contentRules = workflow.contentRules || [];
   const contentMode = emailWorkflowContentMode(workflow);
@@ -3127,68 +3303,20 @@ function TrackerEmailWorkflowEditor({
       : contentMode === "statements"
         ? "statement"
         : "point";
-  const visibleContentRules = contentRules.filter(
-    (rule) => rule.type === contentRuleType,
-  );
-  const scenarioRules = contentRules
-    .filter((rule) => rule.type === "combination")
-    .sort((left, right) => (left.order || 0) - (right.order || 0));
-  const updateContentRule = (
-    id: string,
-    patch: Partial<TrackerEmailContentRule>,
-  ) =>
-    onChange({
-      contentRules: contentRules.map((rule) =>
-        rule.id === id ? { ...rule, ...patch } : rule,
-      ),
-    });
+  // Inspect a retained inactive-style error without changing the sending style.
+  const [dismissedValidationView, setDismissedValidationView] = useState(0);
+  const targetRule = validationTarget?.request !== dismissedValidationView ? contentRules.find(rule => rule.id === validationTarget?.ruleId) : undefined;
+  const editingRuleType = targetRule?.type || contentRuleType;
+  const messageMode = editingRuleType === "combination" ? "combinations" : editingRuleType === "statement" ? "statements" : "points";
+  const updateContentRule = (id: string, patch: DraftRuleChange) =>
+    onChange(current => updateDraftRule(current, id, patch));
   const addContentRule = (type: TrackerEmailContentRule["type"]) => {
     const id = emailId();
-    onChange({
-      contentRules: [
-        ...contentRules,
-        {
-          id,
-          type,
-          action: "include",
-          content: "",
-          order: contentRules.length,
-          conditionGroup: {
-            mode: "ALL",
-            conditions: [
-              {
-                fieldKey: fields[0]?.key || workflow.mainFieldKey,
-                operator: "equals",
-                value: "",
-              },
-            ],
-          },
-        },
-      ],
-    });
+    const rule: TrackerEmailContentRule = { id, type, action: "include", content: "", conditionGroup: { mode: "ALL", conditions: [{ fieldKey: "", operator: "equals", value: "" }] } };
+    onChange(current => addDraftRule(current, rule));
     return id;
   };
-  const moveScenario = (id: string, direction: -1 | 1) => {
-    const index = scenarioRules.findIndex((rule) => rule.id === id);
-    const targetIndex = index + direction;
-    if (index < 0 || targetIndex < 0 || targetIndex >= scenarioRules.length)
-      return;
-    const nextScenarios = [...scenarioRules];
-    [nextScenarios[index], nextScenarios[targetIndex]] = [
-      nextScenarios[targetIndex],
-      nextScenarios[index],
-    ];
-    const orderById = new Map(
-      nextScenarios.map((rule, scenarioIndex) => [rule.id, scenarioIndex]),
-    );
-    onChange({
-      contentRules: contentRules.map((rule) =>
-        rule.type === "combination"
-          ? { ...rule, order: orderById.get(rule.id) }
-          : rule,
-      ),
-    });
-  };
+  const moveScenario = (id: string, direction: -1 | 1) => onChange(current => moveDraftRule(current, id, direction));
   const updateAttachment = (
     id: string,
     patch: Partial<TrackerEmailAttachment>,
@@ -3214,20 +3342,7 @@ function TrackerEmailWorkflowEditor({
     });
     return id;
   };
-  const editorVariables = [
-    { label: "Client company", token: "{{client.companyName}}" },
-    { label: "Client ID", token: "{{client.clientId}}" },
-    { label: "Category", token: "{{client.category}}" },
-    { label: "State", token: "{{client.state}}" },
-    { label: "GST number", token: "{{client.gstNumber}}" },
-    { label: "Tracker name", token: "{{tracker.name}}" },
-    { label: "Financial year", token: "{{tracker.financialYear}}" },
-    { label: "Workflow name", token: "{{workflow.name}}" },
-    { label: "Combination message", token: "{{combinationMessage}}" },
-    { label: "Matching statements", token: "{{statements}}" },
-    { label: "Matching points", token: "{{points}}" },
-    ...fields.map(field => ({ label: field.label, token: `{{column.${field.key}}}` })),
-  ];
+  const editorVariables = useMemo(() => emailEditorVariables(fields), [fields]);
   const setupPages = [
     { title: "About", description: "Name and describe this workflow." },
     { title: "Send rule", description: "Choose which clients should receive it." },
@@ -3239,6 +3354,11 @@ function TrackerEmailWorkflowEditor({
   ];
   const { setupPage, stepDirection, commit, styleCommit, styleClock, selectStyleAndAdvance, navigateToStep, navigateStep } =
     useWorkflowStepNavigation(workflow.id, startPage, setupPages, Boolean(reduceMotion));
+  useEffect(() => {
+    if (validationTarget) navigateToStep(3);
+    // Each failed validation requests navigation once, without resetting edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [validationTarget?.request]);
   const styleReceive = useTransform(styleClock, elapsed => styleCommit && !reduceMotion
     ? handoffReceive(elapsed - styleCommit.selectionDelay) : 0);
   useLayoutEffect(() => {
@@ -3387,6 +3507,7 @@ function TrackerEmailWorkflowEditor({
           group={conditionGroup}
           fields={fields}
           onChange={updateConditions}
+          onChangeCurrent={change => onChange(current => { const group = current.conditionGroup || conditionGroup; return { conditionGroup: { ...group, ...change(group) } }; })}
           valuesForField={fieldValues}
           operatorsForField={emailOperatorsForField}
           reduced={Boolean(reduceMotion)}
@@ -3407,13 +3528,18 @@ function TrackerEmailWorkflowEditor({
         variables={editorVariables} onChange={onChange} onAddAttachment={addAttachment} onUpdateAttachment={updateAttachment}
         onRemoveAttachment={id => onChange({ attachments: attachments.filter(item => item.id !== id) })}
         valuesForField={fieldValues} operatorsForField={emailOperatorsForField} />}
-      {setupPage === 3 && <WorkflowMessagesWorkspace key={workflow.id} mode={contentMode}
+      {setupPage === 3 && editingRuleType !== contentRuleType && <p className="workflow-rule-helper">Editing retained {messageMode} content. The active email style remains {workflowModeLabel}. <button type="button" onClick={() => setDismissedValidationView(validationTarget?.request || 0)}>Return to active messages</button></p>}
+      {setupPage === 3 && <WorkflowMessagesWorkspace key={workflow.id} mode={messageMode}
+        matchingMode={workflow.combinationMatchingMode} onMatchingMode={combinationMatchingMode => onChange({ combinationMatchingMode })}
         resolveFromStyle={!!styleCommit}
-        rules={contentMode === "combinations" ? scenarioRules : visibleContentRules} fields={fields}
+        rules={contentRules.filter(rule => rule.type === editingRuleType).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))} fields={fields}
         variables={editorVariables}
         onAdd={addContentRule} onUpdate={updateContentRule}
-        onRemove={id => onChange({ contentRules: contentRules.filter(rule => rule.id !== id) })}
+        allRules={contentRules} totalRuleCount={contentRules.length}
+        onRemove={(id, expected) => onChange(current => removeDraftRule(current, id, expected))}
+        onRestore={snapshot => onChange(current => restoreDraftRule(current, snapshot))}
         onMove={moveScenario} onPreview={onPreviewCombinations}
+        onTestClients={onTestClients} analysis={analysis} analysisCurrent={analysisCurrent} validationTarget={validationTarget}
         valuesForField={fieldValues} operatorsForField={emailOperatorsForField} reduced={Boolean(reduceMotion)} />}
       {setupPage === 6 && <WorkflowReviewWorkspace workflow={workflow} fields={fields} variables={editorVariables}
         mode={contentMode} issues={reviewIssues} otherWorkflows={otherReviewWorkflows}
@@ -3426,20 +3552,156 @@ function TrackerEmailWorkflowEditor({
   );
 }
 
-function TrackerEditor({
+type TrackerRowProps = {
+  entry: Entry; fields: TrackerField[]; clientColumns?: ClientTrackerDetailKey[];
+  active: boolean; bulkSaving: boolean; canSelect: boolean; selected: boolean;
+  emailEnabled?: boolean; communicationStatus: string; savingCells: Set<string>;
+  onToggle: (id: string) => void;
+  onSave: SaveTrackerValue;
+  feedback: Map<string, CellFeedback>;
+  onDraftStart: (id: string) => void;
+};
+const TrackerRow = React.memo(function TrackerRow({ entry, fields, clientColumns, active, bulkSaving,
+  canSelect, selected, emailEnabled, communicationStatus, savingCells, feedback, onDraftStart, onToggle, onSave }: TrackerRowProps) {
+  const [mobileExpanded, setMobileExpanded] = useState(false);
+  const rowDetailsId = React.useId();
+  return (<tr role="row" className="tracker-client-row hover:bg-surface/60" data-mobile-expanded={mobileExpanded}>
+                    <td role="cell" className="tracker-row-selection px-3 py-3">
+                      <input
+                        disabled={
+                          !active ||
+                          !canSelect
+                        }
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => onToggle(entry._id)}
+                        aria-label={`Select ${entry.client?.companyName || entry.clientId}`}
+                      />
+                    </td>
+                    <td role="cell" className="tracker-row-identity sticky left-0 z-[1] bg-card px-4 py-3">
+                      <Link
+                        href={`/dashboard/clients/${entry.clientId}`}
+                        prefetch={false}
+                        className="font-medium text-default hover:text-blue-600"
+                      >
+                        {entry.client?.companyName || entry.clientId}
+                      </Link>
+                      <p className="text-xs text-faint">{entry.clientId}</p>
+                      <button type="button" className="tracker-mobile-toggle hidden" aria-expanded={mobileExpanded}
+                        aria-controls={fields.length ? rowDetailsId : undefined} aria-label={`${mobileExpanded ? "Collapse" : "Edit"} fields for ${entry.client?.companyName || entry.clientId}`}
+                        onClick={() => setMobileExpanded(value => !value)}>
+                        {mobileExpanded ? "Hide fields" : "View / edit fields"}<ChevronDown size={14} aria-hidden="true" />
+                      </button>
+                    </td>
+                    <td role="cell" data-label="Category" className="tracker-row-category px-4 py-3 text-muted">
+                      {entry.client?.category || "—"}
+                    </td>
+                    {emailEnabled &&
+                      (() => {
+                        const status =
+                          communicationStatus;
+                        const tone =
+                          status === "Replied"
+                            ? "bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-200"
+                            : status === "Sent" || status === "Reminder Sent"
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                              : status === "Draft Created"
+                                ? "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+                                : status === "Failed"
+                                  ? "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200"
+                                  : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
+                        return (
+                          <td role="cell" data-label="Communication" className="tracker-row-communication px-4 py-3">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${tone}`}
+                            >
+                              {status}
+                            </span>
+                          </td>
+                        );
+                      })()}
+                    {(clientColumns || ["state"]).map((column) => (
+                      <td
+                        key={column}
+                        role="cell" data-label={CLIENT_TRACKER_DETAIL_OPTIONS.find(option => option.key === column)?.label || column}
+                        className="tracker-row-detail max-w-52 truncate px-4 py-3 text-muted"
+                        title={clientDetailValue(entry.client, column)}
+                      >
+                        {clientDetailValue(entry.client, column)}
+                      </td>
+                    ))}
+                    {fields.map((field) => (
+                      <td key={field.key} role="cell" id={field === fields[0] ? rowDetailsId : undefined} data-label={field.label} data-tracker-field={field.key} className="tracker-row-detail relative px-4 py-3">
+                        {renderEditor(
+                          entry,
+                          field,
+                          savingCells.has(`${entry._id}-${field.key}`),
+                          onSave,
+                          bulkSaving || !active,
+                          onDraftStart,
+                        )}
+                        {(savingCells.has(`${entry._id}-${field.key}`) || feedback.has(`${entry._id}-${field.key}`)) && <span
+                          aria-hidden="true" title={`${field.label}: ${savingCells.has(`${entry._id}-${field.key}`) ? "Saving" : feedback.get(`${entry._id}-${field.key}`)}`}
+                          className="pointer-events-none absolute right-1 top-1 inline-flex h-3 w-3 items-center justify-center">
+                          {savingCells.has(`${entry._id}-${field.key}`) ? <LoaderCircle size={10} className="animate-spin text-muted motion-reduce:animate-none" />
+                            : feedback.get(`${entry._id}-${field.key}`) === "saved" ? <Check size={10} className="text-emerald-600" /> : <CircleAlert size={10} className="text-rose-500" />}
+                        </span>}
+                      </td>
+                    ))}
+                    <td role="cell" data-label="Updated" className="tracker-row-detail whitespace-nowrap px-4 py-3 text-xs text-faint">
+                      {new Date(entry.updatedAt).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                      })}
+                    </td>
+                  </tr>);
+}, (previous, next) => previous.entry === next.entry && previous.fields === next.fields
+  && previous.clientColumns === next.clientColumns && previous.active === next.active
+  && previous.bulkSaving === next.bulkSaving && previous.canSelect === next.canSelect
+  && previous.selected === next.selected && previous.emailEnabled === next.emailEnabled
+  && previous.communicationStatus === next.communicationStatus && previous.onToggle === next.onToggle
+  && previous.onSave === next.onSave && previous.onDraftStart === next.onDraftStart && next.fields.every(field => {
+    const key = next.entry._id + "-" + field.key;
+    return previous.savingCells.has(key) === next.savingCells.has(key) && previous.feedback.get(key) === next.feedback.get(key);
+  }));
+
+const TrackerEditor = React.memo(function TrackerEditor({
   entry,
   field,
   saving,
+  disabled,
+  onDraftStart,
   onSave,
 }: {
   entry: Entry;
   field: TrackerField;
   saving: boolean;
-  onSave: (entry: Entry, field: TrackerField, value: TrackerValue) => void;
+  disabled: boolean;
+  onDraftStart: (id: string) => void;
+  onSave: SaveTrackerValue;
 }) {
   const value = entry.values[field.key];
   const [draft, setDraft] = useState(valueText(value));
-  React.useEffect(() => setDraft(valueText(value)), [value]);
+  const focused = useRef(false), dirty = useRef(false);
+  const draftRevision = useRef(trackerMarkRevision(entry.fieldRevisions, field.key));
+  React.useEffect(() => {
+    if (!focused.current || !dirty.current) setDraft(valueText(value));
+  }, [value]);
+  const changeDraft = (next: string) => { if (!dirty.current) onDraftStart(`${entry._id}-${field.key}`); dirty.current = true; setDraft(next); };
+  const commitDraft = () => {
+    focused.current = false; dirty.current = false;
+    if (draft !== valueText(value)) onSave(entry, field, draft, { expectedRevision: draftRevision.current });
+  };
+  const focusDraft = () => { focused.current = true; draftRevision.current = trackerMarkRevision(entry.fieldRevisions, field.key); };
+  const draftKey = (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing) return;
+    if (event.key === "Escape") {
+      event.preventDefault(); event.stopPropagation(); dirty.current = false;
+      setDraft(valueText(value)); draftRevision.current = trackerMarkRevision(entry.fieldRevisions, field.key);
+    } else if (event.key === "Enter" && field.type !== "date" && (field.type !== "longText" || event.ctrlKey || event.metaKey)) {
+      event.preventDefault(); event.currentTarget.blur();
+    }
+  };
   if (field.dataLink || field.computed)
     return (
       <span
@@ -3462,7 +3724,8 @@ function TrackerEditor({
         type="button"
         role="switch"
         aria-checked={Boolean(value)}
-        disabled={saving}
+        disabled={disabled}
+        aria-busy={saving}
         onClick={() => onSave(entry, field, !Boolean(value))}
         className={`relative inline-flex h-[31px] w-[51px] shrink-0 items-center rounded-2xl transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${value ? "bg-[#34C759] dark:bg-[#30D158]" : "bg-[#E5E5EA] dark:bg-[#3A3A3C]"}`}
         aria-label={`${field.label}: ${value ? "Yes" : "No"}`}
@@ -3475,7 +3738,8 @@ function TrackerEditor({
   if (field.type === "status" || field.type === "select")
     return (
       <select
-        disabled={saving}
+        disabled={disabled}
+        aria-busy={saving}
         value={String(value ?? "")}
         onChange={(event) => onSave(entry, field, event.target.value)}
         aria-label={field.label}
@@ -3497,8 +3761,8 @@ function TrackerEditor({
       <div role="group" aria-label={field.label} className="flex min-w-32 max-w-64 flex-wrap gap-1">
         {[...new Set([...(field.options || []), ...selected])].map(option => {
           const checked = selected.includes(option), color = trackerOptionColor(field, option);
-          return <label key={option} data-option-color={color} className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs ${checked ? trackerOptionTone(field, option) : "bg-surface text-muted"} ${saving ? "opacity-60" : ""}`}>
-            <input type="checkbox" aria-label={option} disabled={saving} checked={checked}
+          return <label key={option} data-option-color={color} className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs ${checked ? trackerOptionTone(field, option) : "bg-surface text-muted"} ${disabled ? "opacity-60" : ""}`}>
+            <input type="checkbox" aria-label={option} disabled={disabled} aria-busy={saving} checked={checked}
               style={{ accentColor: TRACKER_OPTION_PALETTE[color].swatch }}
               onChange={event => onSave(entry, field, event.target.checked ? [...selected, option] : selected.filter(value => value !== option))} />
             <span>{option}</span>
@@ -3510,12 +3774,14 @@ function TrackerEditor({
   if (field.type === "longText")
     return (
       <textarea
-        disabled={saving}
+        disabled={disabled}
+        aria-busy={saving}
         value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={() => {
-          if (draft !== valueText(value)) onSave(entry, field, draft);
-        }}
+        onChange={(event) => changeDraft(event.target.value)}
+        onFocus={focusDraft}
+        onKeyDown={draftKey}
+        aria-label={field.label}
+        onBlur={commitDraft}
         rows={2}
         className="min-w-52 rounded-lg border border-base bg-surface px-2 py-1.5 text-sm outline-none focus:border-blue-500"
       />
@@ -3529,7 +3795,8 @@ function TrackerEditor({
   ].includes(field.type);
   const numericInput = (
     <input
-      disabled={saving}
+      disabled={disabled}
+      aria-busy={saving}
       type={numeric ? "number" : field.type === "date" ? "date" : "text"}
       min={
         field.type === "percentage" || field.type === "progress" ? 0 : undefined
@@ -3541,10 +3808,11 @@ function TrackerEditor({
       }
       step={numeric ? "any" : undefined}
       value={draft}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={() => {
-        if (draft !== valueText(value)) onSave(entry, field, draft);
-      }}
+      onChange={(event) => changeDraft(event.target.value)}
+      onFocus={focusDraft}
+      onKeyDown={draftKey}
+      aria-label={field.label}
+      onBlur={commitDraft}
       className="w-full min-w-28 rounded-lg border border-base bg-surface px-2 py-1.5 text-sm outline-none focus:border-blue-500"
     />
   );
@@ -3580,19 +3848,27 @@ function TrackerEditor({
     );
   }
   return numericInput;
-}
+}, (previous, next) => previous.entry._id === next.entry._id
+  && sameTrackerValue(previous.entry.values[previous.field.key], next.entry.values[next.field.key])
+  && previous.field === next.field && previous.saving === next.saving
+  && trackerMarkRevision(previous.entry.fieldRevisions, previous.field.key) === trackerMarkRevision(next.entry.fieldRevisions, next.field.key)
+  && previous.disabled === next.disabled && previous.onSave === next.onSave && previous.onDraftStart === next.onDraftStart);
 
 function renderEditor(
   entry: Entry,
   field: TrackerField,
   saving: boolean,
-  onSave: (entry: Entry, field: TrackerField, value: TrackerValue) => void,
+  onSave: SaveTrackerValue,
+  disabled: boolean,
+  onDraftStart: (id: string) => void,
 ) {
   return (
     <TrackerEditor
       entry={entry}
       field={field}
       saving={saving}
+      disabled={disabled}
+      onDraftStart={onDraftStart}
       onSave={onSave}
     />
   );

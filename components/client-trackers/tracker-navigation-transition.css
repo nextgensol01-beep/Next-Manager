@@ -1,0 +1,33 @@
+/* Visibility has one owner: incoming routes stay painted; retained source surfaces overlap them. */
+.tracker-navigation-ghost, .tracker-navigation-surface, .tracker-loading-resolve-surface {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  contain: layout style;
+}
+.tracker-navigation-ghost { z-index: 45; }
+.tracker-navigation-surface { z-index: 44; }
+.tracker-loading-resolve-surface { z-index: 43; }
+.tracker-navigation-ghost > div { box-sizing: border-box; will-change: transform, opacity; }
+.tracker-navigation-boundary[data-tracker-handoff] [data-tracker-selected] [data-tracker-title],
+.tracker-navigation-boundary[data-tracker-handoff] [data-tracker-selected] [data-tracker-description],
+.tracker-navigation-boundary[data-tracker-handoff][data-tracker-direction="open"] [data-tracker-detail-heading] [data-tracker-title],
+.tracker-navigation-boundary[data-tracker-handoff][data-tracker-direction="open"] [data-tracker-detail-heading] [data-tracker-description],
+.tracker-navigation-surface[data-tracker-snapshot-handoff] [data-tracker-snapshot-text] {
+  opacity: 0;
+}
+.tracker-loading-region { min-height: 44px; }
+.tracker-loading-placeholder {
+  display: inline-block; height: 10px; width: 90px; border-radius: 5px;
+  background: currentColor; opacity: .06;
+}
+.tracker-loading-feedback { opacity: 0; animation: tracker-placeholder-ready 140ms ease 180ms forwards; }
+.tracker-loading-records { min-height: 176px; display: grid; place-items: center; }
+@keyframes tracker-placeholder-ready { to { opacity: 1; } }
+@media (prefers-reduced-motion: no-preference) {
+  .tracker-navigation-boundary [data-tracker-transition-id]:active { transform: scale(.988); transition-duration: 95ms; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tracker-navigation-ghost { display: none; }
+  .tracker-loading-feedback { animation-duration: 0ms; }
+}

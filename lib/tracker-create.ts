@@ -53,7 +53,7 @@ export function trackerCreateErrors(form: TrackerCreateDraft): TrackerCreateErro
 }
 export function trackerCreatePayload(form: TrackerCreateDraft) {
   return { ...form, fields: form.fields.map(({ uiId, ...field }) => { void uiId; return field; }),
-    clientMembershipMode: form.scope === "categories" ? form.membershipMode : "snapshot",
+    clientMembershipMode: form.scope !== "selected" ? form.membershipMode : "snapshot",
     clientIds: form.scope === "selected" ? form.selected : [],
     clientCategories: form.scope === "categories" ? form.selectedCategories : [] };
 }

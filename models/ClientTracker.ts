@@ -13,8 +13,10 @@ export interface IClientTracker extends Document {
   fields: TrackerField[];
   clientColumns?: string[];
   clientCategories?: ClientTrackerCategory[];
-  /** A fixed list is intentional; category-sync follows changes to selected categories. */
+  /** Category sync adds eligible clients; historical rows and exclusions are retained. */
   clientMembershipMode?: "snapshot" | "categorySync";
+  clientScope?: "all" | "categories" | "selected";
+  clientSyncCheckedAt?: Date;
   clientIds: string[];
   status: "active" | "archived";
   createdBy?: string;
@@ -72,6 +74,8 @@ const ClientTrackerSchema = new Schema<IClientTracker>(
       default: "snapshot",
     },
     clientIds: { type: [String], required: true, default: [] },
+    clientScope: { type: String, enum: ["all", "categories", "selected"], default: undefined },
+    clientSyncCheckedAt: Date,
     status: {
       type: String,
       enum: ["active", "archived"],
@@ -87,6 +91,7 @@ const ClientTrackerSchema = new Schema<IClientTracker>(
 );
 
 ClientTrackerSchema.index({ status: 1, updatedAt: -1 });
+ClientTrackerSchema.index({ status: 1, clientMembershipMode: 1, clientScope: 1, clientCategories: 1 });
 
 const existingTrackerFieldsPath = mongoose.models.ClientTracker?.schema.path(
   "fields",
@@ -100,6 +105,7 @@ if (
   mongoose.models.ClientTracker &&
   (!mongoose.models.ClientTracker.schema.path("clientCategories") ||
     !mongoose.models.ClientTracker.schema.path("clientMembershipMode") ||
+    !mongoose.models.ClientTracker.schema.path("clientScope") ||
     !mongoose.models.ClientTracker.schema.path("savedViews") ||
     !Array.isArray(existingTrackerTypeValues) ||
     !existingTrackerTypeValues.includes("longText"))

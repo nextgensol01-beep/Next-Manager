@@ -9,6 +9,8 @@
 "use client";
 
 import { Recycle, Leaf } from "lucide-react";
+import { calculateTargetCoverage, coveragePercentageText, coverageQuantityText as quantity, type TargetCoverage } from "@/lib/financial-year-coverage";
+import type { FinancialYearRecord } from "@/lib/financial-year-form";
 
 // ─── Shared types ──────────────────────────────────────────────────────────
 
@@ -25,6 +27,7 @@ export interface TypedEntry {
 }
 
 interface Props {
+  record?: FinancialYearRecord;
   clientType: "PWP" | "PIBO";
   rows?: CatRow[];
   entries?: TypedEntry[];
@@ -63,56 +66,59 @@ function TypePill({ type }: { type: "RECYCLING" | "EOL" }) {
 
 // ─── Typed breakdown ────────────────────────────────────────────────────────
 
-function TypedBreakdown({ clientType, entries, achievedMap }: {
+function TypedBreakdown({ clientType, entries, achievedMap, coverage }: {
   clientType: "PWP" | "PIBO";
   entries: TypedEntry[];
   achievedMap: Record<string, number>;
+  coverage?: TargetCoverage;
 }) {
   const isPWP = clientType === "PWP";
   const baseLabel = isPWP ? "Generated" : "Target";
-  const usedLabel = isPWP ? "Sold" : "Achieved";
+  const usedLabel = isPWP ? "Sold" : "Target Achieved";
 
-  const catIds = [...new Set(entries.map((e) => e.categoryId))].sort();
+  const catIds = coverage ? coverage.categories.map(category => category.categoryId) : [...new Set(entries.map((e) => e.categoryId))].sort();
 
-  const totalBase = entries.reduce((s, e) => s + e.value, 0);
-  const totalUsed = entries.reduce((s, e) => s + (achievedMap[`${e.categoryId}|${e.type}`] ?? 0), 0);
-  const totalRemaining = totalBase - totalUsed;
-  const totalPct = totalBase > 0 ? Math.min(100, Math.round((totalUsed / totalBase) * 100)) : 0;
+  const totalBase = coverage ? coverage.target : entries.reduce((s, e) => s + e.value, 0);
+  const totalUsed = coverage ? coverage.covered : entries.reduce((s, e) => s + (achievedMap[`${e.categoryId}|${e.type}`] ?? 0), 0);
+  const totalRemaining = coverage ? coverage.pending : (totalBase ?? 0) - (totalUsed ?? 0);
+  const totalPct = coverage ? coverage.percentage : totalBase ? Math.min(100, Math.round(((totalUsed ?? 0) / totalBase) * 100)) : 0;
 
   return (
     <div className="space-y-5">
       {/* Overall summary */}
       <div className="bg-surface rounded-xl p-4">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold text-muted uppercase tracking-wide">Overall Progress</span>
-          <span className="text-xs font-bold text-default">{totalPct}%</span>
+          <span className="text-xs font-semibold text-muted uppercase tracking-wide">{isPWP ? "Overall Progress" : "Overall Target Achievement"}</span>
+          <span className="text-xs font-bold text-default">{coverage?.status === "No target" ? "No target" : coveragePercentageText(totalPct)}</span>
         </div>
         <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mb-3">
-          <div className={`h-2.5 rounded-full transition-all ${totalPct >= 100 ? "bg-emerald-500" : "bg-brand-500"}`}
-            style={{ width: `${totalPct}%` }} />
+          <div className={`h-2.5 rounded-full transition-all ${(totalPct ?? 0) >= 100 ? "bg-emerald-500" : "bg-brand-500"}`}
+            style={{ width: `${totalPct ?? 0}%` }} />
         </div>
         <div className="grid grid-cols-3 gap-3">
           {[
             { label: `Total ${baseLabel}`, val: totalBase, cls: "text-default" },
             { label: `Total ${usedLabel}`, val: totalUsed, cls: "text-brand-600" },
-            { label: "Total Remaining", val: totalRemaining, cls: totalRemaining < 0 ? "text-red-500" : "text-emerald-600" },
+            { label: "Total Remaining", val: totalRemaining, cls: totalRemaining !== null && totalRemaining < 0 ? "text-red-500" : "text-emerald-600" },
           ].map(({ label, val, cls }) => (
             <div key={label} className="text-center">
               <p className="text-xs text-faint mb-0.5">{label}</p>
-              <p className={`text-lg font-bold ${cls}`}>{val.toLocaleString()}</p>
+              <p className={`text-lg font-bold ${cls}`}>{quantity(val)}</p>
             </div>
           ))}
         </div>
       </div>
 
+      {coverage && <p className="text-xs text-muted" role="status">{coverage.status} · Recorded target coverage (MT), not verified compliance. {coverage.issues.join(" ")}</p>}
       {/* Per-category breakdown */}
       <div className="space-y-3">
         {catIds.map((catId, i) => {
-          const catEntries = entries.filter((e) => e.categoryId === catId);
-          const catBase = catEntries.reduce((s, e) => s + e.value, 0);
-          const catUsed = catEntries.reduce((s, e) => s + (achievedMap[`${e.categoryId}|${e.type}`] ?? 0), 0);
-          const catRemaining = catBase - catUsed;
-          const catPct = catBase > 0 ? Math.min(100, Math.round((catUsed / catBase) * 100)) : 0;
+          const category = coverage?.categories.find(category => category.categoryId === catId);
+          const catEntries = category ? category.buckets.map(bucket => ({ categoryId: catId, type: bucket.type, value: bucket.target ?? 0 })) : entries.filter((e) => e.categoryId === catId);
+          const catBase = category ? category.target : catEntries.reduce((s, e) => s + e.value, 0);
+          const catUsed = category ? category.covered : catEntries.reduce((s, e) => s + (achievedMap[`${e.categoryId}|${e.type}`] ?? 0), 0);
+          const catRemaining = category ? category.pending : (catBase ?? 0) - (catUsed ?? 0);
+          const catPct = category ? category.percentage : catBase ? Math.min(100, Math.round(((catUsed ?? 0) / catBase) * 100)) : 0;
           const color = COLORS[i % COLORS.length];
 
           return (
@@ -123,48 +129,51 @@ function TypedBreakdown({ clientType, entries, achievedMap }: {
                   {CAT_DISPLAY[catId] ?? `CAT-${catId}`}
                 </span>
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${color.badge}`}>
-                  {catPct}% used
+                  {!isPWP && catBase === 0 ? "No target" : catPct === null ? "Target unavailable" : `${coveragePercentageText(catPct)} ${isPWP ? "used" : "achieved"}`}
                 </span>
               </div>
 
               {/* Progress bar */}
               <div className="w-full bg-white/60 dark:bg-black/20 rounded-full h-1.5 mb-3">
-                <div className={`h-1.5 rounded-full transition-all ${color.bar}`} style={{ width: `${catPct}%` }} />
+                <div className={`h-1.5 rounded-full transition-all ${color.bar}`} style={{ width: `${catPct ?? 0}%` }} />
               </div>
 
               {/* Per-type sub-rows */}
               <div className="space-y-2">
                 {catEntries.map((entry) => {
-                  const typeUsed = achievedMap[`${entry.categoryId}|${entry.type}`] ?? 0;
-                  const typeRemaining = entry.value - typeUsed;
-                  const typePct = entry.value > 0 ? Math.min(100, Math.round((typeUsed / entry.value) * 100)) : 0;
+                  const bucket = category?.buckets.find(bucket => bucket.type === entry.type);
+                  const typeBase = bucket ? bucket.target : entry.value;
+                  const typeUsed = bucket ? bucket.covered : achievedMap[`${entry.categoryId}|${entry.type}`] ?? 0;
+                  const typeRemaining = bucket ? bucket.pending : entry.value - (typeUsed ?? 0);
+                  const typePct = bucket ? bucket.percentage : entry.value > 0 ? Math.min(100, Math.round(((typeUsed ?? 0) / entry.value) * 100)) : 0;
                   return (
                     <div key={`${entry.categoryId}|${entry.type}`}
                       className="bg-white/50 dark:bg-black/10 rounded-lg px-3 py-2.5">
                       <div className="flex items-center justify-between mb-1.5">
                         <TypePill type={entry.type} />
-                        <span className="text-[10px] text-faint">{typePct}%</span>
+                        <span className="text-[10px] text-faint">{!isPWP && typeBase === 0 ? "No target" : typePct === null ? "Target unavailable" : coveragePercentageText(typePct)}</span>
                       </div>
                       <div className="w-full bg-white/60 dark:bg-black/20 rounded-full h-1 mb-2">
-                        <div className={`h-1 rounded-full transition-all ${typePct >= 100 ? "bg-emerald-500" : color.bar}`}
-                          style={{ width: `${typePct}%` }} />
+                        <div className={`h-1 rounded-full transition-all ${(typePct ?? 0) >= 100 ? "bg-emerald-500" : color.bar}`}
+                          style={{ width: `${typePct ?? 0}%` }} />
                       </div>
                       <div className="grid grid-cols-3 gap-2">
                         <div>
                           <p className="text-[9px] text-faint uppercase tracking-wide">{baseLabel}</p>
-                          <p className="font-semibold text-xs text-default">{entry.value.toLocaleString()}</p>
+                          <p className="font-semibold text-xs text-default">{quantity(typeBase)}</p>
                         </div>
                         <div>
                           <p className="text-[9px] text-faint uppercase tracking-wide">{usedLabel}</p>
-                          <p className={`font-semibold text-xs ${color.text}`}>{typeUsed.toLocaleString()}</p>
+                          <p className={`font-semibold text-xs ${color.text}`}>{quantity(typeUsed)}</p>
                         </div>
                         <div>
                           <p className="text-[9px] text-faint uppercase tracking-wide">Remaining</p>
-                          <p className={`font-semibold text-xs ${typeRemaining < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>
-                            {typeRemaining.toLocaleString()}
+                          <p className={`font-semibold text-xs ${typeRemaining !== null && typeRemaining < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>
+                            {quantity(typeRemaining)}
                           </p>
                         </div>
                       </div>
+                      {bucket && <p className="mt-2 text-[10px] text-muted">Recorded {quantity(bucket.recorded)} MT · Above target {quantity(bucket.excess)} MT. Eligibility and transferable balance unverified.</p>}
                     </div>
                   );
                 })}
@@ -175,20 +184,21 @@ function TypedBreakdown({ clientType, entries, achievedMap }: {
                 <div className="mt-2 pt-2 border-t border-white/30 dark:border-black/20 grid grid-cols-3 gap-2">
                   <div>
                     <p className="text-[9px] text-faint uppercase tracking-wide">Total {baseLabel}</p>
-                    <p className="font-bold text-xs text-default">{catBase.toLocaleString()}</p>
+                    <p className="font-bold text-xs text-default">{quantity(catBase)}</p>
                   </div>
                   <div>
                     <p className="text-[9px] text-faint uppercase tracking-wide">Total {usedLabel}</p>
-                    <p className={`font-bold text-xs ${color.text}`}>{catUsed.toLocaleString()}</p>
+                    <p className={`font-bold text-xs ${color.text}`}>{quantity(catUsed)}</p>
                   </div>
                   <div>
                     <p className="text-[9px] text-faint uppercase tracking-wide">Remaining</p>
-                    <p className={`font-bold text-xs ${catRemaining < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>
-                      {catRemaining.toLocaleString()}
+                    <p className={`font-bold text-xs ${catRemaining !== null && catRemaining < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>
+                      {quantity(catRemaining)}
                     </p>
                   </div>
                 </div>
               )}
+              {category && category.recorded !== null && category.buckets.some(bucket => bucket.recorded === null) && <p className="mt-2 text-xs text-muted">Recorded category quantity: {quantity(category.recorded)} MT · Recycling/EOL allocation unresolved.</p>}
             </div>
           );
         })}
@@ -273,7 +283,13 @@ function LegacyBreakdown({ clientType, rows }: { clientType: "PWP" | "PIBO"; row
 
 // ─── Main export ────────────────────────────────────────────────────────────
 
-export function CategoryBreakdown({ clientType, rows, entries, achievedMap }: Props) {
+export function CategoryBreakdown({ clientType, rows, entries, achievedMap, record }: Props) {
+  if (clientType === "PIBO") {
+    const source = record ?? { clientId: "", financialYear: "", ...(entries?.length ? { targets: entries,
+      achievedByType: Object.entries(achievedMap ?? {}).map(([key, value]) => { const [categoryId, type] = key.split("|"); return { categoryId, type: type as TypedEntry["type"], value }; }) }
+      : Object.fromEntries((rows ?? []).flatMap((row, index) => [[`cat${index + 1}Target`, row.base], [`achievedCat${index + 1}`, row.used]]))) };
+    return <TypedBreakdown clientType={clientType} entries={entries ?? []} achievedMap={achievedMap ?? {}} coverage={calculateTargetCoverage(source)} />;
+  }
   if (entries && entries.length > 0) {
     return <TypedBreakdown clientType={clientType} entries={entries} achievedMap={achievedMap ?? {}} />;
   }

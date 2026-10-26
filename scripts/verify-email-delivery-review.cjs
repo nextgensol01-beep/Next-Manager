@@ -10,7 +10,7 @@ const workflows=['W1','W2'].map((id,index)=>({id,name:index?'Compliance update':
 const clients=Array.from({length:500},(_,index)=>({clientId:'C'+index,companyName:index===0?'Arihant Packaging':index===1?'Pearl Plastic':'Client '+index,category:index%2?'PWP':'Producer'}));
 const messages=()=>clients.slice(0,zero?0:large?500:3).map((client,index)=>({entryId:'E'+index,clientId:client.clientId,companyName:client.companyName,to:'rahul'+index+'@example.com',suggestedTo:['rahul'+index+'@example.com'],
   recipients:[{email:'rahul'+index+'@example.com',name:'Rahul Sharma',designation:'Director',isPrimary:true},{email:'accounts'+index+'@example.com',name:'Accounts',designation:'Finance',isPrimary:false}],
-  subject:'EPR portal update — '+client.companyName,body:'Dear '+client.companyName+',\nPlease review the documents.',html:'<!doctype html><html><body style="font:14px Arial;color:#222;padding:20px"><p>Dear <strong>'+client.companyName+'</strong>,</p><p>Please review your EPR portal documents for FY 2025–26.</p><p>Regards,<br>NextGen Solutions</p></body></html>',points:[],statements:['Documents required','Compliance review'],combinationMessage:'Actual matched content',attachments:[{documentId:'D1',filename:'Certificate.pdf',mimeType:'application/pdf',fileSize:4000}]}));
+  subject:'EPR portal update — '+client.companyName,body:'Dear '+client.companyName+',\nPlease review the documents.',html:'<!doctype html><html><body style="font:14px Arial;color:#222;padding:20px"><p>Dear <strong>'+client.companyName+'</strong>,</p><p>Please review your EPR portal documents for FY 2025–26.</p><p>Regards,<br>NextGen Solutions</p></body></html>',points:[],statements:['Documents required','Compliance review'],combinationMessage:'Actual matched content',attachments:[{documentId:index===0?'D1':'D'+(index+1),filename:client.companyName+'-Certificate.pdf',mimeType:'application/pdf',fileSize:4000,category:'certificates',financialYear:'2025-26',required:true}],attachmentWarnings:[{ruleId:'optional-report',required:false,code:'missing_document',message:'Optional supporting document not found.'}],attachmentSnapshot:'isolated-attachment-selection-'+index}));
 async function main(){
   fs.mkdirSync(output,{recursive:true});webpackRuntime.init();
   await new Promise((resolve,reject)=>{const compiler=webpackRuntime.webpack({mode:'development',devtool:false,context:root,entry:path.join(__dirname,'fixtures/tracker-search.tsx'),output:{path:output,filename:'fixture.js'},
@@ -26,12 +26,13 @@ async function main(){
       let raw='';for await(const chunk of req)raw+=chunk;const body=raw?JSON.parse(raw):null;requests.push({path:url.pathname,method:req.method,body});
       let data={},delay=60,status=200;
       if(url.pathname===`/api/client-trackers/${trackerId}`)data={_id:trackerId,name:'Compliance tracker',status:'active',fields:[{key:'ready',label:'Ready',type:'toggle'}],entries:clients.slice(0,100).map((client,index)=>({_id:'E'+index,clientId:client.clientId,client,updatedAt:'2026-10-09',values:{ready:true}})),clientIds:clients.map(c=>c.clientId),entryCount:500,totalEntryCount:500,offset:0,hasMore:false,overviewCounts:[],emailEnabled:true,emailWorkflows:workflows};
-      else if(url.pathname===`/api/client-trackers/${trackerId}/email`&&req.method==='POST'){delay=1250;if(failPreview){failPreview=false;status=500;data={error:'Fixture preparation failure'};}else data={workflow:{id:body.workflowId,name:workflows.find(w=>w.id===body.workflowId).name,signatureGap:2},messages:messages(),skipped:[{clientId:'C499',companyName:'Electromark',reason:'Workflow eligibility conditions do not match'},{clientId:'C498',companyName:'XYZ Foods',reason:'No contact email matches the selected recipient strategy'}]};}
+      else if(url.pathname===`/api/client-trackers/${trackerId}/email`&&req.method==='POST'){delay=1250;if(failPreview){failPreview=false;status=500;data={error:'Fixture preparation failure'};}else data={workflow:{id:body.workflowId,name:workflows.find(w=>w.id===body.workflowId).name,signatureGap:2},messages:messages(),skipped:[{clientId:'C499',companyName:'Electromark',reasonCode:'conditions_not_matched',reason:'Workflow eligibility conditions do not match'},{clientId:'C498',companyName:'XYZ Foods',reasonCode:'no_recipient',reason:'No contact email matches the selected recipient strategy'}]};}
       else if(url.pathname.endsWith('/email/replies')){delay=650;data={checked:3,replied:0};}
       else if(url.pathname==='/api/settings/email-delivery-security')data=securityPolicy;
       else if(url.pathname.endsWith('/approval/request')){data={approvalId:require('node:crypto').randomUUID(),methodsRequired:authorized.has(body.campaignId)?[]:['emailOtp'],methodsVerified:[],approvalEmailMasked:securityPolicy.approvalEmailMasked,expiresAt:new Date(Date.now()+300000).toISOString(),otpExpiresAt:new Date(Date.now()+300000).toISOString(),resendAvailableAt:new Date(Date.now()+45000).toISOString(),status:authorized.has(body.campaignId)?'verified':'pending',resumed:authorized.has(body.campaignId),messageCount:body.messages.length,holdToSend:true};approvals.set(data.approvalId,data);}
       else if(url.pathname.endsWith('/approval/verify')){data={...approvals.get(body.approvalId),methodsVerified:['emailOtp'],status:'verified'};assert.equal(body.otp,'123456');}
-      else if(url.pathname.endsWith('/email/deliver')){authorized.add(body.campaignId);if(failDelivery){failDelivery=false;status=500;data={error:'Fixture interrupted delivery'};}else data={completed:body.messages.length,failed:0,status:'completed'};}
+      else if(url.pathname.endsWith('/email/deliver')){authorized.add(body.campaignId);if(failDelivery){failDelivery=false;status=500;data={error:'Fixture interrupted delivery'};}else {status=202;data={outcome:'accepted',campaignId:body.campaignId,job:{campaignId:body.campaignId,trackerId,trackerName:'Compliance tracker',workflowName:'New email workflow',kind:body.kind,mode:body.mode,status:'queued',total:body.messages.length,processed:0,sent:0,drafts:0,failed:0,uncertain:0,pending:body.messages.length,delivering:0,executionMode:'browser',canResume:false,controllerLeaseExpiresAt:null,needsHistoryRepair:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),message:'Queued'}};}}
+      else if(url.pathname.startsWith('/api/email-delivery/jobs/')){status=404;data={error:'Job not accepted'};}
       else if(url.pathname==='/api/email/default-signature')data={signature:'<div data-gmail-signature="true" style="padding:0 20px;color:#777">Fixture Gmail signature</div>'};
       else if(url.pathname==='/api/clients')data=clients;
       else if(url.pathname==='/api/financial-year-preference')data={settings:{enabled:false}};
@@ -44,7 +45,7 @@ async function main(){
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let browser,page;
   try{
     browser=await puppeteer.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,userDataDir:fs.mkdtempSync(path.join(output,'profile-')),args:['--no-sandbox','--disable-gpu']});page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
-    const button=async(text,scope='body')=>{for(const node of await page.$$(scope+' button'))if((await node.evaluate(el=>el.textContent)).trim()===text){await node.click();return;}throw Error('Missing button '+text);};
+    const button=async(text,scope='body')=>{for(const node of await page.$$(scope+' button'))if((await node.evaluate(el=>el.textContent)).trim()===text){await require('./fixtures/wait-for-stable-control.cjs')(node);await node.click();return;}throw Error('Missing button '+text);};
     const wait=async()=>page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,380)));
     const main='.email-delivery-review-modal';
     const open=async()=>{await button('Email clients');await page.waitForSelector(main);await wait();};
@@ -83,6 +84,9 @@ async function main(){
         const expected=JSON.parse(fs.readFileSync(file,'utf8'));
         // The repeatable additional-recipient editor now intentionally adds controls here.
         for(const key of ['.email-review-add-recipient','.email-review-recipients .email-review-segments']){delete snapshot[key];delete expected[key];}
+        // Actual attachment metadata and optional omissions add content to this
+        // scrolling section. Its material/width and all surrounding geometry remain protected.
+        for(const state of [snapshot,expected])for(const entry of state['.email-review-mail'])delete entry.height;
         // Shared glass buttons retain their last pointer position after a click.
         // Compare their material independently of that transient gradient origin.
         for(const state of [snapshot,expected])for(const entries of Object.values(state))if(Array.isArray(entries))for(const entry of entries)for(const style of [entry.style,entry.before,entry.after])style.background=style.background.replace(/radial-gradient\(43% 54% at [\d.]+% [\d.]+%/g,'radial-gradient(43% 54% at 50% 35%');
@@ -156,7 +160,13 @@ async function main(){
     await page.$eval('.email-review-add-recipient',node=>node.click());assert.equal(await page.$$('.email-review-additional-row').then(nodes=>nodes.length),5,'Cannot add a sixth recipient');
     await page.click('[aria-label="Remove additional recipient 3"]');assert.equal(await page.$$('.email-review-additional-row').then(nodes=>nodes.length),4);assert(!(await page.$eval('.email-review-add-recipient',node=>node.disabled)));await addExtra('replacement@example.com');
     await page.$eval('.email-review-additional',node=>node.scrollIntoView({block:'start'}));await wait();await screenshot('recipients-five-light');
-    await selectClient('Pearl Plastic');assert.equal(await page.$$('.email-review-additional-row').then(nodes=>nodes.length),0,'Additional recipients are per client');await addExtra('pearl-extra@example.com');await selectClient('Arihant Packaging');
+    await selectClient('Pearl Plastic');assert.equal(await page.$$('.email-review-additional-row').then(nodes=>nodes.length),0,'Additional recipients are per client');
+    assert((await page.$eval('.email-review-attachments',node=>node.textContent)).includes('Pearl Plastic-Certificate.pdf'));
+    assert((await page.$eval('.email-review-attachments',node=>node.textContent)).includes('FY 2025-26'));
+    assert((await page.$eval('.email-review-attachments',node=>node.textContent)).includes('Required'));
+    assert((await page.$eval('.email-review-personalisation',node=>node.textContent)).includes('Optional supporting document not found.'));
+    await addExtra('pearl-extra@example.com');await selectClient('Arihant Packaging');
+    for(const name of ['Pearl Plastic','Arihant Packaging','Pearl Plastic','Arihant Packaging']){await selectClient(name);assert((await page.$eval('.email-review-attachments',node=>node.textContent)).includes(name+'-Certificate.pdf'));}
     assert.equal(await page.$$('.email-review-additional-row').then(nodes=>nodes.length),5,'All added rows persist across client navigation');assert.equal(await page.$eval('[aria-label="Additional recipient 1 email"]',node=>node.value),'extra@example.com');assert.equal(await page.$eval('[aria-label="Additional recipient 5 email"]',node=>node.value),'replacement@example.com');
     assert.equal(await page.$eval('[aria-label="Delivery for additional recipient 2"] [aria-label=CC]',node=>node.getAttribute('aria-checked')),'true');assert.equal(await page.$eval('[aria-label="Assignment for accounts0@example.com"] [aria-label=CC]',node=>node.getAttribute('aria-checked')),'true');
     failDelivery=true;await draft(3,true);const fiveDelivery=requests.filter(r=>r.path.endsWith('/email/deliver')).at(-1).body;
@@ -166,6 +176,16 @@ async function main(){
     await page.setViewport({width:900,height:900});await wait();assert(await page.$eval('.email-review-audience',node=>getComputedStyle(node).display!=='none'));assert(await page.$eval('.email-review-detail',node=>getComputedStyle(node).display!=='none'));await screenshot('review-medium');
     await page.setViewport({width:768,height:900});await wait();assert.equal(await page.$eval('.email-review-audience',node=>getComputedStyle(node).display),'none');await button('Back to audience',main);assert(await page.$eval('.email-review-audience',node=>getComputedStyle(node).display!=='none'));assert(await page.$eval(main,node=>node.scrollWidth<=node.clientWidth));await screenshot('audience-tablet');await page.setViewport({width:1340,height:1000});await wait();
     await page.click('[aria-label="Audience filter"] [aria-label="Skipped 2"]');await page.waitForFunction(()=>document.querySelector('.email-review-detail')?.innerText.includes('Workflow eligibility conditions do not match'));assert((await page.$eval('.email-review-detail',node=>node.innerText)).includes('Workflow eligibility conditions do not match'));assert.equal(await page.$$('.email-review-recipients').then(a=>a.length),0);
+    await page.click('.email-review-reason-breakdown summary');
+    await page.$eval('.email-review-reason-breakdown', node => Array.from(node.querySelectorAll('button')).find(button => button.textContent.includes('No matching contact email')).click());
+    await page.waitForFunction(() => document.querySelectorAll('.email-review-client-row').length === 1 && document.querySelector('.email-review-client-row')?.textContent.includes('XYZ Foods'));
+    const skippedRequests = requests.length; await fill('[aria-label="Search audience clients"]', 'Electromark');
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.email-review-client-row').length), 0, 'Reason filters intersect with client search');
+    await fill('[aria-label="Search audience clients"]', '');
+    await page.$eval('.email-review-reason-breakdown', node => Array.from(node.querySelectorAll('button')).find(button => button.textContent.includes('All reasons')).click());
+    await page.waitForFunction(() => document.querySelectorAll('.email-review-client-row').length === 2);
+    assert.equal(requests.length, skippedRequests, 'Skipped-reason filtering remains local');
+    await page.screenshot({path:path.join(output,'skipped-reason-filters.png')});
     await selectClient('XYZ Foods');assert((await page.$eval('.email-review-detail',node=>node.innerText)).includes('No contact email matches the selected recipient strategy'));
     await page.click('[aria-label="Audience filter"] [aria-label="Eligible 3"]');await wait();const localBefore=requests.length;await fill('[aria-label="Search audience clients"]','C1');assert.equal(await page.$$('.email-review-client-row').then(a=>a.length),1);await fill('[aria-label="Search audience clients"]','');assert.equal(requests.length,localBefore,'Audience search is local');
     await page.evaluate(()=>document.documentElement.classList.add('dark'));await wait();await screenshot('review-dark');

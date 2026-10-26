@@ -2,11 +2,7 @@
 const assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), http = require("node:http"), vm = require("node:vm"), ts = require("typescript");
 const puppeteer = require("puppeteer-core"), compiledWebpack = require("next/dist/compiled/webpack/webpack");
 const root = path.resolve(__dirname, ".."), output = path.join(root, "tmp/workflow-review-tests");
-function load(file, dependencies = {}) {
-  const env = { exports: {}, require(name) { assert(name in dependencies, `Unexpected dependency ${name}`); return dependencies[name]; } };
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, file), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, env);
-  return env.exports;
-}
+function load(file, dependencies = {}) { return require("./search-test-loader.cjs")(dependencies)(file); }
 function validationChecks() {
   const data = load("scripts/fixtures/workflow-review-data.ts", { "./rule-combinations-data": load("scripts/fixtures/rule-combinations-data.ts") });
   const validation = load("lib/tracker-email-validation.ts"), baseline = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/workflow-validation-baseline.json"), "utf8"));

@@ -26,16 +26,29 @@ export function SecurityCodeInput({
   onChange,
   pin = false,
   disabled = false,
+  autoFocus = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   pin?: boolean;
   disabled?: boolean;
+  autoFocus?: boolean;
 }) {
   const id = useId();
+  const input = useRef<HTMLInputElement>(null);
+  const focused = useRef(false);
   const [caret, setCaret] = useState(0);
   const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (!autoFocus || disabled || (focused.current && document.activeElement !== document.body)) return;
+    const frame = requestAnimationFrame(() => {
+      if (!input.current?.isConnected || input.current.disabled) return;
+      input.current.focus({ preventScroll: true });
+      focused.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [autoFocus, disabled]);
   useEffect(() => {
     if (!value || disabled || !pin) setVisible(false);
   }, [value, disabled, pin]);
@@ -70,6 +83,7 @@ export function SecurityCodeInput({
       <span className="email-security-code-control">
         <input
           id={id}
+          ref={input}
           aria-label={label}
           type={pin && !visible ? "password" : "text"}
           inputMode="numeric"
@@ -123,11 +137,17 @@ export function VerificationChallenge({
   busy,
   onVerify,
   onResend,
+  error,
+  processingAction,
+  focusInput = false,
 }: {
   challenge: ApprovalView;
   busy: boolean;
   onVerify: (values: { otp?: string; pin?: string }) => Promise<void>;
   onResend: () => Promise<void>;
+  error?: string;
+  processingAction?: "verify" | "resend";
+  focusInput?: boolean;
 }) {
   const [value, setValue] = useState("");
   const now = useSecurityClock();
@@ -182,19 +202,22 @@ export function VerificationChallenge({
         <h4>{otp ? "Email verification" : "Send PIN"}</h4>
       </div>
       {otp && (
-        <p>
+        <p role="status">
           We sent a six-digit code to{" "}
           <strong>{challenge.approvalEmailMasked}</strong>.
         </p>
       )}
       {otp && resent && <p role="status">New code sent</p>}
+      {!otp && focusInput && challenge.methodsVerified.includes("emailOtp") && <p className="email-security-verified" role="status"><Check size={14} /> Email verified. Enter your Send PIN to complete authorization.</p>}
       <SecurityCodeInput
         label={otp ? "Verification code" : "Send PIN"}
         value={value}
         onChange={setValue}
         pin={!otp}
         disabled={busy}
+        autoFocus={focusInput}
       />
+      {error && <p className="email-security-error email-authorization-local-error" role="alert">{error}</p>}
       <p className="email-security-countdown" aria-live="off">
         {expires
           ? `${otp ? "Code" : "Authorization"} expires in ${Math.floor(expires / 60)}:${String(expires % 60).padStart(2, "0")}`
@@ -204,8 +227,9 @@ export function VerificationChallenge({
         <GlassButton
           disabled={busy || value.length !== 6 || !expires}
           type="submit"
+          data-verifying={busy && processingAction === "verify" || undefined}
         >
-          Verify
+          {busy && processingAction === "verify" ? <><span className="email-security-dyes" aria-hidden="true"><i /><i /><i /></span><span>Verifying {otp ? "code" : "PIN"}…</span></> : "Verify"}
         </GlassButton>
         {otp && (
           <GlassButton
@@ -214,8 +238,9 @@ export function VerificationChallenge({
               setValue("");
               void onResend();
             }}
+            data-verifying={busy && processingAction === "resend" || undefined}
           >
-            {resend ? `Resend in ${resend}s` : "Resend code"}
+            {busy && processingAction === "resend" ? <><span className="email-security-dyes" aria-hidden="true"><i /><i /><i /></span><span>Sending code…</span></> : resend ? `Resend in ${resend}s` : "Resend code"}
           </GlassButton>
         )}
       </div>

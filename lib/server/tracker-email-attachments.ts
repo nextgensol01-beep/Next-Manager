@@ -1,150 +1,169 @@
+import { createHash } from "node:crypto";
 import Document from "@/models/Document";
 import type { TrackerEmailWorkflow, TrackerValues } from "@/lib/clientTrackers";
 import type { GmailAttachment } from "@/lib/server/gmail-delivery";
-import { downloadDriveFile } from "@/lib/server/google-drive-documents";
-import { evaluateTrackerConditionGroup } from "@/lib/server/tracker-conditions";
+import {
+  downloadDriveFile,
+  inspectDriveFile,
+} from "@/lib/server/google-drive-documents";
+import {
+  resolveTrackerAttachmentSelection,
+  TRACKER_ATTACHMENT_LIMITS,
+  type AttachmentInput,
+  type ManagedTrackerEmailDocument,
+} from "./tracker-attachment-matching";
+import { assertPinnedTrackerAttachments } from "./tracker-attachment-snapshot";
+import { ATTACHMENT_DOCUMENT_FIELDS, pinnedAttachmentQuery } from "./tracker-attachment-query";
+import { deliveryMemory } from "./email-delivery-memory";
+export type {
+  ManagedTrackerEmailDocument,
+  TrackerEmailAttachmentPreview,
+} from "./tracker-attachment-matching";
 
-const MAX_ATTACHMENTS = 4;
-const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 18 * 1024 * 1024;
-
-export type ManagedTrackerEmailDocument = {
-  _id: unknown;
-  clientId: string;
-  documentName: string;
-  category?: string;
-  documentKind?: string;
-  financialYear?: string;
-  storageType?: string;
-  driveFileId?: string;
-  mimeType?: string;
-  fileSize?: number;
-  uploadedDate?: Date;
-};
-
-export type TrackerEmailAttachmentPreview = {
-  documentId: string;
-  filename: string;
-  mimeType: string;
-  fileSize: number;
-};
-
-/** Selects only managed Drive files. Shared rules use their exact document; client rules use the newest match. */
-export function resolveTrackerEmailAttachmentDocuments(input: {
-  workflow: TrackerEmailWorkflow;
-  documents: ManagedTrackerEmailDocument[];
-  clientId: string;
-  values: TrackerValues;
-  financialYear?: string;
-}) {
-  const selected: TrackerEmailAttachmentPreview[] = [];
-  let totalBytes = 0;
-  for (const rule of input.workflow.attachments || []) {
-    if (selected.length >= MAX_ATTACHMENTS) break;
-    if (
-      rule.conditionGroup &&
-      !evaluateTrackerConditionGroup(rule.conditionGroup, input.values)
-    )
-      continue;
-    const isManaged = (item: ManagedTrackerEmailDocument) =>
-      item.storageType === "google-drive" &&
-      Boolean(item.driveFileId) &&
-      Boolean(item.mimeType);
-    const document =
-      rule.source === "shared"
-        ? input.documents.find(
-            (item) => String(item._id) === rule.documentId && isManaged(item),
-          )
-        : input.documents.find(
-            (item) =>
-              item.clientId === input.clientId &&
-              isManaged(item) &&
-              (!rule.category || item.category === rule.category) &&
-              (!rule.documentKind || item.documentKind === rule.documentKind) &&
-              (rule.financialYear === "any" ||
-                item.financialYear === input.financialYear),
-          );
-    if (!document) continue;
-    const fileSize = Number(document.fileSize || 0);
-    if (
-      fileSize <= 0 ||
-      fileSize > MAX_ATTACHMENT_BYTES ||
-      totalBytes + fileSize > MAX_TOTAL_BYTES
-    )
-      continue;
-    const documentId = String(document._id);
-    if (selected.some((item) => item.documentId === documentId)) continue;
-    selected.push({
-      documentId,
-      filename: document.documentName,
-      mimeType: document.mimeType!,
-      fileSize,
-    });
-    totalBytes += fileSize;
-  }
-  return selected;
+/** Compatibility API; richer preparation results also include rule-specific issues. */
+export function resolveTrackerEmailAttachmentDocuments(input: AttachmentInput) {
+  return resolveTrackerAttachmentSelection(input).attachments;
 }
+export type MaterializedTrackerAttachment = GmailAttachment & {
+  documentId: string;
+  fileSize: number;
+  category?: string;
+  financialYear?: string;
+  required?: boolean;
+};
 
-/** Re-resolves ids at delivery time so the browser can never supply file contents or Drive identifiers. */
+/** Only pinned application references can reach Drive. Never reselect newest on resume. */
 export async function materializeTrackerEmailAttachments(input: {
   clientId: string;
   attachments: Array<{ documentId: string }>;
   allowedDocumentIds?: string[];
+  signal?: AbortSignal;
+  trackerId?: string;
+  entryId?: string;
+  kind?: string;
+  workflow?: TrackerEmailWorkflow;
+  financialYear?: string;
+  values?: TrackerValues;
+  attachmentSnapshot?: string;
+  documents?: ManagedTrackerEmailDocument[];
 }) {
-  if (!input.attachments.length) return [] as GmailAttachment[];
-  if (input.attachments.length > MAX_ATTACHMENTS)
+  const ids = input.attachments.map((item) => item.documentId);
+  if (
+    ids.length > TRACKER_ATTACHMENT_LIMITS.count ||
+    new Set(ids).size !== ids.length
+  )
     throw new Error(
-      "No more than four documents can be attached to one email.",
+      "The attachment selection exceeds allowed limits or repeats a document.",
     );
-  const requestedIds = [
-    ...new Set(input.attachments.map((item) => item.documentId)),
-  ];
-  if (requestedIds.length !== input.attachments.length)
-    throw new Error("A document was selected more than once.");
   if (
     input.allowedDocumentIds &&
-    requestedIds.some((id) => !input.allowedDocumentIds!.includes(id))
+    ids.some((id) => !input.allowedDocumentIds!.includes(id))
   )
     throw new Error(
       "A selected document no longer matches this workflow's attachment rules.",
     );
-  const documents = (await Document.find({
-    _id: { $in: requestedIds },
-    storageType: "google-drive",
-  }).lean()) as unknown as ManagedTrackerEmailDocument[];
-  if (documents.length !== requestedIds.length)
-    throw new Error(
-      "One or more selected documents are no longer available as managed Drive files.",
-    );
-  const byId = new Map(documents.map((item) => [String(item._id), item]));
-  let totalBytes = 0;
-  const output: GmailAttachment[] = [];
-  for (const id of requestedIds) {
-    const document = byId.get(id);
-    const fileSize = Number(document?.fileSize || 0);
+  deliveryMemory("document.lookup.before");
+  const documents =
+    input.documents ||
+    (ids.length
+      ? ((await Document.find(pinnedAttachmentQuery(input.clientId, ids, input.workflow, input.allowedDocumentIds))
+          .select(ATTACHMENT_DOCUMENT_FIELDS).lean()) as unknown as ManagedTrackerEmailDocument[])
+      : []);
+  deliveryMemory("document.lookup.after");
+  const pinned = input.workflow
+    ? assertPinnedTrackerAttachments({
+        ...input,
+        trackerId: input.trackerId!,
+        entryId: input.entryId!,
+        kind: input.kind!,
+        workflow: input.workflow,
+        documents,
+      })
+    : undefined;
+  const byId = new Map(
+    documents.map((document) => [String(document._id), document]),
+  );
+  const output: MaterializedTrackerAttachment[] = [];
+  let total = 0;
+  for (const id of ids) {
+    const document = byId.get(id),
+      approved = pinned?.proof?.picks.find((item) => item.documentId === id);
+    const size = Number(document?.fileSize || 0);
     if (
       !document?.driveFileId ||
+      document.storageType !== "google-drive" ||
       !document.mimeType ||
-      fileSize <= 0 ||
-      fileSize > MAX_ATTACHMENT_BYTES ||
-      totalBytes + fileSize > MAX_TOTAL_BYTES
+      !/^[\w.+-]+\/[\w.+-]+$/.test(document.mimeType) ||
+      (!pinned &&
+        document.clientId !== input.clientId &&
+        !input.allowedDocumentIds?.includes(id))
     )
       throw new Error(
-        "A selected document exceeds the attachment size limit or is incomplete.",
+        "The selected document is unavailable or is not authorized for this client.",
       );
-    const bytes = await downloadDriveFile(document.driveFileId);
+    if (
+      !Number.isFinite(size) ||
+      size <= 0 ||
+      size > TRACKER_ATTACHMENT_LIMITS.file ||
+      total + size > TRACKER_ATTACHMENT_LIMITS.total
+    )
+      throw new Error(
+        "The selected document exceeds email attachment size limits.",
+      );
+    input.signal?.throwIfAborted();
+    let bytes: Buffer;
+    try {
+      const remote = await inspectDriveFile(document.driveFileId, input.signal);
+      if (
+        remote.fileSize !== size ||
+        remote.mimeType !== document.mimeType ||
+        (approved && approved.revision !== remote.revision)
+      )
+        throw new Error("ATTACHMENT_CHANGED");
+      deliveryMemory("drive.download.before");
+      bytes = await downloadDriveFile(document.driveFileId, input.signal, size);
+      deliveryMemory("drive.download.after");
+      if (
+        bytes.length !== remote.fileSize ||
+        (approved?.checksum &&
+          createHash("md5").update(bytes).digest("hex") !== approved.checksum)
+      )
+        throw new Error("ATTACHMENT_CHANGED");
+    } catch (error) {
+      input.signal?.throwIfAborted();
+      if (error instanceof Error && error.message === "ATTACHMENT_CHANGED")
+        throw new Error(
+          "The approved document changed. Prepare this client again; no email was created or sent.",
+        );
+      const status = Number(
+        (error as { response?: { status?: number }; code?: unknown })?.response
+          ?.status || (error as { code?: unknown })?.code,
+      );
+      throw new Error(
+        status === 403 || status === 404
+          ? "The selected document is no longer accessible in Google Drive."
+          : "Google Drive could not provide the selected document. Try again; no email was created or sent.",
+      );
+    }
     if (
       !bytes.length ||
-      bytes.length > MAX_ATTACHMENT_BYTES ||
-      totalBytes + bytes.length > MAX_TOTAL_BYTES
+      bytes.length > TRACKER_ATTACHMENT_LIMITS.file ||
+      total + bytes.length > TRACKER_ATTACHMENT_LIMITS.total
     )
-      throw new Error(`Unable to safely attach ${document.documentName}.`);
+      throw new Error(
+        "The selected document exceeds email attachment size limits.",
+      );
     output.push({
-      filename: document.documentName,
+      documentId: id,
+      filename: approved?.filename || document.documentName,
       mimeType: document.mimeType,
-      contentBase64: bytes.toString("base64"),
+      content: bytes,
+      fileSize: bytes.length,
+      category: document.category,
+      financialYear: document.financialYear,
+      required: approved?.required,
     });
-    totalBytes += bytes.length;
+    total += bytes.length;
   }
   return output;
 }

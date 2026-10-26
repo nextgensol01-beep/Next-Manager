@@ -5,6 +5,7 @@ export interface IClientTrackerEntry extends Document {
   trackerId: mongoose.Types.ObjectId;
   clientId: string;
   values: TrackerValues;
+  fieldRevisions: Record<string, number>;
   inScope: boolean;
   removedAt?: Date;
   removalReason?: string;
@@ -23,6 +24,7 @@ const ClientTrackerEntrySchema = new Schema<IClientTrackerEntry>(
     },
     clientId: { type: String, required: true, index: true },
     values: { type: Schema.Types.Mixed, default: {} },
+    fieldRevisions: { type: Schema.Types.Mixed, default: {} },
     inScope: { type: Boolean, default: true, index: true },
     removedAt: Date,
     removalReason: { type: String, trim: true },
@@ -39,6 +41,10 @@ ClientTrackerEntrySchema.index({
   updatedAt: -1,
   _id: -1,
 });
+
+// Next dev may retain the existing model across a hot reload of this schema.
+if (mongoose.models.ClientTrackerEntry && !mongoose.models.ClientTrackerEntry.schema.path("fieldRevisions"))
+  mongoose.models.ClientTrackerEntry.schema.add({ fieldRevisions: { type: Schema.Types.Mixed, default: {} } });
 
 export default mongoose.models.ClientTrackerEntry ||
   mongoose.model<IClientTrackerEntry>(

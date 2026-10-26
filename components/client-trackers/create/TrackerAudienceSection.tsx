@@ -46,12 +46,12 @@ export default function TrackerAudienceSection({ form, clients, count, errors, l
           <span className="create-chip-check"><Check size={12} /></span>{category}<small>{categoryCounts[category] || 0}</small>
         </button>)}
       </div>
-      <div className="create-membership"><span className="create-label">Category membership</span>
-        <BuilderChoices label="Category membership" value={form.membershipMode} options={[
-          { value: "snapshot", label: "Fixed snapshot" }, { value: "categorySync", label: "Keep in sync" },
-        ]} onChange={membershipMode => patch({ membershipMode: membershipMode as TrackerCreateDraft["membershipMode"] })} />
-        <p className="create-help">{form.membershipMode === "snapshot" ? "Keep the client list captured when this tracker is created." : "Clients entering or leaving these categories are updated when the tracker is opened."}</p>
-      </div>
+    </div>}
+    {form.scope !== "selected" && <div className="create-membership"><span className="create-label">Client synchronization</span>
+      <BuilderChoices label="Client synchronization" value={form.membershipMode} options={[
+        { value: "snapshot", label: "Manual Sync" }, { value: "categorySync", label: "Auto Sync" },
+      ]} onChange={membershipMode => patch({ membershipMode: membershipMode as TrackerCreateDraft["membershipMode"] })} />
+      <p className="create-help">{form.membershipMode === "snapshot" ? "Add new clients only after reviewing them." : "Add future matching clients. Existing clients, marks and history are preserved. No emails are sent."}</p>
     </div>}
     {form.scope === "selected" && <div className="create-client-picker">
       <label className="create-client-search"><Search size={15} /><input aria-label="Search clients" placeholder="Search name, client ID, or category"

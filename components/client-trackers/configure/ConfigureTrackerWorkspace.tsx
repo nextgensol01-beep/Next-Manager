@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { ChevronLeft, Eye, X } from "lucide-react";
 import LiquidGlassDropdown from "@/components/ui/LiquidGlassDropdown";
-import ConfirmModal from "@/components/ui/ConfirmModal";
+import ConfirmModal from "@/components/client-trackers/TrackerConfirmModal";
 import { DEFAULT_STATUS_FIELD, type ClientTrackerDetailKey } from "@/lib/clientTrackers";
 import { FINANCIAL_YEARS } from "@/lib/utils";
 import { draftField, type TrackerDraftField } from "@/lib/tracker-create";
@@ -13,11 +13,14 @@ import { BuilderError, BuilderSection } from "../create/BuilderControls";
 import ClientDetailsPicker from "../create/ClientDetailsPicker";
 import TrackerColumnsBuilder from "../create/TrackerColumnsBuilder";
 import TrackerClientManager from "./TrackerClientManager";
+import TrackerSyncControls from "./TrackerSyncControls";
+import type { TrackerSyncDraft } from "@/lib/tracker-sync";
 import TrackerImpactPreview, { type ConfigurePreviewClient, type ConfigurePreviewEntry } from "./TrackerImpactPreview";
 
-export default function ConfigureTrackerWorkspace({ baseline, fields, clientColumns, clientIds, financialYear, clients, entries,
+export default function ConfigureTrackerWorkspace({ baseline, fields, clientColumns, clientIds, financialYear, clients, entries, trackerId, syncDraft, onSyncChange,
   saving, saved, serverError, clientsLoading, clientsError, categorySync, onFieldsChange, onColumnsChange, onClientsChange, onFinancialYearChange, onCompactChange, onNestedDialogChange }: {
   baseline: TrackerConfiguration; fields: TrackerDraftField[]; clientColumns: ClientTrackerDetailKey[]; clientIds: string[]; financialYear: string;
+  trackerId: string; syncDraft: TrackerSyncDraft; onSyncChange: (draft: TrackerSyncDraft) => void;
   clients: ConfigurePreviewClient[]; entries: ConfigurePreviewEntry[]; saving: boolean; saved: boolean; serverError: string | null;
   clientsLoading: boolean; clientsError: string | null; categorySync?: string;
   onFieldsChange: (fields: TrackerDraftField[]) => void; onColumnsChange: (columns: ClientTrackerDetailKey[]) => void;
@@ -31,7 +34,7 @@ export default function ConfigureTrackerWorkspace({ baseline, fields, clientColu
   const workspace = useRef<HTMLDivElement>(null), scroll = useRef<HTMLDivElement>(null), reopen = useRef<HTMLButtonElement>(null), mobileTrigger = useRef<HTMLButtonElement>(null), close = useRef<HTMLButtonElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [removeField, setRemoveField] = useState<TrackerDraftField | null>(null);
-  const draft = useMemo<TrackerConfiguration>(() => ({ fields, clientColumns, clientIds, financialYear }), [fields, clientColumns, clientIds, financialYear]);
+  const draft = useMemo<TrackerConfiguration>(() => ({ fields, clientColumns, clientIds, financialYear, ...syncDraft }), [fields, clientColumns, clientIds, financialYear, syncDraft]);
   const changes = useMemo(() => configurationChanges(baseline, draft), [baseline, draft]);
   const needsFY = configurationNeedsFinancialYear(fields);
   const pickerClients = useMemo(() => {
@@ -86,6 +89,7 @@ export default function ConfigureTrackerWorkspace({ baseline, fields, clientColu
             describedBy={needsFY ? `${id}-fy-help` : undefined} options={[{ value: "", label: "Not tied to a FY" }, ...FINANCIAL_YEARS.map(year => ({ value: year, label: year }))]} onChange={onFinancialYearChange} />
           {needsFY && <p id={`${id}-fy-help`} className="create-help create-fy-reason">Required because this tracker uses CPCB upload data.</p>}
         </div></BuilderSection>
+        <TrackerSyncControls trackerId={trackerId} value={syncDraft} savedMode={baseline.clientMembershipMode} onChange={onSyncChange} />
         <TrackerClientManager clients={pickerClients} selectedIds={clientIds} baselineIds={baseline.clientIds} loading={clientsLoading} error={clientsError} categorySync={categorySync} onChange={onClientsChange} />
         <ClientDetailsPicker value={clientColumns} onChange={onColumnsChange} />
         <TrackerColumnsBuilder fields={fields} includeStatus={includeStatus} configuring onFieldsChange={onFieldsChange} onRemoveField={remove}

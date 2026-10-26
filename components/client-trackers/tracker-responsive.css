@@ -1,0 +1,183 @@
+/* Client Tracker opt-in layouts only. Desktop material, shared primitives and
+   the application shell keep their existing styles. */
+.tracker-mobile-toggle, .tracker-mobile-only { display: none; }
+.client-trackers-page .tracker-marks-panel fieldset { min-width: 0; }
+@media (max-width: 1023px), (max-height: 600px) {
+  [data-tracker-confirmation-overlay] { height: var(--tracker-confirm-height, 100dvh); top: var(--tracker-confirm-top, 0px); bottom: auto; padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); }
+  [data-tracker-confirmation-overlay] > .tracker-confirmation-modal { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; }
+  .tracker-confirmation-modal button { min-height: 44px; }
+}
+
+@media (max-width: 1023px), (max-height: 600px) {
+  [data-tracker-overlay] {
+    top: var(--tracker-visual-top, 0px);
+    bottom: auto;
+    height: var(--tracker-visual-height, 100dvh);
+    padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+  }
+  [data-tracker-overlay] > .tracker-modal {
+    margin-block: 0;
+    max-height: 100%;
+    min-width: 0;
+  }
+  [data-tracker-overlay] > .tracker-modal.is-complex-sheet { height: 100%; }
+  .tracker-modal :is(.tracker-modal-frame, .tracker-modal-body) { min-width: 0; }
+  .tracker-modal .tracker-modal-body { overscroll-behavior-y: contain; }
+  .tracker-modal :is(.tracker-modal-footer, .email-review-footer, .email-security-footer) { flex-shrink: 0; }
+  .tracker-modal :is(input, textarea, [contenteditable=true]) { scroll-margin-block: 20px; }
+}
+
+@media (max-width: 1023px) {
+  .client-trackers-page, .client-trackers-page fieldset { min-width: 0; }
+  .client-trackers-page :is(.tracker-page-header, .tracker-premium-summary, .tracker-premium-intro, .tracker-card-grid, .tracker-marks-panel) { min-width: 0; max-width: 100%; }
+  .client-trackers-page :is(h1, .tracker-page-header p, .tracker-premium-meta, .tracker-premium-summary span, .tracker-activity-event) { overflow-wrap: anywhere; }
+  .tracker-list-actions { flex-wrap: wrap; }
+  .tracker-premium-intro label { min-width: 0; max-width: 100%; }
+  .tracker-activity-trigger > span:first-child { min-width: 0; }
+  .tracker-activity-trigger-meta { flex-shrink: 0; }
+  .tracker-marks-panel > div:first-child > * { min-width: 0; max-width: 100%; }
+  .tracker-marks-actions { align-items: center; }
+  .tracker-marks-actions > :is(label, select, input), .tracker-bulk-actions select { min-width: 0; max-width: 100%; }
+  .tracker-marks-actions > label { flex: 1 1 200px; }
+  .tracker-marks-actions > label input { width: 100%; }
+  .tracker-marks-panel fieldset > .overflow-x-auto { overscroll-behavior-inline: contain; }
+  .tracker-marks-table .tracker-row-identity { min-width: 150px; max-width: 240px; white-space: normal; overflow-wrap: anywhere; }
+  .tracker-header-menu-content, .tracker-views-menu-content { max-width: calc(100vw - 40px); max-height: min(420px, 65dvh); overflow-y: auto; overscroll-behavior: contain; }
+  /* This menu sits in a clipped table panel, so its own region must fit. */
+  .tracker-views-menu-content { left: 0; right: auto; transform-origin: top left; }
+  .tracker-modal :is(.create-column-title, .create-help, .configure-client-toolbar, .create-chip, .delivery-file-copy, .workflow-review-summary) { overflow-wrap: anywhere; }
+  .tracker-modal :is(.create-option-row, .create-chip, .create-column-expand) { min-width: 0; }
+  .tracker-modal .create-option-row input { min-width: 0; flex: 1; }
+  .tracker-modal .create-client-filters { flex-wrap: wrap; }
+  .tracker-modal .create-column-remove { opacity: 1; }
+  .tracker-modal :is(.create-color-palette, .create-color-layer) { max-width: calc(100vw - 64px); }
+  .tracker-modal .create-color-palette [role=radiogroup] { flex-wrap: wrap; }
+  .tracker-modal .configure-client-toolbar { flex-wrap: wrap; }
+  .tracker-modal .configure-client-filters { flex-wrap: wrap; }
+  .tracker-modal .tracker-modal-header p { white-space: normal; overflow-wrap: anywhere; }
+  .tracker-modal :is(.email-review-footer, .tracker-email-footer) { gap: 8px; }
+  .tracker-modal :is(.email-review-attachment, .email-review-client-heading, .email-security-summary dd, .email-review-subject) { overflow-wrap: anywhere; min-width: 0; }
+  .tracker-modal .email-security-hold { touch-action: pan-y; }
+}
+
+@media (max-width: 767px) {
+  .tracker-card-grid .tracker-premium-card h2 { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+  .tracker-list-actions { width: 100%; gap: 8px; }
+  .tracker-list-actions > button { flex: 1 1 auto; }
+  .tracker-page-header > div:first-child { width: 100%; }
+  .tracker-page-header :is(h1, p) { overflow-wrap: anywhere; }
+  .tracker-back-link { min-height: 40px; }
+  .tracker-marks-actions > select { flex: 1 1 130px; }
+  .tracker-marks-actions > :is(.tracker-table-control, .tracker-table-primary) { flex: 1 1 auto; }
+  .tracker-marks-panel :is(.tracker-table-control, .tracker-table-primary, .tracker-views-menu > summary) { min-height: 42px; line-height: 1.25; }
+  .tracker-bulk-actions :is(select, button) { min-height: 42px; }
+  .tracker-bulk-actions select { flex: 1 1 130px; }
+  .tracker-activity-trigger { align-items: flex-start; gap: 8px; }
+  .tracker-activity-trigger-meta { white-space: normal; text-align: right; font-size: 11px; }
+  .tracker-activity-event strong { overflow-wrap: anywhere; }
+  .tracker-status-card > p { overflow-wrap: anywhere; }
+  .tracker-status-value { min-height: 48px; }
+
+  /* A single row/editor tree becomes a card. Editors are never duplicated or
+     remounted when the viewport changes, keeping drafts and revision queues. */
+  .tracker-marks-table, .tracker-marks-table > :is(thead, tbody) { display: block; width: 100%; min-width: 0; }
+  .tracker-marks-table thead tr { display: block; }
+  .tracker-marks-table thead th { display: none; }
+  .tracker-marks-table thead th:first-child { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; }
+  .tracker-mobile-only { display: inline; }
+  .tracker-marks-table input[type=checkbox] { width: 20px; height: 20px; flex-shrink: 0; }
+  .tracker-marks-table tbody { padding: 12px; }
+  .tracker-marks-table .tracker-client-row {
+    display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 0 8px;
+    margin-bottom: 12px; padding: 12px; border: 1px solid var(--tracker-line); border-radius: 14px;
+    background: var(--tracker-panel); overflow-wrap: anywhere;
+  }
+  .tracker-marks-table .tracker-client-row:last-child { margin-bottom: 0; }
+  .tracker-client-row > td { display: block; min-width: 0; max-width: 100%; padding: 0; }
+  .tracker-client-row > .tracker-row-selection { grid-column: 1; grid-row: 1; padding-top: 3px; }
+  .tracker-marks-table .tracker-row-identity { position: static; grid-column: 2; min-width: 0; max-width: 100%; background: transparent; }
+  .tracker-row-identity > a { display: block; min-height: 24px; }
+  .tracker-mobile-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; text-align: left; font-size: 12px; font-weight: 600; color: var(--tracker-subtle); }
+  [data-mobile-expanded=true] .tracker-mobile-toggle svg { transform: rotate(180deg); }
+  .tracker-client-row > :is(.tracker-row-category, .tracker-row-communication) { grid-column: 2; font-size: 12px; padding-bottom: 6px; }
+  .tracker-client-row > .tracker-row-detail { display: none; grid-column: 1 / -1; padding: 12px 0; border-top: 1px solid var(--tracker-line); white-space: normal; overflow: visible; text-overflow: clip; }
+  .tracker-client-row[data-mobile-expanded=true] > .tracker-row-detail { display: block; }
+  .tracker-row-detail::before { content: attr(data-label); display: block; margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--tracker-subtle); }
+  .tracker-client-row .tracker-row-detail :is(input:not([type=checkbox]), select, textarea) { min-width: 0; max-width: 100%; width: 100%; min-height: 44px; font-size: 16px; }
+  .tracker-client-row .tracker-row-detail [role=group] { flex-wrap: wrap; }
+  .tracker-client-row .tracker-row-detail [role=group] label { min-height: 40px; }
+  .tracker-marks-table tbody > tr:not(.tracker-client-row) { display: block; }
+  .tracker-marks-table tbody > tr:not(.tracker-client-row) > td { display: block; }
+}
+
+@media (max-width: 639px) {
+  .tracker-modal .tracker-modal-header { padding: 12px 14px; }
+  .tracker-modal .tracker-modal-header h3 { font-size: 16px; overflow-wrap: anywhere; }
+  .tracker-modal .tracker-modal-header p { font-size: 12px; line-height: 1.4; }
+  .tracker-modal .tracker-modal-header > button { min-width: 44px; min-height: 44px; }
+  .tracker-modal :is(.tracker-modal-footer, .email-security-footer) { padding: 10px 14px; gap: 8px; flex-wrap: wrap; }
+  .tracker-modal .tracker-modal-footer > button { min-height: 44px; }
+  .tracker-modal :is(input:not([type=checkbox]):not([type=radio]), select, textarea, [contenteditable=true]) { font-size: 16px !important; }
+  .tracker-modal :is(.create-editor-grid, .delivery-file-filters, .delivery-followup-fields) { grid-template-columns: minmax(0, 1fr); }
+  .tracker-modal .create-column-summary { flex-wrap: wrap; }
+  .tracker-modal .create-column-expand { flex-basis: 120px; }
+  .tracker-modal :is(.create-scope-options, .create-chips) { flex-wrap: wrap; }
+  .tracker-modal .create-chip { min-height: 40px; }
+  .tracker-modal :is(.create-icon-button, .create-option-color-trigger, .create-color-choice) { min-width: 36px; min-height: 36px; }
+  .tracker-modal .create-color-layer { left: auto; right: 0; }
+  .tracker-modal .configure-condition { grid-template-columns: minmax(0, 1fr) 36px; }
+  .tracker-modal .configure-condition > :not(:last-child) { grid-column: 1; }
+  .tracker-modal .configure-condition > :last-child { grid-column: 2; grid-row: 2; }
+  .tracker-email-modal .tracker-email-workspace { padding-inline: 12px; }
+  .tracker-email-modal :is(.tracker-email-library > div, .tracker-email-setting-row) { flex-wrap: wrap; }
+  .tracker-email-modal .tracker-email-new-workflow { min-height: 44px; flex-shrink: 0; }
+  .tracker-email-modal .fluid-step-navigation { min-width: 0; }
+  .tracker-email-modal .fluid-step-scroll { max-width: calc(100% + 24px); margin-inline: -12px; padding-inline: 12px; touch-action: pan-x; }
+  .tracker-email-modal .fluid-step-track { justify-content: flex-start; min-width: max-content; }
+  .tracker-email-modal .fluid-step { min-width: 44px; min-height: 44px; }
+  .tracker-email-modal .fluid-step.is-selected { min-height: 44px; }
+  .tracker-email-modal .fluid-step-connector { flex-shrink: 0; }
+  .tracker-email-modal .tracker-email-identity-copy { right: 82px; }
+  .tracker-email-modal .tracker-email-workflow-description { overflow-wrap: anywhere; }
+  .tracker-email-modal .workflow-rule-row { grid-template-columns: minmax(0, 1fr) 36px; }
+  .tracker-email-modal .workflow-rule-row > :not(:last-child) { grid-column: 1; }
+  .tracker-email-modal .workflow-rule-row > :last-child { grid-column: 2; grid-row: 1; min-height: 40px; }
+  .tracker-email-modal :is(.workflow-message-top, .workflow-message-summary, .delivery-file-heading) { flex-wrap: wrap; }
+  .tracker-email-modal .workflow-message-expander { min-width: 0; }
+  .tracker-email-modal .workflow-review-section { grid-template-columns: 20px minmax(0, 1fr); }
+  .tracker-email-modal .workflow-review-actions { grid-column: 2; flex-wrap: wrap; }
+  .tracker-email-modal :is(.tracker-rich-text-toolbar, .workflow-template-workspace .tracker-rich-text-toolbar) { flex-wrap: wrap; }
+  .tracker-email-modal :is(.tracker-rich-text, .workflow-review-body-preview) { overflow-wrap: anywhere; }
+  .tracker-email-modal .tracker-email-footer { padding-inline: 12px; }
+  .email-delivery-review-modal .email-review-context-controls,
+  .email-delivery-review-modal .email-review-context.is-campaign .email-review-context-controls { grid-template-columns: minmax(0, 1fr); }
+  .email-delivery-review-modal .email-review-recipient { flex-wrap: wrap; }
+  .email-delivery-review-modal .email-review-recipient-copy { flex-basis: 100%; }
+  .email-delivery-review-modal .email-review-recipient .email-review-segments { margin-left: auto; min-height: 40px; }
+  .email-delivery-review-modal .email-review-footer { padding: 10px 12px; }
+  .email-delivery-review-modal .email-review-footer > div { flex-wrap: wrap; }
+  .email-delivery-review-modal :is(.email-review-send, .email-review-footer .glass-button, .email-review-back) { min-height: 44px; }
+  .email-delivery-review-modal .email-review-attachment-list :is(strong, span, a) { overflow-wrap: anywhere; }
+  .email-delivery-review-modal .email-review-attachments > span { min-width: 0; overflow-wrap: anywhere; }
+  .email-authorization-modal .email-security-summary > div { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .email-authorization-modal .email-security-hold { min-width: 0; width: 100%; }
+}
+
+/* In a keyboard-sized viewport let the workflow's identity/stepper scroll with
+   its canvas. The sheet header and Save/Cancel remain outside that region. */
+.tracker-email-modal.is-short-viewport.is-workflow-editing .tracker-email-editor-viewport { overflow-y: auto; overscroll-behavior: contain; }
+.tracker-email-modal.is-short-viewport.is-workflow-editing .tracker-email-editor { height: auto; min-height: 100%; }
+.tracker-email-modal.is-short-viewport.is-workflow-editing .tracker-email-sticky-header { position: relative; flex-shrink: 0; }
+.tracker-email-modal.is-short-viewport.is-workflow-editing .tracker-email-content-stage { position: relative; overflow: visible; flex-shrink: 0; }
+.tracker-email-modal.is-short-viewport.is-workflow-editing .tracker-email-content-scroll { height: auto; overflow: visible; mask-image: none; -webkit-mask-image: none; }
+.tracker-email-modal.is-short-viewport.is-workflow-editing .tracker-email-content-inner { min-height: 0; padding-block: 16px 80px; }
+.tracker-email-modal.is-short-viewport.is-workflow-editing .tracker-email-footer { position: relative; pointer-events: auto; }
+.tracker-email-modal.is-short-viewport.is-workflow-editing .tracker-email-editor-nav-overlay { bottom: 0; }
+.tracker-email-modal.is-short-viewport .workflow-overlay-scrollbar { display: none; }
+
+@media (pointer: coarse) and (max-width: 1023px) {
+  .client-trackers-page :is(.tracker-header-primary, .tracker-header-menu > summary, .tracker-views-menu-content button),
+  .tracker-modal :is(.configure-sync-button, .workflow-rule-add, .delivery-add, .email-review-client-row) { min-height: 44px; }
+  .tracker-modal .create-column-remove { opacity: 1; }
+}
+

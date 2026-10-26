@@ -7,6 +7,7 @@ import { uploadClientDocument } from "@/lib/server/google-drive-documents";
 import Client from "@/models/Client";
 import Document from "@/models/Document";
 import { recordActivityEvent } from "@/lib/server/activity-events";
+import { normalizeDocumentFinancialYear } from "@/lib/document-financial-year";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -27,7 +28,9 @@ export async function POST(req: NextRequest) {
     const category = String(form.get("category") || "other");
     const rawPath = String(form.get("relativePath") || "");
     const documentKind = String(form.get("documentKind") || "general");
-    const financialYear = String(form.get("financialYear") || "").trim();
+    let financialYear: string | undefined;
+    try { financialYear = normalizeDocumentFinancialYear(form.get("financialYear")); }
+    catch { return NextResponse.json({ error: "Choose a valid financial year (for example, 2025-26)." }, { status: 400 }); }
 
     if (!(file instanceof File) || !clientId) {
       return NextResponse.json({ error: "A file and clientId are required." }, { status: 400 });
@@ -74,8 +77,8 @@ export async function POST(req: NextRequest) {
       clientId,
       documentName: file.name,
       category: CATEGORIES.has(category) ? category : "other",
-      documentKind: documentKind === "target-screenshot" ? "target-screenshot" : "general",
-      financialYear: documentKind === "target-screenshot" ? financialYear : undefined,
+      documentKind: documentKind === "target-screenshot" ? "target-screenshot" : documentKind === "epr-certificate" ? "epr-certificate" : "general",
+      financialYear,
       storageType: "google-drive",
       driveFileId: uploaded.driveFileId,
       driveLink: uploaded.driveLink,

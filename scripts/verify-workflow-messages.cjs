@@ -4,13 +4,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const ts = require("typescript");
 
-function load(relativePath) {
-  const source = fs.readFileSync(path.join(__dirname, "..", relativePath), "utf8");
-  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
-  const context = { exports: {} };
-  vm.runInNewContext(compiled, context, { filename: relativePath });
-  return context.exports;
-}
+function load(file, dependencies = {}) { return require("./search-test-loader.cjs")(dependencies)(file); }
 const { cleanTrackerEmailWorkflows } = load("lib/server/tracker-email-workflows.ts");
 const { evaluateTrackerConditionGroup } = load("lib/server/tracker-conditions.ts");
 const fields = [{ key: "upload", label: "Purchase upload", type: "toggle" }];

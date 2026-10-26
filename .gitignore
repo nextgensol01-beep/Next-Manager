@@ -8,9 +8,17 @@
 /coverage
 
 # generated test output and local design artifacts
-/tmp/
 /.artifacts/
+/tmp/
 /outputs/
+/local-inngest/
+/.inngest/
+/inngest*.log
+/inngest.json
+/inngest.yaml
+/inngest.yml
+/inngest.toml
+/inngest.properties
 
 # next.js
 /.next/
@@ -37,9 +45,36 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+.env.inngest*
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# scoped generated test/runtime artifacts
+/tmp/**/node_modules/
+/.artifacts/**/node_modules/
+/tmp/**/.next/
+/.artifacts/**/.next/
+/tmp/**/profile-*/
+/tmp/ignore-check-*/
+/.artifacts/email-memory/files/*MiB-client-*.bin
+
+# conventional generated test reports
+/playwright-report/
+/test-results/
+/blob-report/
+
+# generated local logs
+/*.log
+/tmp/**/*.log
+/.artifacts/**/*.log
+
+# root environment variants; keep example templates visible
+/.env.*
+!/.env.example
+!/.env.*.example
+!/.env.sample
+!/.env.template

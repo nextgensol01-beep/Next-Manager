@@ -245,67 +245,17 @@
   gap: 9px;
   z-index: 1;
 }
-.email-security-hold-fill {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  background: #2369c4;
-  clip-path: inset(0 100% 0 0);
-}
-.hold-to-send-liquid .email-security-dyes { opacity: .88; }
-.hold-to-send-liquid .email-security-hold-dormant { opacity: .28; }
-.hold-to-send-liquid .email-security-dyes i {
-  background: radial-gradient(ellipse, #7943dc 10%, #7943dcdd 46%, #7943dc00 74%);
-  filter: blur(10px);
-  animation: hold-liquid-violet 6.7s ease-in-out infinite alternate;
-}
-.hold-to-send-liquid .email-security-dyes i:nth-child(2) {
-  background: radial-gradient(ellipse, #237fe8 8%, #237fe8df 45%, #237fe800 75%);
-  left: 18%; width: 72%;
-  animation: hold-liquid-blue 5.3s ease-in-out infinite alternate;
-}
-.hold-to-send-liquid .email-security-dyes i:nth-child(3) {
-  background: radial-gradient(ellipse, #23c9e7 7%, #23c9e7df 44%, #23c9e700 75%);
-  left: 58%; width: 58%;
-  animation: hold-liquid-cyan 4.1s ease-in-out infinite alternate;
-}
-.hold-to-send-liquid[data-state="ready"] .email-security-dyes {
-  translate: calc(var(--hold-pointer-x, 0) * 3px) calc(var(--hold-pointer-y, 0) * 2px);
-}
-.hold-to-send-liquid[data-state="holding"] { transform: scale(.98); }
-.hold-to-send-liquid[data-state="sending"] { animation: hold-liquid-commit 120ms ease-out both; }
-.hold-to-send-liquid[data-state="sending"] .email-security-hold-fill,
-.hold-to-send-liquid[data-state="success"] .email-security-hold-fill { clip-path: inset(0) !important; }
-.hold-to-send-liquid[data-state="sending"] .email-security-dyes { opacity: 1; }
-.hold-to-send-liquid[data-state="success"] .email-security-dyes { opacity: .32; transition: opacity 450ms ease-out; }
-.hold-to-send-liquid[data-state="success"] .email-security-dyes i { animation-play-state: paused; }
-.hold-to-send-liquid[data-state="success"] { background: #23776e; }
-.hold-to-send-liquid[data-state="success"] .email-security-hold-fill { background: #23776e; transition: background 400ms ease-out; }
-.hold-to-send-liquid[data-paused] .email-security-dyes i,
-.hold-to-send-liquid:disabled[data-state="ready"] .email-security-dyes i { animation-play-state: paused; }
-@keyframes hold-liquid-violet {
-  from { transform: translate(-9%, -5%) rotate(-13deg) scale(1.05,.96); }
-  to { transform: translate(22%, 12%) rotate(18deg) scale(.92,1.12); }
-}
-@keyframes hold-liquid-blue {
-  from { transform: translate(11%, 10%) rotate(9deg) scale(1.1,.92); }
-  to { transform: translate(-14%, -12%) rotate(-17deg) scale(.94,1.14); }
-}
-@keyframes hold-liquid-cyan {
-  from { transform: translate(-14%, -9%) rotate(-18deg) scale(.96,1.1); }
-  to { transform: translate(7%, 14%) rotate(21deg) scale(1.14,.95); }
-}
 @keyframes hold-liquid-commit {
   from { transform: scale(.98); box-shadow: inset 0 0 16px rgba(33,202,231,.28); }
   to { transform: scale(1); }
 }
-.email-authorization-modal .email-authorization-processing .email-security-processing {
+.email-authorization-modal .email-security-processing {
   padding: 11px 18px;
   color: white;
   background: #2762b7;
   text-shadow: 0 1px 3px rgba(0,22,66,.55);
 }
-.email-authorization-modal .email-authorization-processing .email-security-dyes { opacity: 1; }
+.email-authorization-modal .email-security-processing .email-security-dyes { opacity: 1; }
 .email-authorization-modal .email-security-commit { animation: email-authorization-ready 220ms ease-out both; }
 @keyframes email-authorization-ready {
   from { opacity: 0; transform: translateY(5px); filter: blur(2px); }
@@ -319,7 +269,41 @@
   opacity: 0.45;
   cursor: default;
 }
-.email-security-hold:disabled:is([data-state="sending"],[data-state="success"]) { opacity: 1; }
+
+.email-authorization-surface { min-width: 0; overflow: clip; overflow-clip-margin: 8px; }
+.email-authorization-surface > div > div { display: grid; gap: 14px; }
+.email-authorization-modal .email-security-commit { animation: none; }
+.email-authorization-modal .email-security-request h4 { font-size: 14px; font-weight: 600; }
+.email-authorization-modal .email-authorization-action-surface .glass-button { min-height: 43px; padding: 11px 18px; }
+.email-authorization-modal .glass-button[data-verifying] { position: relative; isolation: isolate; overflow: hidden; background: #2869b8; color: #fff; border-color: rgba(114,174,228,.45); text-shadow: 0 1px 3px rgba(0,20,60,.45); }
+.email-authorization-modal .glass-button[data-verifying] .email-security-dyes { opacity: .95; }
+.email-authorization-modal .glass-button[data-verifying] > span:last-child { position: relative; z-index: 1; }
+.email-authorization-local-error { font-size: 12px; }
+.hold-to-send-pressure { background: rgba(22,79,139,.9); border-color: rgba(113,175,229,.48); transition: transform 120ms ease-out,box-shadow 130ms ease-out,background 160ms ease-out; box-shadow: 0 5px 13px rgba(12,49,94,.18),inset 0 1px 1px rgba(255,255,255,.24),inset 0 -8px 18px rgba(3,29,66,.18); }
+.hold-to-send-pressure[data-state="ready"] { translate: calc(var(--hold-pointer-x,0) * 1.5px) calc(var(--hold-pointer-y,0) * 1px); }
+.hold-pressure-material { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit; background: radial-gradient(ellipse at 15% 75%,rgba(103,67,183,.2),transparent 55%),radial-gradient(ellipse at 78% 18%,rgba(45,190,219,.22),transparent 58%); }
+.hold-pressure-reflection { position: absolute; inset: 0; opacity: .55; background: radial-gradient(ellipse at calc(55% + var(--hold-pointer-x,0) * 20%) calc(12% + var(--hold-pointer-y,0) * 10%),rgba(210,239,250,.22),transparent 65%); }
+.hold-pressure-contact { position: absolute; inset: -20%; opacity: 0; background: radial-gradient(ellipse at var(--hold-contact-x,50%) var(--hold-contact-y,50%),rgba(71,210,235,.35),transparent 45%); transition: opacity 160ms ease-out; }
+.hold-to-send-pressure[data-state="holding"] { transform: scale(.985); background: rgba(18,67,124,.97); box-shadow: 0 1px 4px rgba(12,39,76,.2),inset 0 2px 9px rgba(0,21,54,.3),inset 0 -1px 2px rgba(163,225,248,.15); }
+.hold-to-send-pressure[data-state="holding"] .hold-pressure-contact { opacity: calc(.45 + var(--hold-focus,0) * .35); }
+.hold-to-send-pressure[data-state="holding"] .hold-pressure-reflection { opacity: .3; translate: 0 1px; }
+.hold-to-send-pressure[data-state="holding"] .email-security-hold-copy svg { translate: calc(var(--hold-focus,0) * 1.5px) calc(var(--hold-focus,0) * -.5px); }
+.hold-optical-perimeter { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.hold-optical-track { stroke: rgba(134,202,230,.14); stroke-width: .8px; }
+.hold-optical-path { stroke: #9cdded; stroke-width: 1.3px; stroke-linecap: round; opacity: 0; }
+.hold-optical-path.is-halo { stroke: #3dadd3; stroke-width: 3px; filter: blur(1px); }
+.hold-pressure-material .email-security-dyes { opacity: 0; transition: opacity 180ms ease-out; }
+.hold-pressure-material .email-security-dyes i { animation-play-state: paused; }
+.hold-to-send-pressure[data-state="committing"] { animation: hold-liquid-commit 130ms ease-out both; }
+.hold-to-send-pressure[data-state="committing"] .hold-pressure-material .email-security-dyes { opacity: .72; }
+.hold-to-send-pressure[data-state="committing"] .email-security-dyes i { animation-play-state: running; }
+.hold-to-send-pressure[data-state="accepted"] .hold-pressure-material { opacity: .7; }
+.hold-to-send-pressure:disabled:is([data-state="committing"],[data-state="accepted"]) { opacity: 1; }
+.hold-to-send-pressure[data-paused] .email-security-dyes i { animation-play-state: paused; }
+@media(prefers-reduced-motion:reduce) {
+  .hold-to-send-pressure,.hold-to-send-pressure[data-state="ready"],.hold-to-send-pressure[data-state="holding"],.hold-to-send-pressure[data-state="committing"] { translate: none; transform: none; animation: none; }
+  .hold-to-send-pressure .email-security-hold-copy svg,.hold-to-send-pressure .hold-pressure-reflection { translate: none; }
+}
 .email-delivery-settings {
   padding: 24px;
   display: grid;
@@ -567,12 +551,10 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .email-security-dyes i,
-  .hold-to-send-liquid .email-security-dyes i {
+  .email-security-dyes i {
     animation: none;
   }
   .email-security-hold,
-  .email-security-hold-fill,
   .email-security-hold .email-security-dyes,
   .email-authorization-modal .email-security-commit {
     transition: none !important;
@@ -581,6 +563,5 @@
   .email-security-hold[data-holding] {
     transform: none;
   }
-  .hold-to-send-liquid[data-state="ready"] .email-security-dyes { translate: none; }
   .email-authorization-modal .email-authorization-processing { transform: none !important; filter: none !important; }
 }

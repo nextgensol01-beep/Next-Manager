@@ -1,5 +1,7 @@
 # Email delivery review workspace
 
+Current asynchronous acceptance, dashboard activity/history and skipped-reason grouping are documented in [browser-coordinated delivery](email-browser-delivery.md). These supersede historical synchronous completion notes below.
+
 The existing tracker “Email clients” modal has a preparation view and a delivery-review workspace. The subsequent [Email Delivery Protection implementation](email-delivery-protection.md) adds server-enforced authorization, verified approval email, optional Send PIN, draft confirmation, Hold to Send, audit and safe campaign retries. It supersedes the earlier confirmation-only delivery behavior described in the historical visual-refinement notes below.
 
 Preparation shows a glass workflow selector, Initial/Reminder segmented control, the actual selected-row scope and an explicit “Preview eligible clients” action. Context changes invalidate the preview without starting requests. The same preview action becomes the processing capsule. Reminder copy follows the two actual awaited operations: checking reply status, then preparing recipients. No percentage or fabricated stage is shown.

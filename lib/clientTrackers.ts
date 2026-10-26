@@ -87,6 +87,8 @@ export const CLIENT_TRACKER_CATEGORIES = [
 export type ClientTrackerCategory = (typeof CLIENT_TRACKER_CATEGORIES)[number];
 
 export type TrackerEmailPointFormat = "point" | "statement";
+/** Shared editor/server limit, including inactive and migrated content rules. */
+export const TRACKER_EMAIL_CONTENT_RULE_LIMIT = 40;
 export type TrackerEmailPoint = {
   id: string;
   fieldKey: string;
@@ -102,7 +104,9 @@ export type TrackerEmailAttachment = {
   documentId?: string;
   category?: "compliance" | "financial" | "invoices" | "certificates" | "other";
   documentKind?: "general" | "epr-certificate";
-  financialYear?: "tracker" | "any";
+  financialYear?: "tracker" | "any" | (string & {});
+  /** Missing on saved legacy rules means optional. */
+  required?: boolean;
   conditionGroup?: TrackerConditionGroup;
 };
 /** Determines the suggested recipients; every client can still be edited before delivery. */
@@ -113,11 +117,15 @@ export type TrackerRecipientStrategy =
   | "per_client";
 export type TrackerEmailContentRule = {
   id: string;
+  /** Optional display metadata; never participates in matching. */
+  name?: string;
   type: "combination" | "statement" | "point";
   conditionGroup: TrackerConditionGroup;
   action?: "include" | "skip";
   content?: string;
   order?: number;
+  /** Migrated legacy points historically append regardless of the chosen content style. */
+  legacyPoint?: true;
 };
 export type TrackerEmailWorkflow = {
   id: string;
@@ -125,6 +133,8 @@ export type TrackerEmailWorkflow = {
   description?: string;
   /** The one column-content approach selected when this workflow is created. */
   contentMode?: "points" | "statements" | "combinations";
+  /** Omitted preserves the historical first-combination/all-statements behaviour. */
+  combinationMatchingMode?: "first" | "combine";
   mainFieldKey: string;
   mainValue: string;
   subject: string;
@@ -153,11 +163,19 @@ export type TrackerRuleOperator =
   | "greater_than"
   | "greater_than_or_equal"
   | "less_than"
-  | "less_than_or_equal";
+  | "less_than_or_equal"
+  | "is_any_of"
+  | "contains_any"
+  | "contains_all"
+  | "before"
+  | "after"
+  | "on";
 export type TrackerCondition = {
   fieldKey: string;
   operator: TrackerRuleOperator;
-  value?: string | number | boolean;
+  value?: string | number | boolean | string[];
+  /** Email conditions retain the source type so incompatible column edits are visible. */
+  fieldType?: TrackerFieldType;
 };
 export type TrackerConditionGroup = {
   mode: "ALL" | "ANY";

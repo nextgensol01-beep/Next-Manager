@@ -91,6 +91,7 @@ export const trackerDeliverySchema = z.object({
         cc: z.array(address).max(100).default([]),
         subject: z.string().min(1).max(200),
         html: z.string().min(1).max(1_000_000),
+        attachmentSnapshot: z.string().min(1).max(48000).optional(),
         attachments: z
           .array(z.object({ documentId: z.string().min(1).max(100) }))
           .max(4)
@@ -127,6 +128,7 @@ export function canonicalDeliveryBatch(
         cc: normalize(message.cc || []),
         subject: message.subject,
         html: message.html,
+        ...(message.attachmentSnapshot ? { attachmentSnapshot: message.attachmentSnapshot } : {}),
         attachments: (message.attachments || [])
           .map((item) => item.documentId)
           .sort(),

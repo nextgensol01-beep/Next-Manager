@@ -5,11 +5,11 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import {
   activeFinancialYearEntries,
-  financialYearQuantity,
   financialYearUsage,
   FY_CATEGORY_LABELS,
 } from "@/lib/financial-year-form";
 import type { useFinancialYearForm } from "./useFinancialYearForm";
+import { calculateTargetCoverage, coverageQuantityText, targetTrackingProvenance } from "@/lib/financial-year-coverage";
 
 export default function FinancialYearSummary({
   form,
@@ -24,6 +24,11 @@ export default function FinancialYearSummary({
     keys = new Set(
       [...base, ...usage.entries].map((row) => `${row.categoryId}|${row.type}`),
     );
+  const existingTracking = form.record ? form.record.targetTracking ?? targetTrackingProvenance(form.record as unknown as Record<string, unknown>) : null;
+  const coverage = calculateTargetCoverage({ ...form.record, ...form.identity, targets: base,
+    targetTracking: existingTracking?.source === "legacy" ? existingTracking : { source: "typed", issues: Object.keys(form.rowErrors).length ? ["Correct invalid or duplicate target rows before calculating coverage."] : [], usageIssues: existingTracking?.usageIssues },
+    achievedByType: form.record?.achievedByType ?? (form.record ? undefined : []),
+  });
   return (
     <section className="fy-summary" aria-label="Financial year summary">
       <div className="fy-section-heading">
@@ -39,30 +44,31 @@ export default function FinancialYearSummary({
         {[
           {
             label: form.isPWP ? "Total Generated" : "Total Target",
-            value: form.total,
+            value: form.isPWP ? form.total : coverage.target,
             detail: "Editing",
           },
           {
-            label: form.isPWP ? "Sold" : "Achieved",
-            value: usage.total,
-            detail: "From credit transactions",
+            label: form.isPWP ? "Sold" : "Target Achieved",
+            value: form.isPWP ? usage.total : coverage.covered,
+            detail: form.isPWP ? "From credit transactions" : "Recorded target coverage",
           },
           {
             label: "Remaining",
-            value: form.total - usage.total,
+            value: form.isPWP ? form.total - usage.total : coverage.pending,
             detail: "Calculated balance",
           },
         ].map((item) => (
           <div key={item.label}>
             <span>{item.label}</span>
             <strong>
-              {financialYearQuantity(item.value)}
+              {coverageQuantityText(item.value)}
               <small>MT</small>
             </strong>
             <p>{item.detail}</p>
           </div>
         ))}
       </div>
+      {!form.isPWP && <p className="fy-help" role="status">{coverage.status} · Internal recorded coverage; eligibility is not verified. {coverage.issues.join(" ")}</p>}
       <div className="fy-summary-breakdown">
         <button
           type="button"
@@ -109,16 +115,17 @@ export default function FinancialYearSummary({
                   const used = usage.entries
                     .filter((row) => `${row.categoryId}|${row.type}` === key)
                     .reduce((sum, row) => sum + row.value, 0);
+                  const bucket = coverage.buckets.find(bucket => bucket.categoryId === categoryId && bucket.type === type);
                   return (
                     <div role="row" key={key}>
                       <span role="cell">
                         {FY_CATEGORY_LABELS[categoryId]} ·{" "}
                         {type === "EOL" ? "EOL" : "Recycling"}
                       </span>
-                      <span role="cell">{financialYearQuantity(entered)}</span>
-                      <span role="cell">{financialYearQuantity(used)}</span>
+                      <span role="cell">{coverageQuantityText(form.isPWP ? entered : bucket?.target ?? null)}</span>
+                      <span role="cell">{coverageQuantityText(form.isPWP ? used : bucket?.covered ?? null)}</span>
                       <span role="cell">
-                        {financialYearQuantity(entered - used)}
+                        {coverageQuantityText(form.isPWP ? entered - used : bucket?.pending ?? null)}
                       </span>
                     </div>
                   );

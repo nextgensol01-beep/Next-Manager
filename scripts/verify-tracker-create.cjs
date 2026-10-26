@@ -169,7 +169,7 @@ async function main() {
     const afterDrag=await page.$$eval('.create-column-row',nodes=>nodes.map(node=>node.dataset.columnId));assert.notDeepEqual(afterDrag,beforeDrag,'Pointer drag changes canonical order');assert.deepEqual([...afterDrag].sort(),[...beforeDrag].sort());
     assert.deepEqual(afterDrag,await page.$$eval('[role=columnheader][data-preview-column^="tracker-column-"]',nodes=>nodes.map(node=>node.dataset.previewColumn)),'Preview follows pointer drag ordering');
     await radio('Client scope','By category');await click('.tracker-create-modal .tracker-modal-primary');assert(await page.$('#create-audience-error'));assert.equal(posts.length,0);
-    await radio('Category membership','Keep in sync');await click('.create-chips[aria-label="Client categories"] button');assert((await text('.create-audience-count')).includes('101 clients'));
+    await radio('Client synchronization','Auto Sync');await click('.create-chips[aria-label="Client categories"] button');assert((await text('.create-audience-count')).includes('101 clients'));
     await radio('Client scope','Specific clients');await write('input[aria-label="Search clients"]','  nEEdLe  ');await click('.create-client-row');
     assert((await text('.create-preview-table')).includes('Needle Works'));await write('input[aria-label="Search clients"]','Company 2');await click('.create-client-row');await write('input[aria-label="Search clients"]','unmatched');
     assert((await text('.create-client-picker > .create-help')).includes('2 selected'));assert((await text('.create-audience-count')).includes('2 clients'));

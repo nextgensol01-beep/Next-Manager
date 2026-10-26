@@ -1,3 +1,5 @@
+import { targetTrackingProvenance } from "@/lib/financial-year-coverage";
+
 export type FinancialYearEntry = {
   categoryId: string;
   type: "RECYCLING" | "EOL";
@@ -9,6 +11,7 @@ export type FinancialYearClient = {
   category: string;
 };
 export type FinancialYearRecord = {
+  targetTracking?: import("./financial-year-coverage").TargetTracking;
   _id?: string;
   clientId: string;
   financialYear: string;
@@ -182,7 +185,7 @@ export function financialYearUsage(
     total: total ?? typed?.reduce((sum, entry) => sum + entry.value, 0) ?? 0,
   };
 }
-/** Keep the last verified ledger usage when a save succeeds but its follow-up read fails.
+/** Keep the last server-confirmed ledger usage when a save succeeds but its follow-up read fails.
  * Recalculate every editable balance so the profile never displays the previous target total. */
 export function financialYearSavedSnapshot(
   stored: FinancialYearRecord,
@@ -190,6 +193,7 @@ export function financialYearSavedSnapshot(
 ): FinancialYearRecord {
   const saved = { ...previous, ...stored } as FinancialYearRecord &
     Record<string, unknown>;
+  saved.targetTracking = { ...targetTrackingProvenance(stored as unknown as Record<string, unknown>), usageIssues: previous?.targetTracking?.usageIssues ?? [] };
   const targets = financialYearEntries(stored, "targets"),
     generated = financialYearEntries(stored, "generated");
   const achieved = financialYearUsage(previous, false),

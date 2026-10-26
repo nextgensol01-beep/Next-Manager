@@ -1,14 +1,19 @@
 export type EmailRecipient = { email: string; name: string; designation: string; isPrimary: boolean };
 export type EmailPreview = {
   workflow: { id: string; name: string; signatureGap?: number };
+  scenarioSummary?: Array<{ id: string; name: string; matched: number; selected: number; eligible: number }>;
+  clientMatches?: Array<{ clientId: string; companyName: string; category?: string; sendRuleMatched: boolean; eligible: boolean; skippedReason?: string;
+    selection: { matchingMode: string; matchedScenarioIds: string[]; selectedScenarioIds: string[]; ignoredScenarioIds: string[]; scenarios: Array<{ id: string; name: string; matched: boolean; selected: boolean; excluded: boolean }> } }>;
   messages: Array<{
-    entryId: string; clientId: string; companyName: string; to: string;
+    entryId: string; clientId: string; companyName: string; category?: string; to: string;
     suggestedTo?: string[]; recipients: EmailRecipient[];
     subject: string; body: string; html: string; points: string[];
     statements?: string[]; combinationMessage?: string;
-    attachments: Array<{ documentId: string; filename: string; mimeType: string; fileSize: number }>;
+    attachments: Array<{ documentId: string; filename: string; mimeType: string; fileSize: number; category?: string; financialYear?: string; required?: boolean }>;
+    attachmentWarnings?: Array<{ ruleId: string; code: string; message: string; required: boolean }>;
+    attachmentSnapshot?: string;
   }>;
-  skipped: Array<{ clientId: string; companyName: string; reason: string }>;
+  skipped: Array<{ clientId: string; companyName: string; reason: string; reasonCode?: string }>;
 };
 export type AdditionalEmailRecipient = { id: string; email: string; kind: "to" | "cc" };
 export const MAX_ADDITIONAL_RECIPIENTS = 5;

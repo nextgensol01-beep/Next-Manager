@@ -41,6 +41,6 @@ export default function TrackerClientManager({ clients, selectedIds, baselineIds
     {error && <p role="alert" className="create-error">Unable to load clients. Close Configure and try again.</p>}
     {!selectedIds.length && <p className="create-error">Keep at least one client in this tracker.</p>}
     {removed > 0 && <p className="configure-removal-note">{removed} client{removed === 1 ? "" : "s"} will leave this worklist. Their saved marks are kept for re-adding; Client Master is unchanged.</p>}
-    {categorySync && <p className="create-help configure-sync-note">Category sync stays active for {categorySync}. Matching clients can rejoin when the tracker is opened.</p>}
+    {categorySync && <p className="create-help configure-sync-note">Auto Sync adds new matching clients for {categorySync}. Clients you remove stay excluded; saved marks are retained.</p>}
   </BuilderSection>;
 }

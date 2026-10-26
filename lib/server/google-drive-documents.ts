@@ -1,5 +1,6 @@
 import { Readable } from "node:stream";
-import { google, drive_v3 } from "googleapis";
+// Import only Drive/OAuth, rather than initializing every Google API client.
+import { auth as googleAuth, drive as createDrive, drive_v3 } from "googleapis/build/src/apis/drive";
 
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 
@@ -14,9 +15,9 @@ function driveClient() {
   if (!clientId || !clientSecret || !refreshToken) {
     throw new Error("Google Drive is not configured. Set GOOGLE_DRIVE_REFRESH_TOKEN and provide OAuth client credentials.");
   }
-  const auth = new google.auth.OAuth2(clientId, clientSecret);
+  const auth = new googleAuth.OAuth2(clientId, clientSecret);
   auth.setCredentials({ refresh_token: refreshToken });
-  return google.drive({ version: "v3", auth });
+  return createDrive({ version: "v3", auth });
 }
 
 async function findFolder(drive: drive_v3.Drive, name: string, parentId: string) {
@@ -90,17 +91,51 @@ export async function uploadClientDocument(input: {
   };
 }
 
-export async function downloadDriveFile(fileId: string) {
+export async function downloadDriveFile(fileId: string, signal?: AbortSignal, expectedSize?: number) {
   const drive = driveClient();
+  // Keep the general document-preview API compatible; email supplies an approved limit.
+  if (expectedSize === undefined) {
+    const response = await drive.files.get({ fileId, alt: "media", supportsAllDrives: true }, { responseType: "arraybuffer", signal });
+    const data = response.data as unknown as ArrayBuffer | Buffer<ArrayBuffer>;
+    return Buffer.isBuffer(data) ? data : Buffer.from(data);
+  }
+  if (!Number.isSafeInteger(expectedSize) || expectedSize <= 0 || expectedSize > 8 * 1024 * 1024)
+    throw new Error("The selected document exceeds email attachment size limits.");
   const response = await drive.files.get(
     {
       fileId,
       alt: "media",
       supportsAllDrives: true,
     },
-    { responseType: "arraybuffer" }
+    { responseType: "stream", signal }
   );
-  return Buffer.from(response.data as ArrayBuffer);
+  const stream = response.data as Readable;
+  // Stop a changed/oversized remote file during download, before buffering it all.
+  const limit = expectedSize;
+  const bytes = Buffer.allocUnsafe(limit);
+  let offset = 0;
+  try {
+    for await (const chunk of stream) {
+      signal?.throwIfAborted();
+      const part = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (offset + part.length > limit) throw new Error("ATTACHMENT_CHANGED");
+      part.copy(bytes, offset);
+      offset += part.length;
+    }
+    return bytes.subarray(0, offset);
+  } finally {
+    stream.destroy();
+  }
+}
+
+/** Lightweight availability/revision check. Preview never downloads document bytes. */
+export async function inspectDriveFile(fileId: string, signal?: AbortSignal) {
+  const drive = driveClient();
+  const response = await drive.files.get({ fileId, fields: "id,name,mimeType,size,trashed,md5Checksum,modifiedTime,version", supportsAllDrives: true }, { signal });
+  const file = response.data;
+  if (file.trashed || !file.id) throw Object.assign(new Error("The selected document is no longer available in Google Drive."), { code: 404 });
+  return { id: file.id, mimeType: file.mimeType || "", fileSize: Number(file.size || 0),
+    revision: file.md5Checksum || `${file.version || ""}:${file.modifiedTime || ""}`, checksum: file.md5Checksum || "" };
 }
 
 function driveIdFromLink(link: string) {

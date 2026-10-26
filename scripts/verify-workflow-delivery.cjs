@@ -92,6 +92,8 @@ async function main() {
 
     await button("Add files"); await settle();
     assert.deepEqual((await state()).attachments[0], { id: "attachment-1", source: "client_latest", category: "certificates", documentKind: "general", financialYear: "tracker" }, "Attachment defaults are unchanged");
+    await select("Attachment 1 requirement", "Required"); assert.equal((await state()).attachments[0].required, true);
+    await select("Attachment 1 financial year", "FY 2025-26"); assert.equal((await state()).attachments[0].financialYear, "2025-26");
     await select("Attachment 1 category", "Financial"); await select("Attachment 1 document type", "EPR certificate"); await select("Attachment 1 financial year", "Any financial year");
     await page.click('.delivery-condition-toggle input'); await select("Attachment 1 condition value", "Yes");
     assert.deepEqual((await state()).attachments[0].conditionGroup, { mode: "ALL", conditions: [{ fieldKey: "done", operator: "equals", value: "Yes" }] });
@@ -110,7 +112,7 @@ async function main() {
     await button("Toggle documents"); assert(await page.$('.delivery-file-warning'), "Empty managed-document list retains warning"); await button("Toggle documents");
     await button("Add files"); await button("Add files"); await button("Add files"); await settle();
     assert.equal((await state()).attachments.length, 4); assert(await page.$eval('.delivery-add', node => node.disabled), "Original four-file limit is retained");
-    const saved = await state(); await button("Save"); await button("Reset"); await button("Reopen"); await settle(); assert.deepEqual(await state(), saved, "Delivery state round-trips without new schema fields");
+    const saved = await state(); await button("Save"); await button("Reset"); await button("Reopen"); await settle(); assert.deepEqual(await state(), saved, "Delivery state round-trips including attachment requirements");
     await button("Toggle step"); await button("Toggle step"); await settle(); assert.deepEqual(await state(), saved, "Step navigation keeps config");
     const remainingIds = saved.attachments.slice(1).map(item => item.id); await page.click('[aria-label="Remove attachment 1"]'); await settle();
     assert.deepEqual((await state()).attachments.map(item => item.id), remainingIds, "Remove keeps other attachment identities");

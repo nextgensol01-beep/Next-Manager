@@ -1,3 +1,5 @@
+import { activeEmailRules, createTrackerEmailContext, emailCommunicationStatus, emailWorkflowConditionIssue, evaluateEmailConditionGroup } from "@/lib/tracker-email-context";
+import { renderTrackerEmail } from "@/lib/tracker-email-renderer";
 import { withTrackerApiErrors, readTrackerRequestBody } from "@/lib/server/tracker-api-errors";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -14,253 +16,20 @@ import Document from "@/models/Document";
 import { resolveTrackerLinkedValues } from "@/lib/server/tracker-linked-data";
 import { resolveTrackerComputedValues } from "@/lib/server/tracker-computed-values";
 import {
-  resolveTrackerEmailAttachmentDocuments,
   type ManagedTrackerEmailDocument,
 } from "@/lib/server/tracker-email-attachments";
+import { createAttachmentMetadataReader, prepareTrackerAttachmentSelection } from "@/lib/server/tracker-attachment-snapshot";
 import type {
   TrackerEmailWorkflow,
   TrackerField,
-  TrackerValue,
   TrackerValues,
 } from "@/lib/clientTrackers";
 import {
-  evaluateTrackerConditionGroup,
   legacyWorkflowCondition,
 } from "@/lib/server/tracker-conditions";
 
-const valueText = (value: TrackerValue | undefined) =>
-  Array.isArray(value)
-    ? value.join(", ")
-    : value === true
-      ? "Yes"
-      : value === false
-        ? "No"
-        : String(value ?? "");
-const escapeHtml = (value: string) =>
-  value.replace(
-    /[&<>"']/g,
-    (character) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        character
-      ] || character,
-  );
-
-function trackerEmailHtml(
-  body: string,
-  clientName: string,
-  financialYear?: string,
-) {
-  const emphasise = (html: string, value: string) =>
-    value
-      ? html
-          .split(escapeHtml(value))
-          .join(
-            `<strong style="font-weight:700;color:#222222;">${escapeHtml(value)}</strong>`,
-          )
-      : html;
-  const formatted = escapeHtml(body)
-    .replace(
-      /&lt;strong&gt;/gi,
-      '<strong style="font-weight:700;color:#222222;">',
-    )
-    .replace(/&lt;\/strong&gt;/gi, "</strong>")
-    .replace(/&lt;em&gt;/gi, '<em style="font-style:italic;">')
-    .replace(/&lt;\/em&gt;/gi, "</em>")
-    .replace(/&lt;u&gt;/gi, '<u style="text-decoration:underline;">')
-    .replace(/&lt;\/u&gt;/gi, "</u>")
-    .replace(/&lt;p&gt;/gi, '<p style="margin:0 0 12px;">')
-    .replace(/&lt;\/p&gt;/gi, "</p>")
-    .replace(/&lt;ul&gt;/gi, '<ul style="margin:0 0 12px;padding-left:22px;">')
-    .replace(/&lt;\/ul&gt;/gi, "</ul>")
-    .replace(/&lt;ol&gt;/gi, '<ol style="margin:0 0 12px;padding-left:22px;">')
-    .replace(/&lt;\/ol&gt;/gi, "</ol>")
-    .replace(/&lt;li&gt;/gi, '<li style="margin:0 0 4px;">')
-    .replace(/&lt;\/li&gt;/gi, "</li>")
-    .replace(
-      /&lt;blockquote&gt;/gi,
-      '<blockquote style="margin:0 0 12px;padding-left:12px;border-left:3px solid #d1d5db;color:#4b5563;">',
-    )
-    .replace(/&lt;\/blockquote&gt;/gi, "</blockquote>")
-    .replace(/&lt;a href=&quot;([^"<>]*)&quot;&gt;/gi, (_match, href) =>
-      `<a href="${String(href).replace(/&amp;amp;/g, "&amp;")}" style="color:#0071e3;text-decoration:underline;">`,
-    )
-    .replace(/&lt;\/a&gt;/gi, "</a>")
-    .replace(/&lt;br\s*\/?&gt;/gi, "<br />")
-    .replace(/\n/g, "<br />");
-  const content = [
-    clientName,
-    financialYear ? `FY ${financialYear}` : "",
-    "Nextgen Solutions",
-  ].reduce((html, value) => emphasise(html, value), formatted);
-  return `<!doctype html><html><body style="margin:0;padding:0;background:#ffffff;"><div style="width:100%;max-width:780px;box-sizing:border-box;margin:0 auto;padding:4px 12px 0;color:#222222;font-family:Arial,'Helvetica Neue',sans-serif;font-size:14px;line-height:1.65;">${content}</div></body></html>`;
-}
-
-function plainRichText(value: string) {
-  return value
-    .replace(/<br\s*\/?\s*>/gi, "\n")
-    .replace(/<\/(?:div|p|li|ul|ol|blockquote)>/gi, "\n")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">");
-}
-
-function messageFor(input: {
-  workflow: TrackerEmailWorkflow;
-  trackerName: string;
-  client: {
-    clientId: string;
-    companyName: string;
-    category?: string;
-    state?: string;
-    gstNumber?: string;
-  };
-  values: TrackerValues;
-  financialYear?: string;
-  kind: "initial" | "reminder";
-}) {
-  const { workflow, trackerName, client, values, financialYear, kind } = input;
-  const allContentRules = [...(workflow.contentRules || [])].sort(
-    (left, right) => (left.order || 0) - (right.order || 0),
-  );
-  // New workflows deliberately use one content method. Older workflows keep
-  // their original mixed-rule behaviour until they are edited and saved.
-  const contentRules = workflow.contentMode
-    ? allContentRules.filter(
-        (rule) =>
-          rule.type ===
-          (workflow.contentMode === "combinations"
-            ? "combination"
-            : workflow.contentMode === "statements"
-              ? "statement"
-              : "point"),
-      )
-    : allContentRules;
-  const combination = contentRules.find(
-    (rule) =>
-      rule.type === "combination" &&
-      evaluateTrackerConditionGroup(rule.conditionGroup, values),
-  );
-  if (
-    (contentRules.some((rule) => rule.type === "combination") &&
-      !combination) ||
-    combination?.action === "skip"
-  ) {
-    return {
-      subject: "",
-      body: "",
-      html: "",
-      points: [],
-      statements: [],
-      combinationMessage: "",
-      skipReason: combination
-        ? "Matched a combination rule configured not to send"
-        : "No combination rule matches this client",
-      unresolvedVariables: [],
-    };
-  }
-  const matchingStatements = contentRules.filter(
-    (rule) =>
-      rule.type === "statement" &&
-      rule.action !== "skip" &&
-      evaluateTrackerConditionGroup(rule.conditionGroup, values),
-  );
-  const matchingContentPoints = contentRules.filter(
-    (rule) =>
-      rule.type === "point" &&
-      rule.action !== "skip" &&
-      evaluateTrackerConditionGroup(rule.conditionGroup, values),
-  );
-  const matchingPoints = workflow.points.filter(
-    (point) => valueText(values[point.fieldKey]) === point.value,
-  );
-  const points = [
-    ...matchingPoints.map((point) => plainRichText(point.statement)),
-    ...matchingContentPoints.map((rule) => plainRichText(rule.content || "")),
-  ].filter(Boolean);
-  const statements = matchingStatements
-    .map((rule) => plainRichText(rule.content || ""))
-    .filter(Boolean);
-  const combinationMessage = combination?.content || "";
-  const subjectTemplate =
-    kind === "reminder" && workflow.reminderSubject
-      ? workflow.reminderSubject
-      : workflow.subject;
-  const bodyTemplate =
-    kind === "reminder" && workflow.reminderBody
-      ? workflow.reminderBody
-      : workflow.body;
-  const pointMarkup = matchingPoints
-    .map((point) =>
-      point.format === "statement" ? point.statement : `• ${point.statement}`,
-    )
-    .join("\n");
-  const contentPointMarkup = matchingContentPoints
-    .map((rule) => `• ${rule.content || ""}`)
-    .join("\n");
-  const allPointMarkup = [pointMarkup, contentPointMarkup]
-    .filter(Boolean)
-    .join("\n");
-  const statementMarkup = matchingStatements
-    .map((rule) => rule.content || "")
-    .filter(Boolean)
-    .join("\n\n");
-  const replace = (template: string, appendMissingPoints = false) => {
-    const includesPointsPlaceholder = template.includes("{{points}}");
-    const includesStatementsPlaceholder = template.includes("{{statements}}");
-    const includesCombinationPlaceholder = template.includes(
-      "{{combinationMessage}}",
-    );
-    const replaced = template
-      .replace(/{{client\.companyName}}/g, client.companyName)
-      .replace(/{{client\.clientId}}/g, client.clientId)
-      .replace(/{{client\.category}}/g, client.category || "")
-      .replace(/{{client\.state}}/g, client.state || "")
-      .replace(/{{client\.gstNumber}}/g, client.gstNumber || "")
-      .replace(/{{tracker\.financialYear}}/g, financialYear || "")
-      .replace(/{{tracker\.name}}/g, trackerName)
-      .replace(/{{workflow\.name}}/g, workflow.name)
-      .replace(/{{points}}/g, allPointMarkup)
-      .replace(/{{statements}}/g, statementMarkup)
-      .replace(/{{combinationMessage}}/g, combinationMessage);
-    if (!appendMissingPoints) return replaced;
-    const additions = [
-      !includesCombinationPlaceholder && combinationMessage,
-      !includesStatementsPlaceholder && statementMarkup,
-      !includesPointsPlaceholder && allPointMarkup,
-    ].filter(Boolean);
-    return additions.length
-      ? `${replaced.trim()}\n\n${additions.join("\n\n")}`
-      : replaced;
-  };
-  const replaceColumns = (template: string) =>
-    template.replace(/{{column\.([a-zA-Z0-9]+)}}/g, (_match, key) =>
-      valueText(values[key]),
-    );
-  const subject = replaceColumns(replace(subjectTemplate)).trim();
-  const richBody = replaceColumns(replace(bodyTemplate, true))
-    .replace(/(?:<br>\s*){3,}/gi, "<br><br>")
-    .trim();
-  const body = plainRichText(richBody)
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  const unresolvedVariables = Array.from(
-    new Set(`${subject}\n${body}`.match(/{{[^}]+}}/g) || []),
-  );
-  return {
-    subject,
-    body,
-    html: trackerEmailHtml(richBody, client.companyName, financialYear),
-    points,
-    statements,
-    combinationMessage: plainRichText(combinationMessage),
-    unresolvedVariables,
-  };
-}
-
 export const GET = withTrackerApiErrors(async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getServerSession(authOptions);
@@ -268,6 +37,34 @@ export const GET = withTrackerApiErrors(async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await connectDB();
   const { id } = await params;
+  const searchParams = new URL(req.url).searchParams;
+  if (searchParams.get("compact") === "1") {
+    let clientIds: unknown;
+    try { clientIds = JSON.parse(searchParams.get("clientIds") || "[]"); }
+    catch { return NextResponse.json({ error: "Choose valid page clients." }, { status: 400 }); }
+    if (!Array.isArray(clientIds) || clientIds.length > 250 || clientIds.some(value => typeof value !== "string" || !value || value.length > 200))
+      return NextResponse.json({ error: "Choose valid page clients." }, { status: 400 });
+    // One stream provides authoritative whole-tracker totals and only the latest
+    // communication metadata for this page. Bodies never enter this response.
+    const [result] = await EmailLog.aggregate([
+      { $match: { trackerId: id } },
+      { $project: { clientId: 1, status: 1, communicationStatus: 1, mailKind: 1, sentAt: 1 } },
+      { $facet: {
+        counts: [{ $group: { _id: "$status", count: { $sum: 1 }, reminders: { $sum: { $cond: [{ $eq: ["$mailKind", "reminder"] }, 1, 0] } } } }],
+        logs: [
+          { $match: { clientId: { $in: [...new Set(clientIds as string[])] } } },
+          { $sort: { sentAt: -1, _id: -1 } },
+          { $group: { _id: "$clientId", log: { $first: "$$ROOT" } } },
+          { $replaceRoot: { newRoot: "$log" } },
+        ],
+      } },
+    ]);
+    const summary: Record<string, number> = { total: 0, reminders: 0 };
+    for (const row of result?.counts || []) {
+      summary[row._id] = row.count; summary.total += row.count; summary.reminders += row.reminders;
+    }
+    return NextResponse.json({ logs: result?.logs || [], summary }, { headers: { "Cache-Control": "private, no-store" } });
+  }
   const logs = await EmailLog.find({ trackerId: id })
     .sort({ sentAt: -1 })
     .limit(200)
@@ -277,7 +74,7 @@ export const GET = withTrackerApiErrors(async function GET(
     counts.total = (counts.total || 0) + 1;
     return counts;
   }, {});
-  return NextResponse.json({ logs, summary });
+  return NextResponse.json({ logs, summary }, { headers: { "Cache-Control": "private, no-store" } });
 });
 
 export const POST = withTrackerApiErrors(async function POST(
@@ -331,6 +128,8 @@ export const POST = withTrackerApiErrors(async function POST(
       { error: "Choose an email workflow." },
       { status: 400 },
     );
+  const configurationIssue = emailWorkflowConditionIssue(workflow, tracker.fields);
+  if (configurationIssue) return NextResponse.json({ error: configurationIssue, code: "invalid_workflow_configuration" }, { status: 409 });
   const entries = await ClientTrackerEntry.find({
     trackerId: id,
     inScope: { $ne: false },
@@ -355,9 +154,6 @@ export const POST = withTrackerApiErrors(async function POST(
     ),
     workflow.attachments?.length
       ? Document.find({
-          storageType: "google-drive",
-          driveFileId: { $exists: true, $ne: "" },
-          mimeType: { $exists: true, $ne: "" },
           $or: [
             { clientId: { $in: clientIds } },
             ...(sharedDocumentIds.length
@@ -365,10 +161,15 @@ export const POST = withTrackerApiErrors(async function POST(
               : []),
           ],
         })
-          .sort({ uploadedDate: -1 })
+          .select("_id clientId documentName category documentKind financialYear storageType driveFileId mimeType fileSize uploadedDate updatedAt")
+          .sort({ uploadedDate: -1, _id: -1 })
           .lean()
       : Promise.resolve([]),
   ]);
+  const needsCommunication = JSON.stringify([workflow.conditionGroup, workflow.contentRules]).includes("client.communicationStatus");
+  const communicationLogs = needsCommunication ? await EmailLog.find({ trackerId: id, clientId: { $in: clientIds } }).select("clientId status mailKind sentAt communicationStatus").sort({ sentAt: -1, _id: -1 }).lean() : [];
+  const communicationByClient = new Map<string, string>();
+  for (const log of communicationLogs) if (!communicationByClient.has(log.clientId)) communicationByClient.set(log.clientId, emailCommunicationStatus({ communicationStatus: log.communicationStatus, status: log.status, mailKind: log.mailKind }));
   const cooldownSince = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const recentLogs =
     kind === "reminder"
@@ -469,26 +270,45 @@ export const POST = withTrackerApiErrors(async function POST(
       if (current.length) recipientsByClient.set(contact.clientId, current);
     });
   const messages: Array<Record<string, unknown>> = [];
+  const documentsByClient = new Map<string, ManagedTrackerEmailDocument[]>();
+  const sharedIds = new Set(sharedDocumentIds);
+  const sharedDocuments: ManagedTrackerEmailDocument[] = [];
+  for (const document of documents as unknown as ManagedTrackerEmailDocument[]) {
+    const current = documentsByClient.get(document.clientId) || [];
+    current.push(document);
+    documentsByClient.set(document.clientId, current);
+    if (sharedIds.has(String(document._id))) sharedDocuments.push(document);
+  }
   const skipped: Array<{
     clientId: string;
     companyName: string;
     reason: string;
+    reasonCode: string;
+    reasons?: string[];
   }> = [];
-  entries.forEach((entry) => {
+  const clientMatches: Array<{ clientId: string; companyName: string; category?: string; selection: ReturnType<typeof renderTrackerEmail>["selection"]; sendRuleMatched: boolean }> = [];
+  const inspectAttachments = createAttachmentMetadataReader();
+  await Promise.all(entries.map(async (entry) => {
     const client = clientsById.get(entry.clientId);
     const companyName = client?.companyName || entry.clientId;
     const values = resolveTrackerComputedValues(tracker.fields, {
       ...(entry.values as TrackerValues),
       ...(linkedValues.get(entry.clientId) || {}),
     });
+    if (!client) { skipped.push({ clientId: entry.clientId, companyName, reason: "The linked client record is unavailable.", reasonCode: "missing_client_context" }); return; }
+    const context = createTrackerEmailContext({ entry: { clientId: entry.clientId, _id: entry._id }, client: { clientId: client.clientId, companyName: client.companyName, category: client.category, state: client.state, gstNumber: client.gstNumber }, values, fields: tracker.fields, financialYear: tracker.financialYear, trackerName: tracker.name, workflowName: workflow.name, communicationStatus: communicationByClient.get(entry.clientId) });
+    const message = renderTrackerEmail(workflow, context, kind);
     const conditions =
       workflow.conditionGroup ||
       legacyWorkflowCondition(workflow.mainFieldKey, workflow.mainValue);
-    if (!evaluateTrackerConditionGroup(conditions, values)) {
+    const sendRuleMatched = evaluateEmailConditionGroup(conditions, context);
+    clientMatches.push({ clientId: entry.clientId, companyName, category: client.category, selection: message.selection, sendRuleMatched });
+    if (!sendRuleMatched) {
       skipped.push({
         clientId: entry.clientId,
         companyName,
         reason: "Workflow eligibility conditions do not match",
+        reasonCode: "conditions_not_matched",
       });
       return;
     }
@@ -497,6 +317,7 @@ export const POST = withTrackerApiErrors(async function POST(
         clientId: entry.clientId,
         companyName,
         reason: "Initial email already sent; use a reminder campaign",
+        reasonCode: "initial_already_sent",
       });
       return;
     }
@@ -505,6 +326,7 @@ export const POST = withTrackerApiErrors(async function POST(
         clientId: entry.clientId,
         companyName,
         reason: "Initial email has not been sent",
+        reasonCode: "initial_required",
       });
       return;
     }
@@ -513,6 +335,7 @@ export const POST = withTrackerApiErrors(async function POST(
         clientId: entry.clientId,
         companyName,
         reason: "Client has replied to this workflow email",
+        reasonCode: "replied",
       });
       return;
     }
@@ -521,6 +344,7 @@ export const POST = withTrackerApiErrors(async function POST(
         clientId: entry.clientId,
         companyName,
         reason: "Sent recently; 7-day safety cooldown",
+        reasonCode: "recently_sent",
       });
       return;
     }
@@ -559,28 +383,16 @@ export const POST = withTrackerApiErrors(async function POST(
         clientId: entry.clientId,
         companyName,
         reason: "No contact email matches the selected recipient strategy",
+        reasonCode: "no_recipient",
       });
       return;
     }
-    const message = messageFor({
-      workflow,
-      trackerName: tracker.name,
-      client: {
-        clientId: entry.clientId,
-        companyName,
-        category: client?.category,
-        state: client?.state,
-        gstNumber: client?.gstNumber,
-      },
-      values,
-      financialYear: tracker.financialYear,
-      kind,
-    });
     if (!message.subject || !message.body) {
       skipped.push({
         clientId: entry.clientId,
         companyName,
         reason: message.skipReason || "Email content is empty",
+        reasonCode: message.skipReason === "Matched a combination rule configured not to send" ? "combination_skipped" : message.skipReason === "No combination rule matches this client" ? "combination_not_matched" : "empty_content",
       });
       return;
     }
@@ -588,28 +400,43 @@ export const POST = withTrackerApiErrors(async function POST(
       skipped.push({
         clientId: entry.clientId,
         companyName,
-        reason: `Missing variables: ${message.unresolvedVariables.join(", ")}`,
+        reasonCode: message.variableIssues[0]?.code || "missing_variables",
+        reason: message.variableIssues.map(issue => issue.message).join("; "),
       });
       return;
     }
-    const attachments = resolveTrackerEmailAttachmentDocuments({
+    const attachmentSelection = await prepareTrackerAttachmentSelection({
       workflow,
-      documents: documents as unknown as ManagedTrackerEmailDocument[],
+      documents: [...(documentsByClient.get(entry.clientId) || []), ...sharedDocuments.filter(document => document.clientId !== entry.clientId)],
       clientId: entry.clientId,
       values,
       financialYear: tracker.financialYear,
-    });
+      trackerId: id, entryId: String(entry._id), kind,
+    }, inspectAttachments);
+    const missingRequired = attachmentSelection.issues.filter(issue => issue.required);
+    if (missingRequired.length) {
+      skipped.push({ clientId: entry.clientId, companyName, reason: missingRequired.map(issue => issue.message).join("; "),
+        reasons: missingRequired.map(issue => issue.message), reasonCode: "required_attachment_unavailable" });
+      return;
+    }
     messages.push({
       entryId: String(entry._id),
       clientId: entry.clientId,
       companyName,
+      category: context.client.category,
       to,
       suggestedTo,
       recipients,
-      attachments,
+      attachments: attachmentSelection.attachments,
+      attachmentWarnings: attachmentSelection.issues,
+      ...(attachmentSelection.attachmentSnapshot ? { attachmentSnapshot: attachmentSelection.attachmentSnapshot } : {}),
       ...message,
     });
-  });
+  }));
+  const entryOrder = new Map(entries.map((entry, index) => [String(entry._id), index]));
+  const clientOrder = new Map(entries.map((entry, index) => [entry.clientId, index]));
+  messages.sort((a, b) => (entryOrder.get(String(a.entryId)) || 0) - (entryOrder.get(String(b.entryId)) || 0));
+  skipped.sort((a, b) => (clientOrder.get(a.clientId) || 0) - (clientOrder.get(b.clientId) || 0));
   return NextResponse.json({
     trackerName: tracker.name,
     workflow: {
@@ -618,6 +445,8 @@ export const POST = withTrackerApiErrors(async function POST(
       signatureGap: workflow.signatureGap ?? 2,
     },
     kind,
+    clientMatches: clientMatches.map(match => ({ ...match, eligible: messages.some(message => message.clientId === match.clientId), skippedReason: skipped.find(row => row.clientId === match.clientId)?.reason })),
+    scenarioSummary: activeEmailRules(workflow).filter(rule => rule.type === "combination").map((rule, index) => ({ id: rule.id, name: `Scenario ${index + 1}${rule.name ? ` — ${rule.name}` : ""}`, matched: clientMatches.filter(row => row.selection.matchedScenarioIds.includes(rule.id)).length, selected: clientMatches.filter(row => row.selection.selectedScenarioIds.includes(rule.id)).length, eligible: messages.filter(message => (message.selection as ReturnType<typeof renderTrackerEmail>["selection"]).selectedScenarioIds.includes(rule.id)).length })),
     messages,
     skipped,
   });

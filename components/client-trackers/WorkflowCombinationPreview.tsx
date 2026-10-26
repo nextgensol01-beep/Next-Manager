@@ -5,10 +5,11 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, LayoutGroup, motion, useIsPresent, useReducedMotion } from "framer-motion";
 import { Check, ChevronDown, Layers3, Mail, Minus, X } from "lucide-react";
 import type { TrackerCondition, TrackerConditionGroup, TrackerEmailContentRule, TrackerEmailWorkflow, TrackerField } from "@/lib/clientTrackers";
-import { evaluateTrackerCondition, evaluateTrackerConditionGroup, legacyWorkflowCondition, trackerValueText } from "@/lib/server/tracker-conditions";
+import { evaluateTrackerCondition, legacyWorkflowCondition, trackerValueText } from "@/lib/server/tracker-conditions";
 import { buildEmailCombinationPreviews, type EmailCombinationPreview } from "@/lib/tracker-email-combinations";
 import { editorMarkup, escapeEditorText, variableLabel, type EmailEditorVariable } from "@/lib/tracker-editor-document";
 import { WorkflowOverlayScrollbar } from "./WorkflowStepNavigation";
+import { emailConditionFields } from "@/lib/tracker-email-context";
 
 const ease = [.22, 1, .36, 1] as const;
 const filters = [{ value: "all", label: "All" }, { value: "matched", label: "Matched" }, { value: "unmatched", label: "No match" }] as const;
@@ -109,7 +110,7 @@ function PreviewDialog({ workflow, fields, onClose }: { workflow: TrackerEmailWo
           <p>{unmatched ? `${unmatched} ${limited ? "shown " : ""}combination${unmatched === 1 ? " has" : "s have"} no matching message` : <><Check size={12} aria-hidden="true" />All {limited ? "shown " : ""}combinations are covered</>}</p>
         </div>
       </div>
-      {limited && <p className="rule-preview-limit">Showing the first {previews.length} of {possibleCount} possible combinations. Results and coverage refer to those shown.</p>}
+      {limited && <p className="rule-preview-limit">Partial logical analysis: evaluated only the first {previews.length} of {possibleCount} generated test combinations. Other combinations were not evaluated; counts and coverage refer to this sample.</p>}
       <LayoutGroup id={id}>
         <div className="rule-preview-filter-row"><div className="rule-preview-filters" role="radiogroup" aria-label="Filter combinations">
           {filters.map((item, index) => <button key={item.value} type="button" role="radio" aria-checked={filter === item.value} tabIndex={filter === item.value ? 0 : -1} onClick={() => selectFilter(item.value)}
@@ -121,7 +122,7 @@ function PreviewDialog({ workflow, fields, onClose }: { workflow: TrackerEmailWo
             {filter === item.value && <motion.span className="rule-preview-filter-glass" layoutId="filter-glass" transition={{ duration: reduced ? .01 : .22, ease }} aria-hidden="true" />}
             <span>{item.label}<small>{filterCounts[item.value]}</small></span>
           </button>)}
-        </div><span className="rule-preview-priority-note">First matching scenario wins</span></div>
+        </div><span className="rule-preview-priority-note">{workflow.combinationMatchingMode === "combine" ? "All matches combined · Exclude blocks sending" : "First matching scenario wins"}</span></div>
         <div className="rule-preview-panes">
           <section className="rule-preview-navigator" aria-labelledby={`${id}-navigator`}>
             <div className="rule-preview-pane-heading"><h4 id={`${id}-navigator`}>Combinations</h4><span>{visible.length} shown</span></div>
@@ -161,17 +162,21 @@ function PreviewDialog({ workflow, fields, onClose }: { workflow: TrackerEmailWo
 function resultLabel(preview: EmailCombinationPreview, scenarios: TrackerEmailContentRule[]) {
   const index = scenarios.findIndex(rule => rule.id === preview.scenarioId), scenario = scenarios[index];
   if (!preview.sendRuleMatched) return scenario ? `Send rule not met · Scenario ${index + 1}` : "Send rule not met";
-  if (scenario?.action === "skip") return `Excluded · Scenario ${index + 1}`;
+  const exclusions = preview.selection?.scenarios.filter(rule => rule.selected && rule.excluded) || [];
+  if (exclusions.length) return `Excluded · ${exclusions.map(rule => rule.name).join(", ")}`;
+  if (preview.issues?.length) return "Variable data needs attention";
   if (!preview.eligible) return "No matching scenario";
-  return scenario ? `Scenario ${index + 1}` : "Shared email";
+  const selected = preview.selection?.scenarios.filter(rule => rule.selected) || [];
+  return selected.length ? selected.map(rule => rule.name).join(" + ") : "Shared email";
 }
 
 const operatorText: Record<TrackerCondition["operator"], string> = {
   equals: "is", not_equals: "is not", is_empty: "is empty", is_not_empty: "is not empty", contains: "contains", not_contains: "does not contain",
   greater_than: "is greater than", greater_than_or_equal: "is at least", less_than: "is less than", less_than_or_equal: "is at most",
+  is_any_of: "is any of", contains_any: "contains any", contains_all: "contains all", before: "is before", after: "is after", on: "is on",
 };
 function describeCondition(condition: TrackerCondition, fields: TrackerField[]) {
-  const label = fields.find(field => field.key === condition.fieldKey)?.label || "Removed column";
+  const label = emailConditionFields(fields).find(field => field.key === condition.fieldKey)?.label || `Unavailable: ${condition.fieldKey}`;
   return `${label} ${operatorText[condition.operator]}${condition.operator === "is_empty" || condition.operator === "is_not_empty" ? "" : ` ${trackerValueText(condition.value) || "Not set"}`}`;
 }
 function semanticMarkup(html: string, variables: EmailEditorVariable[]) {
@@ -202,11 +207,13 @@ function ResultPanel({ preview, scenarios, workflow, fields, variables, reduced 
           <button type="button" aria-expanded={whyOpen} aria-controls={whyId} onClick={() => setWhyOpen(open => !open)}><span>Why this result?</span><ChevronDown size={14} className={whyOpen ? "is-open" : ""} /></button>
           <motion.div id={whyId} className="rule-preview-proof" inert={!whyOpen} aria-hidden={!whyOpen} initial={false} animate={{ height: whyOpen ? "auto" : 0, opacity: whyOpen ? 1 : 0, filter: whyOpen || reduced ? "blur(0px)" : "blur(2px)" }} transition={{ duration: reduced ? .01 : .2, ease }}>
             <div><ProofGroup title="Send rule" group={eligibility} fields={fields} preview={preview} />
-              {scenarios.map((rule, index) => <ProofGroup key={rule.id} title={`Scenario ${index + 1}`} group={rule.conditionGroup} fields={fields} preview={preview} note={rule.id === preview.scenarioId ? rule.action === "skip" ? "Selected · excludes" : "Selected" : evaluateTrackerConditionGroup(rule.conditionGroup, preview.values) ? "Lower priority" : undefined} />)}
-              {scenarios.length > 0 && <p className="rule-preview-proof-note">Scenarios are checked in priority order. The first match determines the result.</p>}
+              {scenarios.map((rule, index) => <ProofGroup key={rule.id} title={`Scenario ${index + 1}${rule.name ? ` — ${rule.name}` : ""}`} group={rule.conditionGroup} fields={fields} preview={preview} note={preview.selection?.selectedScenarioIds.includes(rule.id) ? rule.action === "skip" ? "Selected · excludes" : preview.selection.matchingMode === "combine" ? "Combined" : "Selected" : preview.selection?.ignoredScenarioIds.includes(rule.id) ? "Lower priority" : undefined} />)}
+              {scenarios.length > 0 && <p className="rule-preview-proof-note">{workflow.combinationMatchingMode === "combine" ? "All matching scenarios are combined in priority order. A matching exclusion prevents delivery." : "Scenarios are checked in priority order. The first match determines the result."}</p>}
             </div>
           </motion.div>
         </div>
+        {preview.selection?.selectedScenarioIds.length && preview.selection.selectedScenarioIds.length > 1 ? <p className="rule-preview-proof-note">Combined: {preview.selection.scenarios.filter(rule => rule.selected).map(rule => rule.name).join(", ")}</p> : null}
+        {preview.issues?.map(issue => <p key={issue} role="alert" className="rule-preview-proof-note">{issue}</p>)}
         {preview.eligible ? <section className="rule-preview-mail-sheet" aria-label="Synthetic email preview">
           <div className="rule-preview-mail-subject"><span>Subject</span><h5 dangerouslySetInnerHTML={{ __html: subject }} /></div>
           <div className="rule-preview-mail-body" onClick={event => { if ((event.target as Element).closest("a")) event.preventDefault(); }} dangerouslySetInnerHTML={{ __html: body }} />
@@ -217,10 +224,11 @@ function ResultPanel({ preview, scenarios, workflow, fields, variables, reduced 
 }
 
 function ProofGroup({ title, group, fields, preview, note }: { title: string; group: TrackerConditionGroup; fields: TrackerField[]; preview: EmailCombinationPreview; note?: string }) {
-  const matched = evaluateTrackerConditionGroup(group, preview.values);
+  const outcomes = group.conditions.map(condition => preview.conditionResults?.[JSON.stringify(condition)] ?? evaluateTrackerCondition(condition, preview.values));
+  const matched = group.conditions.length > 0 && (group.mode === "ANY" ? outcomes.some(Boolean) : outcomes.every(Boolean));
   return <section className="rule-preview-proof-group"><h5>{title}<small>{group.mode === "ALL" ? "AND" : "OR"}</small><span>{note || (matched ? "Matches" : "No match")}</span></h5>
     <ul>{group.conditions.map((condition, index) => {
-      const passed = evaluateTrackerCondition(condition, preview.values);
+      const passed = outcomes[index];
       return <li key={index}><span className="rule-preview-proof-check" aria-label={passed ? "Condition met" : "Condition not met"}>{passed ? <Check size={12} /> : <X size={12} />}</span><span>{describeCondition(condition, fields)}<small>Actual: {trackerValueText(preview.values[condition.fieldKey]) || "Not set"}</small></span></li>;
     })}{!group.conditions.length && <li>No conditions configured.</li>}</ul>
   </section>;

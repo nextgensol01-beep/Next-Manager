@@ -40,20 +40,20 @@
     "Annual return update needs text for each matching message."
   ],
   "ruleConditions": [
-    "Annual return update conditional content needs at least one condition.",
-    "Annual return update conditional content needs at least one condition."
+    "Annual return update: Scenario 1 needs attention. Add at least one matching condition.",
+    "Annual return update: Scenario 1 needs attention. Add at least one matching condition."
   ],
   "ruleText": [
-    "Annual return update has conditional content without message text.",
-    "Annual return update has conditional content without message text."
+    "Annual return update: Scenario 1 needs attention. Add message text for this sending rule.",
+    "Annual return update: Scenario 1 needs attention. Add message text for this sending rule."
   ],
   "skip": [
     null,
     null
   ],
   "inactive": [
-    "Annual return update has conditional content without message text.",
-    "Annual return update has conditional content without message text."
+    "Annual return update: Statement 1 needs attention. Add message text for this sending rule.",
+    "Annual return update: Statement 1 needs attention. Add message text for this sending rule."
   ],
   "attachment": [
     "Annual return update attachment rule needs at least one condition.",

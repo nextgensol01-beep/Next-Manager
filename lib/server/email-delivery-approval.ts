@@ -37,6 +37,8 @@ import {
 } from "./tracker-email-batch";
 import { deliverThroughGmail } from "./gmail-delivery";
 import { renderVerificationEmail } from "@/lib/email-verification-template";
+import { validateTrackerAttachmentBatch } from "./tracker-attachment-snapshot";
+import type { TrackerEmailWorkflow } from "@/lib/clientTrackers";
 
 export type SecurityContext = {
   owner: string;
@@ -704,12 +706,13 @@ export async function assertTrackerAvailable(
   batch: DeliveryBatch,
 ) {
   const tracker = await ClientTracker.findById(trackerId)
-    .select("name status emailEnabled emailWorkflows")
+    .select("name status financialYear emailEnabled emailWorkflows")
     .lean<{
       name: string;
       status: string;
       emailEnabled?: boolean;
-      emailWorkflows?: Array<{ id: string; name: string }>;
+      financialYear?: string;
+      emailWorkflows?: TrackerEmailWorkflow[];
     } | null>();
   const workflow = tracker?.emailWorkflows?.find(
     (item: { id: string }) => item.id === batch.workflowId,
@@ -727,6 +730,8 @@ export async function assertTrackerAvailable(
   return {
     trackerName: String(tracker.name),
     workflowName: String(workflow.name),
+    workflow,
+    financialYear: tracker.financialYear,
   };
 }
 export function assertCampaignMatches(
@@ -774,7 +779,7 @@ export async function requestDeliveryApproval(
   settings: SecuritySettings,
 ) {
   validateDeliveryRecipients(batch, false);
-  await assertTrackerAvailable(trackerId, batch);
+  const available = await assertTrackerAvailable(trackerId, batch);
   const existing = await Campaign.findOne({
     campaignId: batch.campaignId,
   }).lean<AuthorizedCampaign | null>();
@@ -796,6 +801,7 @@ export async function requestDeliveryApproval(
       } satisfies ApprovalView;
   }
   validateDeliveryRecipients(batch, settings.restrictDuplicateRecipients);
+  await validateTrackerAttachmentBatch({ trackerId, batch, workflow: available.workflow, financialYear: available.financialYear });
   const methodsRequired = requiredDeliveryMethods(
     settings,
     batch.mode,
@@ -835,6 +841,8 @@ export async function authorizeCampaign(
       return existing;
   }
   validateDeliveryRecipients(batch, settings.restrictDuplicateRecipients);
+  const available = await assertTrackerAvailable(trackerId, batch);
+  await validateTrackerAttachmentBatch({ trackerId, batch, workflow: available.workflow, financialYear: available.financialYear });
   const methods = requiredDeliveryMethods(
     settings,
     batch.mode,

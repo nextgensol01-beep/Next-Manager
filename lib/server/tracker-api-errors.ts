@@ -25,6 +25,7 @@ export function withTrackerApiErrors<Args extends unknown[]>(
       if (error instanceof TrackerRequestError)
         return NextResponse.json({ error: error.message }, { status: 400 });
       const name = error instanceof Error ? error.name : "";
+      if (name === "TrackerSyncError") return NextResponse.json({ error: (error as Error).message }, { status: (error as Error & { status: number }).status });
       if (name === "CastError")
         return NextResponse.json({ error: "Invalid tracker or entry identifier." }, { status: 400 });
       if (name === "ValidationError")

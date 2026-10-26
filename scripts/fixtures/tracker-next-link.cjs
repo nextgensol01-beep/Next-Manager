@@ -1,2 +1,2 @@
 const React = require('react');
-module.exports = function Link({ children, ...props }) { return React.createElement('a', props, children); };
+module.exports = function Link({ children, prefetch, ...props }) { return React.createElement('a', props, children); };

@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { isAdminSession } from "@/lib/authUsers";
-import { google } from "googleapis";
+import { auth as googleAuth } from "googleapis/build/src/apis/drive";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/gmail.compose",
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     }, { status: 503 });
   }
 
-  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, REDIRECT_URI);
+  const oauth2Client = new googleAuth.OAuth2(clientId, clientSecret, REDIRECT_URI);
 
   const { searchParams } = new URL(req.url);
   const code = searchParams.get("code");

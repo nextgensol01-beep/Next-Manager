@@ -1,0 +1,13 @@
+# Local experiments must never be uploaded by the Vercel CLI.
+local-inngest/
+.inngest/
+.env.inngest*
+inngest*.log
+inngest.json
+inngest.yaml
+inngest.yml
+inngest.toml
+inngest.properties
+tmp/
+.artifacts/
+outputs/

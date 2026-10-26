@@ -10,7 +10,6 @@ import { CLIENT_TRACKER_CATEGORIES, CLIENT_TRACKER_DETAIL_OPTIONS, initialTracke
 import { cleanTrackerFields } from "@/lib/server/tracker-fields";
 import { cleanTrackerEmailWorkflows } from "@/lib/server/tracker-email-workflows";
 import { isAdminSession } from "@/lib/authUsers";
-import { syncCategoryTrackerMembership } from "@/lib/server/tracker-membership";
 
 function usesCpcbUploadData(fields: { dataLink?: { source: string } }[]) {
   return fields.some((field) => ["purchaseUploads", "saleUploads", "uploadedData"].includes(field.dataLink?.source || ""));
@@ -33,7 +32,6 @@ export const GET = withTrackerApiErrors(async function GET(req: NextRequest) {
   const clientId = new URL(req.url).searchParams.get("clientId")?.trim();
   const archiveStatus = new URL(req.url).searchParams.get("status") === "archived" ? "archived" : "active";
   const trackerDocuments = await ClientTracker.find({ status: archiveStatus, ...(clientId ? { clientIds: clientId } : {}) }).sort({ updatedAt: -1 });
-  await Promise.all(trackerDocuments.map((tracker) => syncCategoryTrackerMembership(tracker)));
   const trackers = trackerDocuments.map((tracker) => tracker.toObject());
   const trackerIds = trackers.map((tracker) => tracker._id);
   const [counts, clientEntries] = await Promise.all([
@@ -74,9 +72,16 @@ export const POST = withTrackerApiErrors(async function POST(req: NextRequest) {
       ? body.clientIds.filter((id: unknown): id is string => typeof id === "string").map((id: string) => id.trim()).filter(Boolean)
       : [];
     const clientCategories = cleanClientCategories(body.clientCategories);
-    const clientMembershipMode = body.scope === "categories" && body.clientMembershipMode === "categorySync" ? "categorySync" : "snapshot";
-    if (body.scope === "categories" && !clientCategories.length) return NextResponse.json({ error: "Choose at least one client category." }, { status: 400 });
-    const clients = await Client.find(requestedIds.length ? { clientId: { $in: requestedIds } } : clientCategories.length ? { category: { $in: clientCategories } } : {}).select("clientId").lean();
+    if (body.scope !== undefined && !["all", "categories", "selected"].includes(String(body.scope)))
+      return NextResponse.json({ error: "Choose a valid client audience." }, { status: 400 });
+    // Preserve older create requests that supplied IDs/categories without a scope.
+    const scope = body.scope === "categories" ? "categories" : body.scope === "selected" || (body.scope === undefined && requestedIds.length)
+      ? "selected" : body.scope === undefined && clientCategories.length ? "categories" : "all";
+    if (scope === "selected" && !requestedIds.length) return NextResponse.json({ error: "Select at least one client." }, { status: 400 });
+    if (scope === "selected" && body.clientMembershipMode === "categorySync") return NextResponse.json({ error: "Choose All clients or categories before enabling Auto Sync." }, { status: 400 });
+    const clientMembershipMode = scope !== "selected" && body.clientMembershipMode === "categorySync" ? "categorySync" : "snapshot";
+    if (scope === "categories" && !clientCategories.length) return NextResponse.json({ error: "Choose at least one client category." }, { status: 400 });
+    const clients = await Client.find(scope === "selected" ? { clientId: { $in: requestedIds } } : { category: { $in: scope === "categories" ? clientCategories : [...CLIENT_TRACKER_CATEGORIES] } }).select("clientId").lean();
     const clientIds = clients.map((client) => client.clientId);
     if (!clientIds.length) return NextResponse.json({ error: "Select at least one client." }, { status: 400 });
 
@@ -88,6 +93,7 @@ export const POST = withTrackerApiErrors(async function POST(req: NextRequest) {
       clientColumns: cleanClientColumns(body.clientColumns),
       clientCategories,
       clientMembershipMode,
+      clientScope: scope,
       clientIds,
       createdBy: session.user?.email || undefined,
       emailEnabled,

@@ -85,6 +85,7 @@ async function main() {
   try {
     names.forEach(name => { process.env[name] = name === "GMAIL_USER" ? "sender@example.com" : "isolated-fixture"; });
     global.fetch = async (url, options) => {
+      if (options.body instanceof ReadableStream) options = { ...options, body: await new Response(options.body).text() };
       requests.push({ url: String(url), options });
       const data = String(url).includes("oauth2") ? { access_token: "fixture-token" }
         : String(url).includes("settings/sendAs") ? { signature: '<div id="gmail-signature">Existing client signature</div>' }

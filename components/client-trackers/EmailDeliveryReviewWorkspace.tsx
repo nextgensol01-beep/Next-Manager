@@ -1,14 +1,18 @@
 "use client";
 
-import React, { memo, useEffect, useId, useMemo, useRef, useState } from "react";
-import { animate, AnimatePresence, LayoutGroup, motion, useMotionValue, useReducedMotion, useSpring, useTransform } from "framer-motion";
-import { ArrowLeft, ArrowUpRight, Check, CircleAlert, FileText, Mail, Maximize2, Paperclip, Plus, RefreshCw, Search, Send, Users, X } from "lucide-react";
+import React, { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { animate, AnimatePresence, LayoutGroup, motion, useAnimate, useMotionValue, useSpring, useTransform } from "framer-motion";
+import { ArrowLeft, ArrowUpRight, CircleAlert, FileText, Mail, Maximize2, Paperclip, Plus, RefreshCw, Search, Send, Users, X } from "lucide-react";
 import TrackerModal from "@/components/client-trackers/TrackerModal";
 import LiquidGlassDropdown from "@/components/ui/LiquidGlassDropdown";
 import { GlassButton, GlassSurface } from "@/components/ui/liquid-glass";
 import type { TrackerEmailWorkflow } from "@/lib/clientTrackers";
 import { createSearchMatcher } from "@/lib/search/client-search";
+import { skipReasonGroups, skipReasonKey } from "@/lib/email-skip-reasons";
 import { getAdditionalRecipients, initialRecipientDraft, MAX_ADDITIONAL_RECIPIENTS, previewWithGmailSignature, recipientCount, recipientIssue, updateAdditionalRecipients, type EmailPreparationPhase, type EmailPreview, type RecipientDraft } from "@/lib/tracker-email-delivery-review";
+import EmailPreviewFrame from "./EmailPreviewFrame";
+import { emailMotion } from "./EmailMotionRegion";
+import { useAuthorizationReducedMotion as useReducedMotion } from "./useAuthorizationReducedMotion";
 
 type Props = {
   open: boolean; onClose: () => void;
@@ -25,10 +29,10 @@ type Props = {
   onExpand: (message: EmailPreview["messages"][number]) => void;
 };
 
-const ease = [0.22, 0.72, 0.24, 1] as const;
+const ease = emailMotion.ease;
 
 /** Local material only; activation stays at the existing confirmation boundary. */
-function TransmissionSendButton({ count, disabled, onClick }: { count: number; disabled: boolean; onClick: () => void }) {
+function TransmissionSendButton({ count, disabled, suspended, onClick }: { count: number; disabled: boolean; suspended?: boolean; onClick: () => void }) {
   const reduced = useReducedMotion();
   // Match LiquidNavControl's local coordinates, spring character and physical limits.
   const pointerX = useMotionValue(0), pointerY = useMotionValue(0);
@@ -63,12 +67,12 @@ function TransmissionSendButton({ count, disabled, onClick }: { count: number; d
   };
   const leave = () => { setHovered(false); activeTarget.set(0); pointerX.set(0); pointerY.set(0); pressTarget.set(0); };
   useEffect(() => {
-    if (disabled || reduced) { idlePhase.set(0); return; }
+    if (disabled || reduced || suspended) { idlePhase.set(0); return; }
     const drift = animate(idlePhase, Math.PI * 2, { duration: 48, repeat: Infinity, ease: "linear" });
     const visibility = () => { if (document.hidden) drift.pause(); else drift.play(); };
     visibility(); document.addEventListener("visibilitychange", visibility);
     return () => { drift.stop(); document.removeEventListener("visibilitychange", visibility); };
-  }, [disabled, reduced, idlePhase]);
+  }, [disabled, reduced, suspended, idlePhase]);
   useEffect(() => {
     if (!disabled && !reduced) return;
     pointerX.set(0); pointerY.set(0); activeTarget.set(0); pressTarget.set(0);
@@ -127,14 +131,14 @@ function SegmentedControl({ label, options, value, onChange, disabled = false, c
 
 // A local, stronger version of the existing violet/blue/cyan dye-body language.
 // CSS animation stays outside React; phase-copy changes never restart the bodies.
-function PrepareAction({ busy, phase, kind, complete, refresh, disabled, onClick }: {
-  busy: boolean; phase: EmailPreparationPhase; kind: Props["kind"]; complete: boolean;
+function PrepareAction({ busy, phase, kind, refresh, disabled, onClick }: {
+  busy: boolean; phase: EmailPreparationPhase; kind: Props["kind"];
   refresh: boolean; disabled: boolean; onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const reduced = useReducedMotion();
-  const text = complete ? "Preview ready" : busy ? phase === "replies" ? "Checking reply status…" : kind === "reminder" ? "Preparing recipients…" : "Preparing eligible clients…" : refresh ? "Refresh preview" : "Preview eligible clients";
-  return <motion.button type="button" disabled={disabled || busy || complete} onClick={onClick} aria-busy={busy}
-    className={`email-review-prepare-action glass-surface glass-surface--clear glass-surface--pill ${busy || complete ? "email-client-processing" : ""} ${complete ? "is-complete" : ""}`}
+  const text = busy ? phase === "replies" ? "Checking reply status…" : kind === "reminder" ? "Preparing recipients…" : "Preparing eligible clients…" : refresh ? "Refresh preview" : "Preview eligible clients";
+  return <motion.button type="button" disabled={disabled || busy} onClick={onClick} aria-busy={busy}
+    className={`email-review-prepare-action glass-surface glass-surface--clear glass-surface--pill ${busy ? "email-client-processing" : ""}`}
     layout layoutId="email-preview-action" whileTap={reduced ? undefined : { scale: 0.97 }}
     animate={{ minWidth: busy ? 292 : refresh ? 148 : 232, scale: busy && !reduced ? [0.97, 1] : 1 }} transition={{ duration: reduced ? 0 : 0.26, ease }}>
     <span className="email-review-processing-material" aria-hidden="true">
@@ -142,7 +146,7 @@ function PrepareAction({ busy, phase, kind, complete, refresh, disabled, onClick
       <span className="email-review-processing-rim" />
     </span>
     <span className="email-review-prepare-copy" aria-live="polite" aria-atomic="true">
-      {complete ? <Check size={16} /> : busy ? <span className="email-review-working-orbit" aria-hidden="true" /> : refresh ? <RefreshCw size={15} /> : <FileText size={16} />}
+      {busy ? <span className="email-review-working-orbit" aria-hidden="true" /> : refresh ? <RefreshCw size={15} /> : <FileText size={16} />}
       <AnimatePresence mode="wait" initial={false}><motion.span key={text} initial={{ opacity: 0, y: reduced ? 0 : 3, filter: reduced ? "none" : "blur(2px)" }}
         animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} exit={{ opacity: 0, y: reduced ? 0 : -3, filter: reduced ? "none" : "blur(2px)" }} transition={{ duration: reduced ? 0 : 0.1 }}>{text}</motion.span></AnimatePresence>
     </span>
@@ -159,6 +163,10 @@ const ClientRecipientReview = memo(function ClientRecipientReview({ message, dra
   const pendingAdditionalFocus = useRef<string | null>(null);
   const addRecipientButton = useRef<HTMLButtonElement>(null);
   const focusAddAfterRemoval = useRef(false);
+  useLayoutEffect(() => {
+    pendingAdditionalFocus.current = null;
+    focusAddAfterRemoval.current = false;
+  }, [message.entryId]);
   useEffect(() => {
     if (focusAddAfterRemoval.current) { addRecipientButton.current?.focus(); focusAddAfterRemoval.current = false; }
   }, [draft]);
@@ -210,13 +218,14 @@ const ClientRecipientReview = memo(function ClientRecipientReview({ message, dra
       <div className="email-review-subject"><span>Subject</span><p>{message.subject}</p></div>
       <div className="email-review-mail-sheet glass-surface glass-surface--clear glass-surface--lg">
         <div className="email-review-mail-sheet-bar"><Mail size={13} /><span>Personalised message</span><span>{signatureLoading ? "Loading signature…" : signature ? "Gmail signature included" : "Email body"}</span></div>
-        <iframe title={`Email for ${message.companyName}`} srcDoc={html} sandbox="" />
+        <EmailPreviewFrame title={`Email for ${message.companyName}`} html={html} />
       </div>
       <p className="email-review-signature-note">{signatureLoading ? "Loading the configured Gmail signature…" : signature ? `The Gmail signature follows ${signatureGap} blank line${signatureGap === 1 ? "" : "s"}, matching delivery.` : "A Gmail signature will appear when one is configured."}</p>
-      {(message.combinationMessage || message.statements?.length || message.points.length || message.attachments.length) ? <div className="email-review-personalisation">
+      {(message.combinationMessage || message.statements?.length || message.points.length || message.attachments.length || message.attachmentWarnings?.length) ? <div className="email-review-personalisation">
         <p>{[message.combinationMessage ? "Combination matched" : null, message.statements?.length ? `${message.statements.length} statement${message.statements.length === 1 ? "" : "s"}` : null,
           message.points.length ? `${message.points.length} point${message.points.length === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ")}</p>
-        {message.attachments.length > 0 && <p className="email-review-attachments"><Paperclip size={13} /><span>{message.attachments.length} attachment{message.attachments.length === 1 ? "" : "s"}: {message.attachments.map(file => file.filename).join(", ")}</span></p>}
+        {message.attachments.map(file => <p key={file.documentId} className="email-review-attachments"><Paperclip size={13} /><span>{file.filename}<br /><span className="text-xs text-muted">{[file.category ? file.category[0].toUpperCase() + file.category.slice(1) : null, file.financialYear ? `FY ${file.financialYear}` : null, file.fileSize < 1024 * 1024 ? `${(file.fileSize / 1024).toFixed(1)} KB` : `${(file.fileSize / (1024 * 1024)).toFixed(1)} MB`, typeof file.required === "boolean" ? file.required ? "Required" : "Optional" : null].filter(Boolean).join(" · ")}</span></span></p>)}
+        {message.attachmentWarnings?.map((warning, index) => <p key={`${warning.ruleId}-${index}`} className="email-review-recipient-issue" role="status"><CircleAlert size={14} />{warning.message}</p>)}
       </div> : null}
     </section>
   </>;
@@ -226,47 +235,58 @@ export default function EmailDeliveryReviewWorkspace(props: Props) {
   const { open, preview, busy, phase } = props;
   const reduced = useReducedMotion(), group = useId();
   const [tab, setTab] = useState("eligible"), [search, setSearch] = useState("");
+  const [reasonFilter, setReasonFilter] = useState("");
   const [selected, setSelected] = useState(""), [mobileDetail, setMobileDetail] = useState(false);
-  const [revealed, setRevealed] = useState(false), [previousPreview, setPreviousPreview] = useState(false);
+  const [previousPreview, setPreviousPreview] = useState(false);
+  const [detailScope, animateDetail] = useAnimate();
   const keyboardPreparation = useRef(false);
   const audienceRows = useRef(new Map<string, HTMLButtonElement>());
   const preparing = phase !== null;
-  useEffect(() => {
-    if (!open) { setRevealed(false); setPreviousPreview(false); setSearch(""); setMobileDetail(false); setSelected(""); return; }
-    if (!preview) { setRevealed(false); setMobileDetail(false); return; }
+  useLayoutEffect(() => {
+    setReasonFilter("");
+    if (!open) { setPreviousPreview(false); setSearch(""); setMobileDetail(false); setSelected(""); return; }
+    if (!preview) { setMobileDetail(false); return; }
     setPreviousPreview(true);
     setTab(preview.messages.length ? "eligible" : "skipped");
     setSelected(current => preview.messages.some(message => message.entryId === current) ? current : preview.messages[0]?.entryId || (preview.skipped[0] ? `skipped:${preview.skipped[0].clientId}:0` : ""));
-    const timer = window.setTimeout(() => setRevealed(true), reduced ? 0 : 140);
-    return () => window.clearTimeout(timer);
-  }, [open, preview, reduced]);
+  }, [open, preview]);
+  useEffect(() => {
+    if (!detailScope.current) return;
+    const animation = animateDetail(detailScope.current, { opacity: reduced ? [1, 1] : [.55, 1], x: reduced ? [0, 0] : [8, 0] }, { duration: reduced ? 0 : emailMotion.content, ease });
+    return () => animation.stop();
+  }, [selected, tab, preview, open, reduced, detailScope, animateDetail]);
   const messageIndex = useMemo(() => new Map((preview?.messages || []).map(message => [message.entryId, message])), [preview]);
+  const preparedCategories = useMemo(() => ({ ...props.clientCategories, ...Object.fromEntries((preview?.messages || []).filter(message => message.category).map(message => [message.clientId, message.category])), ...Object.fromEntries((preview?.clientMatches || []).filter(row => row.category).map(row => [row.clientId, row.category])) }), [preview, props.clientCategories]);
+  const reasonGroups = useMemo(() => skipReasonGroups(preview?.skipped || []), [preview]);
   const rows = useMemo(() => {
     const matcher = createSearchMatcher(search);
     const all = tab === "eligible" ? (preview?.messages || []).map(message => ({ key: message.entryId, clientId: message.clientId, companyName: message.companyName, reason: "" }))
       : (preview?.skipped || []).map((client, index) => ({ ...client, key: `skipped:${client.clientId}:${index}` }));
-    return all.filter(row => [row.companyName, row.clientId, props.clientCategories[row.clientId]].some(matcher));
-  }, [preview, search, tab, props.clientCategories]);
+    return all.filter(row => (tab !== "skipped" || !reasonFilter || skipReasonKey(row) === reasonFilter)
+      && [row.companyName, row.clientId, preparedCategories[row.clientId]].some(matcher));
+  }, [preview, search, tab, reasonFilter, preparedCategories]);
+  useEffect(() => { if (!rows.some(row => row.key === selected)) setSelected(rows[0]?.key || ""); }, [rows, selected]);
   const issues = useMemo(() => (preview?.messages || []).reduce((count, message) => count + Number(Boolean(recipientIssue(props.drafts[message.entryId] || initialRecipientDraft(message)))), 0), [preview, props.drafts]);
   const workflow = props.workflows.find(item => item.id === props.workflowId);
   const scenarioCount = workflow?.contentRules?.filter(rule => rule.type === "combination").length || 0;
   const workflowMetadata = workflow?.contentMode === "combinations" ? `Combination${scenarioCount ? ` · ${scenarioCount} scenario${scenarioCount === 1 ? "" : "s"}` : ""}` : undefined;
   const scope = props.selectedCount ? `${props.selectedCount} selected tracker row${props.selectedCount === 1 ? "" : "s"}` : "All tracker clients";
-  const reviewing = Boolean(preview && revealed);
+  const reviewing = Boolean(preview);
   const selectedRow = rows.find(row => row.key === selected);
   const selectedMessage = tab === "eligible" ? messageIndex.get(selected) : undefined;
+  const selectedMatch = preview?.clientMatches?.find(row => row.clientId === (selectedMessage?.clientId || selectedRow?.clientId));
   const choose = (key: string, detail = true) => { setSelected(key); if (detail) setMobileDetail(true); };
   const changeTab = (next: string) => {
     setTab(next); setMobileDetail(false);
     setSelected(next === "eligible" ? preview?.messages[0]?.entryId || "" : preview?.skipped[0] ? `skipped:${preview.skipped[0].clientId}:0` : "");
   };
-  const prepareAction = <PrepareAction busy={preparing} phase={phase} kind={props.kind} refresh={reviewing} complete={Boolean(preview && !revealed && !preparing)} disabled={busy || !props.workflowId}
+  const prepareAction = <PrepareAction busy={preparing} phase={phase} kind={props.kind} refresh={reviewing} disabled={busy || !props.workflowId}
     onClick={event => { keyboardPreparation.current = event.detail === 0; props.onPrepare(); }} />;
   const footer = <div className="email-review-footer tracker-modal-footer">
-    <span className={`email-review-footer-status ${issues ? "needs-attention" : ""}`} role="status">{reviewing ? busy && !preparing ? props.deliveryMode === "draft" ? "Creating Gmail drafts…" : "Sending emails…" : issues ? `${issues} recipient issue${issues === 1 ? "" : "s"}` : `${preview?.messages.length || 0} prepared` : ""}</span>
+    <span className={`email-review-footer-status ${issues ? "needs-attention" : ""}`} role="status">{reviewing ? busy && !preparing ? props.deliveryMode === "draft" ? "Starting draft creation…" : "Starting delivery…" : issues ? `${issues} recipient issue${issues === 1 ? "" : "s"}` : `${preview?.messages.length || 0} prepared` : ""}</span>
     <div><GlassButton onClick={props.onClose} disabled={busy} className="email-review-cancel">Cancel</GlassButton>
       {reviewing && <><GlassButton onClick={props.onDrafts} disabled={busy || !preview?.messages.length} className="email-review-drafts">Create Gmail drafts</GlassButton>
-        <TransmissionSendButton onClick={props.onSend} disabled={busy || !preview?.messages.length} count={preview?.messages.length || 0} /></>}
+        <TransmissionSendButton onClick={props.onSend} suspended={props.interactionLocked} disabled={busy || !preview?.messages.length} count={preview?.messages.length || 0} /></>}
     </div>
   </div>;
   return <TrackerModal open={open} onClose={props.onClose} title="Email clients" subtitle="Review recipients and personalised emails before delivery" icon={Send} inert={props.interactionLocked}
@@ -285,19 +305,31 @@ export default function EmailDeliveryReviewWorkspace(props: Props) {
         {reviewing && <div className="email-review-refresh-action">{prepareAction}</div>}
       </div>
       {props.error && <div className="email-review-error" role="alert"><CircleAlert size={16} /><div><strong>Unable to prepare email preview.</strong><p>{props.error}</p></div><button type="button" onClick={props.onPrepare} disabled={busy}>Try again <ArrowUpRight size={13} /></button></div>}
-      <AnimatePresence mode="wait" initial={false}>
         {!reviewing ? <motion.div key="prepare" className="email-review-ready" initial={false} exit={{ opacity: 0, y: reduced ? 0 : -5 }} transition={{ duration: reduced ? 0 : 0.15 }}>
           <div className="email-review-ready-mark" aria-hidden="true"><Mail size={25} /></div>
           <h3>{previousPreview && !preview ? "Preview needs to be refreshed" : props.kind === "reminder" ? "Ready to prepare reminder" : "Ready to prepare"}</h3>
           <p>{props.kind === "reminder" ? "Reply status will be checked before eligible clients are prepared." : "Eligibility, recipients and personalised messages will be checked before delivery."}</p>
           {prepareAction}
-        </motion.div> : <motion.div key="review" className={`email-review-panes ${mobileDetail ? "show-detail" : ""}`} initial={{ opacity: 0, y: reduced ? 0 : 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? 0 : 0.28, ease }}>
+        </motion.div> : <motion.div key="review" className={`email-review-panes ${mobileDetail ? "show-detail" : ""}`} initial={{ opacity: reduced ? 1 : .55, y: reduced ? 0 : 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : 0.28, ease }}>
           <aside className="email-review-audience" aria-label="Audience navigator">
             <div className="email-review-audience-controls"><div className="email-review-section-title"><h2 ref={node => {
               if (node && keyboardPreparation.current && !preparing) { keyboardPreparation.current = false; requestAnimationFrame(() => node.focus({ preventScroll: true })); }
             }} tabIndex={-1}>Audience</h2><span>{preview?.messages.length} eligible · {preview?.skipped.length} skipped</span></div>
               <SegmentedControl label="Audience filter" options={[{ value: "eligible", label: `Eligible ${preview?.messages.length}` }, { value: "skipped", label: `Skipped ${preview?.skipped.length}` }]} value={tab} onChange={changeTab} />
               <label className="email-review-search"><Search size={15} /><input aria-label="Search audience clients" placeholder="Search clients…" value={search} onChange={event => setSearch(event.target.value)} />{search && <button type="button" aria-label="Clear audience search" onClick={() => setSearch("")}><X size={13} /></button>}</label>
+              {Boolean(preview?.scenarioSummary?.length) && <details className="email-review-reason-breakdown">
+                <summary>Scenario matches and eligibility</summary>
+                {preview!.scenarioSummary!.map(scenario => <p key={scenario.id}>{scenario.name}: {scenario.matched} matched · {scenario.selected} selected · {scenario.eligible} eligible</p>)}
+                <p>{preview?.clientMatches?.filter(row => row.selection.matchedScenarioIds.length > 1).length || 0} overlapping · {preview?.clientMatches?.filter(row => !row.selection.matchedScenarioIds.length).length || 0} with no matching scenario</p>
+              </details>}
+              {tab === "skipped" && reasonGroups.length > 0 && <details className="email-review-reason-breakdown">
+                <summary>Why clients were skipped{reasonFilter ? " · Filter active" : ""}</summary>
+                <p>Each client is counted under their first blocking reason.</p>
+                <div role="group" aria-label="Skipped reason filter">
+                  <button type="button" aria-pressed={!reasonFilter} onClick={() => setReasonFilter("")}>All reasons <span>{preview?.skipped.length}</span></button>
+                  {reasonGroups.map(reason => <button key={reason.key} type="button" aria-pressed={reasonFilter === reason.key} onClick={() => setReasonFilter(reason.key)}>{reason.label}<span>{reason.count}</span></button>)}
+                </div>
+              </details>}
             </div>
             <div className="email-review-client-list" role="list" aria-label={tab === "eligible" ? "Eligible clients" : "Skipped clients"}>
               {rows.map((row, index) => {
@@ -312,7 +344,7 @@ export default function EmailDeliveryReviewWorkspace(props: Props) {
                     choose(rows[next].key, false); audienceRows.current.get(rows[next].key)?.focus();
                   }}>
                   {selected === row.key && <motion.span className="email-review-row-selection glass-surface glass-surface--clear" layoutId="audience-selection" transition={{ type: "spring", stiffness: 500, damping: 42, mass: 0.8, duration: reduced ? 0 : undefined }} aria-hidden="true" />}
-                  <span className="email-review-row-content"><strong>{row.companyName}</strong><span className="email-review-row-id">{row.clientId}{props.clientCategories[row.clientId] ? ` · ${props.clientCategories[row.clientId]}` : ""}</span>
+                  <span className="email-review-row-content"><strong>{row.companyName}</strong><span className="email-review-row-id">{row.clientId}{preparedCategories[row.clientId] ? ` · ${preparedCategories[row.clientId]}` : ""}</span>
                     <span className="email-review-row-bottom">{draft ? <><span>{recipientCount(draft)} recipient{recipientCount(draft) === 1 ? "" : "s"}</span><span className={`email-review-status ${issue ? "needs-attention" : "is-ready"}`}><i />{issue ? "Needs attention" : "Ready"}</span></> : <span className="email-review-skip-reason">{row.reason}</span>}</span>
                   </span>
                 </button></div>;
@@ -323,15 +355,18 @@ export default function EmailDeliveryReviewWorkspace(props: Props) {
           <section className="email-review-detail" aria-label="Selected client review" aria-busy={preparing}>
             <button type="button" className="email-review-back" onClick={() => { setMobileDetail(false); requestAnimationFrame(() => audienceRows.current.get(selected)?.focus()); }}><ArrowLeft size={15} /> Back to audience</button>
             {preview?.messages.length === 0 && <div className="email-review-no-eligible"><Mail size={19} /><div><strong>No eligible clients</strong><p>No tracker clients currently match this workflow. {preview.skipped.length} client{preview.skipped.length === 1 ? " was" : "s were"} skipped.</p></div><button type="button" onClick={() => { changeTab("skipped"); setMobileDetail(false); }}>Review skipped clients</button></div>}
-            <AnimatePresence mode="wait" initial={false}><motion.div key={`${tab}:${selected}`} className="email-review-detail-content" initial={{ opacity: 0, y: reduced ? 0 : 5, filter: reduced ? "none" : "blur(2px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} exit={{ opacity: 0, y: reduced ? 0 : -3, filter: reduced ? "none" : "blur(2px)" }} transition={{ duration: reduced ? 0 : 0.1 }}>
-              {selectedMessage ? <ClientRecipientReview key={selectedMessage.entryId} message={selectedMessage} draft={props.drafts[selectedMessage.entryId] || initialRecipientDraft(selectedMessage)} kind={props.kind} disabled={busy}
+            <div ref={detailScope} className="email-review-detail-content">
+              {selectedMatch && selectedMatch.selection.scenarios.length > 0 && <div className="email-review-reason-breakdown">
+                <p>{selectedMatch.category} · Matched: {selectedMatch.selection.scenarios.filter(row => row.matched).map(row => row.name).join(", ") || "None"}</p>
+                <p>Selected: {selectedMatch.selection.scenarios.filter(row => row.selected).map(row => row.name).join(", ") || "None"}{selectedMatch.selection.ignoredScenarioIds.length ? ` · Lower priority: ${selectedMatch.selection.scenarios.filter(row => selectedMatch.selection.ignoredScenarioIds.includes(row.id)).map(row => row.name).join(", ")}` : ""}</p>
+              </div>}
+              {selectedMessage ? <ClientRecipientReview message={selectedMessage} draft={props.drafts[selectedMessage.entryId] || initialRecipientDraft(selectedMessage)} kind={props.kind} disabled={busy}
                 signature={props.signature} signatureLoading={props.signatureLoading} signatureGap={preview?.workflow.signatureGap ?? 2} onChange={draft => props.onDraft(selectedMessage.entryId, draft)} onExpand={() => props.onExpand(selectedMessage)} />
                 : selectedRow?.reason ? <div className="email-review-skipped-detail"><span className="email-review-eyebrow">Skipped client</span><h2>{selectedRow.companyName}</h2><p className="email-review-skipped-id">{selectedRow.clientId}</p><div><CircleAlert size={21} /><h3>This client was skipped</h3><p>{selectedRow.reason}</p></div></div>
                   : <div className="email-review-detail-empty"><Mail size={28} /><h3>Select a client to review</h3><p>Inspect recipients and the personalised email from the audience list.</p></div>}
-            </motion.div></AnimatePresence>
+            </div>
           </section>
         </motion.div>}
-      </AnimatePresence>
     </div></LayoutGroup>
   </TrackerModal>;
 }

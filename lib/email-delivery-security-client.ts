@@ -72,6 +72,7 @@ export function buildDeliveryMessages(
       cc,
       subject: message.subject,
       html: message.html,
+      ...(message.attachmentSnapshot ? { attachmentSnapshot: message.attachmentSnapshot } : {}),
       attachments: message.attachments.map(({ documentId }) => ({
         documentId,
       })),

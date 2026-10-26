@@ -18,6 +18,7 @@ const copy = value => structuredClone(value);
 const chain = value => ({ select() { return this; }, sort() { return this; }, skip(count) { value = value.slice(count); return this; }, limit(count) { value = value.slice(0, count); return this; }, lean() { return Promise.resolve(copy(value)); } });
 const matches = (entry, query) => Object.entries(query).every(([key, wanted]) => {
   if (key === '$or') return wanted.some(condition => matches(entry, condition));
+  if (key === '$and') return wanted.every(condition => matches(entry, condition));
   const actual = key.split('.').reduce((value, part) => value?.[part], entry);
   if (wanted instanceof RegExp) return wanted.test(String(actual ?? ''));
   if (wanted && typeof wanted === 'object') {
@@ -36,42 +37,58 @@ function apply(entry, update, insert = false) {
     if (key.startsWith('values.')) delete entry.values[key.slice(7)];
     else delete entry[key];
   }
+  for (const [key, change] of Object.entries(update.$pull || {})) entry[key] = (entry[key] || []).filter(value => !change.$in.includes(value));
+  for (const [key, change] of Object.entries(update.$addToSet || {})) entry[key] = [...new Set([...(entry[key] || []), ...change.$each])];
 }
 const stubs = {
   'next-auth': { getServerSession: async () => { if (failSession) throw Error('Session unavailable'); return session; } },
   '@/lib/auth': { authOptions: {} },
   '@/lib/authUsers': { isAdminSession: async user => user?.user?.role === 'admin' },
   '@/lib/mongoose': { connectDB: async () => { if (failDatabase) throw Error('Database unavailable'); } },
-  '@/models/Client': { collection: { name: 'clients' }, find: query => chain(clientRows.filter(client => matches(client, query))) },
+  '@/models/Client': { collection: { name: 'clients' }, find: query => chain(clientRows.filter(client => matches(client, query))),
+    aggregate: stages => Promise.resolve(pipeline(copy(clientRows), JSON.parse(JSON.stringify(stages)), { clienttrackerentries: copy(entries) })) },
   '@/models/ClientCustomField': { find: () => chain([]) },
   '@/lib/server/client-credentials': { clientCredentialAccess: async () => ({ protectedKeys: new Set(), searchableKeys: [] }) },
   '@/models/ClientTracker': {
     findById: async () => ({ ...copy(tracker), toObject: () => copy(tracker) }),
-    findByIdAndUpdate: async (id, update) => { writes++; Object.assign(tracker, copy(update.$set)); return copy(tracker); },
+    findByIdAndUpdate: async (id, update) => { writes++; apply(tracker, update); return copy(tracker); },
+    updateOne: async (query, update) => { if (query.$or && tracker.clientSyncCheckedAt) return { modifiedCount: 0 }; writes++; apply(tracker, update); return { modifiedCount: 1 }; },
   },
   '@/models/ClientTrackerEntry': {
     find: query => chain(entries.filter(entry => matches(entry, query))),
     countDocuments: async query => entries.filter(entry => matches(entry, query)).length,
     aggregate: async stages => {
       if (stages.some(stage => stage.$group)) { overviewReads++; return []; }
+      // Overview totals now share a facet with the grouped field counts.
+      // Keep this model double's empty-count response and evaluate its total.
+      const facetIndex = stages.findIndex(stage => stage.$facet?.counts?.some(part => part.$group));
+      if (facetIndex !== -1) {
+        overviewReads++;
+        const database = { clients: clientRows, clientcontacts: [], people: [], persons: [] };
+        const input = pipeline(copy(entries), stages.slice(0, facetIndex), database);
+        return [{ counts: [], total: pipeline(input, stages[facetIndex].$facet.total, database) }];
+      }
       return pipeline(copy(entries), stages, { clients: clientRows, clientcontacts: [], people: [], persons: [] });
     },
     updateMany: async (query, update) => { writes++; entries.filter(entry => matches(entry, query)).forEach(entry => apply(entry, update)); },
     bulkWrite: async operations => {
       writes++;
+      let upsertedCount = 0;
       for (const { updateOne: operation } of operations) {
         const updatePaths = Object.values(operation.update).flatMap(update => Object.keys(update));
         assert.equal(new Set(updatePaths).size, updatePaths.length, 'Mongo update operators must not target the same path');
         let entry = entries.find(entry => matches(entry, operation.filter));
         const insert = !entry;
-        if (insert) { entry = { ...operation.filter, values: {} }; entries.push(entry); }
+        if (insert) { entry = { ...operation.filter, values: {} }; entries.push(entry); upsertedCount++; }
         apply(entry, operation.update, insert);
       }
+      return { upsertedCount };
     },
   },
   '@/lib/server/tracker-linked-data': { resolveTrackerLinkedValues: async () => new Map() },
   '@/lib/server/tracker-computed-values': { resolveTrackerComputedValues: (fields, values) => values },
-  '@/lib/server/tracker-membership': { syncCategoryTrackerMembership: async () => false },
+  '@/lib/server/tracker-membership': { syncCategoryTrackerMembership: async () => false,
+    proposedTrackerAudience: (current, body) => load('lib/server/tracker-membership.ts').proposedTrackerAudience(current, body), confirmTrackerSync: async () => [], applyTrackerSync: async () => 0 },
   '@/lib/server/excel-report-style': { finaliseReadableReportSheet() {} },
   '@/models/EmailLog': {},
   '@/lib/server/activity-events': { recordActivityEvent: async () => null },
@@ -266,6 +283,7 @@ async function main() {
     tracker, toast: { error: message => { throw Error(message); } },
     draftField: load('lib/tracker-create.ts').draftField,
     configurationSnapshot: load('lib/tracker-configuration.ts').configurationSnapshot,
+    configurationSyncDraft: load('lib/tracker-configuration.ts').configurationSyncDraft, setSyncDraft: noop,
     setConfigurationBaseline: noop, setConfigurationSession: noop, setConfigurationError: noop,
     setConfigurationSaved: noop, setConfigurationCompact: noop, setConfigurationNestedDialog: noop, setConfigurationDiscardOpen: noop,
     setFieldDraft: noop, setColumnDraft: noop, setBasicDraft: noop, setConfigurationOpen: noop,
@@ -276,6 +294,7 @@ async function main() {
   let confirmation;
   await handler('saveConfiguration', {
     tracker, fieldDraft: [first], basicDraft: {}, participantDraft: ['A', 'B'],
+    syncDraft: { clientScope: 'selected', clientMembershipMode: 'snapshot', clientCategories: [] }, configurationBaseline: {},
     configurationSaving: { current: false }, setConfigurationError: noop,
     configurationNeedsFinancialYear: load('lib/tracker-configuration.ts').configurationNeedsFinancialYear,
     toast: { error: message => { throw Error(message); } },
@@ -303,6 +322,7 @@ async function main() {
   assert.equal(overviewResponse.headers.get('cache-control'), 'private, no-store');
   const overviewBody = await overviewResponse.json();
   assert.deepEqual(overviewBody.overviewCounts, []);
+  assert.equal(overviewBody.totalEntryCount, 130, 'Faceted overview preserves the whole-tracker total');
   assert(!('entries' in overviewBody), 'Summaries must not load the table a second time');
   assert.equal(overviewReads, 1);
   const freshResponse = await GET(new NextRequest('http://localhost/api/client-trackers/test?overview=0'), { params: Promise.resolve({ id: tracker._id }) });
@@ -331,14 +351,16 @@ async function main() {
   reset();
   tracker.clientMembershipMode = 'categorySync';
   tracker.clientCategories = ['PWP'];
-  clientRows = [{ clientId: 'A', category: 'PWP' }, { clientId: 'B', category: 'PIBO' }, { clientId: 'C', category: 'PWP' }];
+  clientRows = [{ clientId: 'A', category: 'PWP' }, { clientId: 'B', category: 'PIBO' }, { clientId: 'C', category: 'PWP' }, { clientId: 'D', category: 'PWP' }];
   entries.push({ trackerId: tracker._id, clientId: 'C', inScope: false, values: { note: 'Saved C' } });
   let membershipSaved = 0;
   tracker.save = async () => { membershipSaved++; };
   await load('lib/server/tracker-membership.ts').syncCategoryTrackerMembership(tracker);
-  assert.deepEqual(tracker.clientIds, ['A', 'C']);
-  assert.equal(membershipSaved, 1);
+  assert.deepEqual(tracker.clientIds, ['A', 'B', 'D']);
+  assert.equal(membershipSaved, 0, 'Atomic additions must not save a stale entire tracker document');
+  assert.equal(entries.find(entry => entry.clientId === 'B').inScope, true);
+  assert.equal(entries.find(entry => entry.clientId === 'C').inScope, false);
   assert.equal(entries.find(entry => entry.clientId === 'C').values.note, 'Saved C');
-  console.log('PASS: category membership is refreshed when clients swap but the count stays equal');
+  console.log('PASS: additive category membership preserves historical clients and exclusions without whole-document saves');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

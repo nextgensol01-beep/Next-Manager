@@ -85,6 +85,8 @@ function FixtureContent() {
           workflowName="Fixture workflow"
           batch={batch}
           onClose={() => setModal(false)}
+          onAccepted={() => {}}
+          onHandoffComplete={() => setModal(false)}
           onCommit={async () => {
             setDeliveryAttempts(value => value + 1);
             await new Promise(resolve => setTimeout(resolve, 900));
@@ -93,7 +95,12 @@ function FixtureContent() {
               throw new Error("Fixture send interrupted. Try the same delivery again.");
             }
             setCommits((value) => value + 1);
-            return { completed: batch.messages.length, dismiss: () => setModal(false) };
+            return { outcome: "accepted" as const, campaignId: batch.campaignId, job: {
+              campaignId: batch.campaignId, trackerId: "TRACKER", trackerName: "Fixture tracker", workflowName: "Fixture workflow",
+              mode: batch.mode, kind: batch.kind, status: "queued" as const, total: batch.messages.length,
+              processed: 0, sent: 0, drafts: 0, failed: 0, uncertain: 0, pending: batch.messages.length, delivering: 0,
+              createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), startedAt: null, completedAt: null, message: "Queued", executionMode: "browser" as const, canResume: false, controllerLeaseExpiresAt: null, needsHistoryRepair: false,
+            } };
           }}
         />
       )}

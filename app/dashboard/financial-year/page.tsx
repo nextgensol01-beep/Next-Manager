@@ -148,44 +148,8 @@ export default function FinancialYearPage() {
       };
     }
 
-    // PIBO - targets with type breakdown
-    const entries = Array.isArray(rec.targets) && rec.targets.length > 0 ? rec.targets : null;
-    if (entries) {
-      const achievedMapFromTx = buildEntryValueMap(rec.achievedByType);
-      const hasTypedAchieved = Object.keys(achievedMapFromTx).length > 0;
-      if (hasTypedAchieved) {
-        return { entries, achievedMap: achievedMapFromTx, rows: undefined };
-      }
-
-      // Legacy fallback when typed transaction data is unavailable.
-      const achievedMap: Record<string, number> = {};
-      const catIds = [...new Set(entries.map((e) => e.categoryId))];
-      for (const catId of catIds) {
-        const catEntries = entries.filter((e) => e.categoryId === catId);
-        const catTotal = catEntries.reduce((s, e) => s + e.value, 0);
-        const rawAchieved =
-          catId === "1" ? (rec.achievedCat1 ?? 0) :
-          catId === "2" ? (rec.achievedCat2 ?? 0) :
-          catId === "3" ? (rec.achievedCat3 ?? 0) :
-          catId === "4" ? (rec.achievedCat4 ?? 0) : 0;
-        for (const entry of catEntries) {
-          const share = catTotal > 0 ? entry.value / catTotal : 1 / catEntries.length;
-          achievedMap[`${catId}|${entry.type}`] = Math.round(rawAchieved * share);
-        }
-      }
-      return { entries, achievedMap, rows: undefined };
-    }
-
-    // Legacy flat fallback
-    return {
-      entries: null,
-      rows: [
-        { label: "CAT-I",   base: rec.cat1Target ?? 0, used: rec.achievedCat1 ?? 0 },
-        { label: "CAT-II",  base: rec.cat2Target ?? 0, used: rec.achievedCat2 ?? 0 },
-        { label: "CAT-III", base: rec.cat3Target ?? 0, used: rec.achievedCat3 ?? 0 },
-        { label: "CAT-IV",  base: rec.cat4Target ?? 0, used: rec.achievedCat4 ?? 0 },
-      ],
-    };
+    // The shared coverage engine uses the original record; never infer legacy type allocations.
+    return { entries: rec.targets ?? [], achievedMap: buildEntryValueMap(rec.achievedByType), rows: undefined };
   };
 
   // -- Render --------------------------------------------------------------
@@ -484,6 +448,7 @@ export default function FinancialYearPage() {
               clientType={_bCat === "PWP" ? "PWP" : "PIBO"}
               entries={_bProps.entries ?? undefined}
               achievedMap={_bProps.achievedMap}
+              record={breakdownRec}
               rows={_bProps.rows}
             />
           </Modal>

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentType, ReactNode } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { ClipboardList, X } from "lucide-react";
 import Modal from "@/components/ui/Modal";
 
@@ -24,10 +24,44 @@ type TrackerModalProps = {
 
 /** A calm, focused sheet used throughout the client-tracker workspace. */
 export default function TrackerModal({ open, onClose, title, subtitle, icon: Icon = ClipboardList, children, footer, size = "xl", fixedHeight = false, scrollable = true, className, compactHeader = false, inert = false }: TrackerModalProps) {
+  const [frame, setFrame] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open || !frame) return;
+    const panel = frame.closest<HTMLElement>(".tracker-modal"), overlay = panel?.parentElement;
+    if (!panel || !overlay) return;
+    const viewport = window.visualViewport;
+    const media = matchMedia("(max-width: 1023px), (max-height: 600px)");
+    let scheduled = 0;
+    const update = () => {
+      scheduled = 0;
+      if (!media.matches) {
+        delete overlay.dataset.trackerOverlay;
+        panel.classList.remove("is-short-viewport");
+        for (const name of ["--tracker-visual-height", "--tracker-visual-top"]) overlay.style.removeProperty(name);
+        return;
+      }
+      overlay.dataset.trackerOverlay = "true";
+      const height = Math.round(viewport?.height || window.innerHeight);
+      panel.classList.toggle("is-short-viewport", height <= 600);
+      overlay.style.setProperty("--tracker-visual-height", `${height}px`);
+      overlay.style.setProperty("--tracker-visual-top", `${Math.round(viewport?.offsetTop || 0)}px`);
+    };
+    const schedule = () => { if (!scheduled) scheduled = requestAnimationFrame(update); };
+    // Only this tracker sheet opts in; global modal geometry is untouched.
+    update(); viewport?.addEventListener("resize", schedule); viewport?.addEventListener("scroll", schedule);
+    window.addEventListener("resize", schedule);
+    return () => {
+      cancelAnimationFrame(scheduled);
+      viewport?.removeEventListener("resize", schedule); viewport?.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      // Keep the last geometry through the sheet's exit animation. These
+      // properties live only on its own portal and disappear with that node.
+    };
+  }, [open, frame]);
   return <Modal open={open} onClose={onClose} title={title} size={size} hideHeader fluidMotion inert={inert}
-    className={`tracker-modal ${compactHeader ? "is-header-compact" : ""} ${className || ""} mt-auto ${fixedHeight ? "h-[94dvh] sm:h-[90vh]" : "h-auto"} max-h-[94dvh] rounded-b-none rounded-t-[28px] border-white/70 shadow-[0_34px_110px_rgba(0,0,0,0.28)] backdrop-blur-2xl sm:mt-0 sm:max-h-[90vh] sm:rounded-[28px] dark:border-white/[0.12] dark:shadow-[0_38px_120px_rgba(0,0,0,0.74)]`}
+    className={`tracker-modal ${fixedHeight ? "is-complex-sheet" : ""} ${compactHeader ? "is-header-compact" : ""} ${className || ""} mt-auto ${fixedHeight ? "h-[94dvh] sm:h-[90vh]" : "h-auto"} max-h-[94dvh] rounded-b-none rounded-t-[28px] border-white/70 shadow-[0_34px_110px_rgba(0,0,0,0.28)] backdrop-blur-2xl sm:mt-0 sm:max-h-[90vh] sm:rounded-[28px] dark:border-white/[0.12] dark:shadow-[0_38px_120px_rgba(0,0,0,0.74)]`}
     bgColor="rgba(var(--color-card-rgb),0.92)">
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-transparent">
+    <div ref={setFrame} className="tracker-modal-frame flex min-h-0 flex-1 flex-col overflow-hidden bg-transparent">
       <div className="tracker-modal-header flex shrink-0 items-start justify-between gap-3 border-b border-white/[0.35] bg-white/20 px-4 py-4 backdrop-blur-2xl sm:gap-4 sm:px-6 sm:py-5 dark:border-white/[0.10] dark:bg-white/[0.04]">
         <div className="flex min-w-0 items-start gap-3 sm:gap-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-brand-500/10 text-brand-600 shadow-sm sm:h-11 sm:w-11"><Icon className="h-5 w-5" /></div>

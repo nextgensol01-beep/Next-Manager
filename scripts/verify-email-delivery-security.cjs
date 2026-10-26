@@ -70,6 +70,8 @@ function matches(object, filter) {
         switch (operator) {
           case "$ne":
             return !values.some((value) => equals(value, expected));
+          case "$nin":
+            return !values.some(value => expected.some(item => equals(value, item)));
           case "$in":
             return values.some((value) =>
               expected.some((item) => equals(value, item)),
@@ -121,19 +123,48 @@ function update(object, change, inserted = false) {
   for (const key of Object.keys(change.$unset || {}))
     set(object, key, undefined, true);
 }
+function project(value, fields) {
+  if (value == null) return value;
+  if (Array.isArray(value)) return value.map(item => project(item, fields));
+  if (typeof fields === 'object') {
+    if (fields.items?.$slice) {
+      const [start, count] = fields.items.$slice;
+      return { _id: value._id, items: copy(value.items.slice(start, start + count)) };
+    }
+    throw Error('Unsupported test projection');
+  }
+  const tokens = fields.split(/\s+/).filter(Boolean);
+  if (!tokens.some(token => !token.startsWith('+') && !token.startsWith('-'))) return copy(value);
+  const tree = {};
+  for (const token of ['_id', ...tokens]) {
+    if (token.startsWith('-')) continue;
+    const parts = token.replace(/^\+/, '').split('.');
+    let branch = tree;
+    for (const part of parts.slice(0, -1)) branch = branch[part] ??= {};
+    branch[parts.at(-1)] = true;
+  }
+  function pick(object, branch) {
+    if (object == null) return object;
+    if (Array.isArray(object)) return object.map(item => pick(item, branch));
+    return Object.fromEntries(Object.entries(branch).filter(([key]) => key in object).map(([key, child]) =>
+      [key, child === true ? copy(object[key]) : pick(object[key], child)]));
+  }
+  return pick(value, tree);
+}
 function query(value) {
-  let result = copy(value);
+  let result = value, fields;
   const chain = {
-    select() {
+    select(selection) {
+      fields = selection;
       return chain;
     },
     lean() {
-      return Promise.resolve(copy(result));
+      return Promise.resolve(fields ? project(result, fields) : copy(result));
     },
     sort(order) {
       if (Array.isArray(result)) {
         const [key, direction] = Object.entries(order)[0];
-        result.sort((a, b) => (at(a, key) > at(b, key) ? 1 : -1) * direction);
+        result = [...result].sort((a, b) => (at(a, key) > at(b, key) ? 1 : -1) * direction);
       }
       return chain;
     },
@@ -142,7 +173,7 @@ function query(value) {
       return chain;
     },
     then(resolve, reject) {
-      return Promise.resolve(copy(result)).then(resolve, reject);
+      return Promise.resolve(fields ? project(result, fields) : copy(result)).then(resolve, reject);
     },
   };
   return chain;
@@ -208,7 +239,8 @@ function databaseModel(defaults = {}, unique) {
       return query(row);
     },
     aggregate(stages) {
-      let result = copy(rows);
+      // Aggregation executes in MongoDB; only its final result reaches the app.
+      let result = rows;
       for (const stage of stages) {
         if (stage.$match)
           result = result.filter((row) => matches(row, stage.$match));
@@ -328,6 +360,8 @@ const load = createLoader(mocks),
   crypto = load("lib/server/email-delivery-crypto.ts");
 const service = load("lib/server/email-delivery-approval.ts"),
   hash = load("lib/server/tracker-email-batch.ts").trackerEmailBatchHash;
+const worker = load("lib/server/tracker-email-worker.ts");
+const jobs = load("lib/server/email-delivery-jobs.ts");
 const routes = {
   settings: load("app/api/settings/email-delivery-security/route.ts"),
   authorize: load(
@@ -384,7 +418,25 @@ async function call(route, body, method = "POST", options = {}) {
   const response = await routes[route][method](request, {
     params: Promise.resolve({ id: options.trackerId || trackerId }),
   });
-  return { status: response.status, body: await response.json() };
+  const result = { status: response.status, body: await response.json() };
+  if (route !== "deliver" || !response.ok || options.acceptOnly) return result;
+  // Existing business/security assertions now exercise acceptance followed by the
+  // shared engine, isolated from live MongoDB/Gmail.
+  const alreadyProcessed = ["completed", "completed_with_errors"].includes(result.body.job.status);
+  try {
+    for (let pass = 0; pass < 300; pass++) {
+      const progress = await worker.processDeliveryJob(result.body.campaignId, { assertOwnership: async () => {} });
+      if (progress.state === "busy") return { status: 409, body: { code: "DELIVERY_BUSY" } };
+      if (progress.state !== "processing") break;
+    }
+    const record = Campaign.rows.find(row => row.campaignId === result.body.campaignId);
+    const summary = jobs.publicDeliveryJob(record);
+    return { status: 200, body: { campaignId: record.campaignId, status: summary.status,
+      total: summary.total, completed: summary.sent + summary.drafts, failed: summary.failed + summary.uncertain,
+      pending: summary.pending, uncertain: summary.uncertain, alreadyProcessed } };
+  } catch (error) {
+    return { status: error.status || 500, body: { error: error.message, code: error.code } };
+  }
 }
 function advanceCooldown() {
   Gate.rows.forEach((row) => (row.events = []));
@@ -411,6 +463,8 @@ async function approve(input, pin) {
   return values.approvalId;
 }
 async function main() {
+
+
   process.env.EMAIL_DELIVERY_OTP_SECRET = randomUUID() + randomUUID();
   process.env.EMAIL_SEND_PIN_PEPPER = randomUUID() + randomUUID();
   Tracker.rows.push({
@@ -1067,6 +1121,15 @@ async function main() {
         communicationStatus:
           scenario === "reminder-replied" ? "replied" : "sent",
       });
+    if (scenario === "attachment") {
+      const before = delivered.length;
+      advanceCooldown();
+      const rejected = await call("request", protectedBatch);
+      assert.equal(rejected.status, 409, "Unapproved attachments are rejected before OTP authorization");
+      assert.equal(rejected.body.code, "ATTACHMENT_REVIEW_INVALID");
+      assert.equal(delivered.length, before);
+      continue;
+    }
     const protectedId = await approve(protectedBatch, "246810"),
       beforeBusinessRule = delivered.length;
     assert.equal(
@@ -1389,7 +1452,8 @@ async function main() {
     "PASS: admin HTTP boundaries, defaults/fail-closed secrets, trusted-email setup/change, hashed OTP/PIN, resend/expiry/lockout/rates, exact batch and owner binding, policy invalidation, replay/concurrent delivery, history recovery, ambiguous Gmail outcomes, draft confirmation, 350-send cap and safe resume, secret-free audit pagination.",
   );
 }
-main().catch((error) => {
+module.exports = { Campaign, Tracker, Entry, EmailLog, Gate, Approval, Audit, Settings, WorkItem, worker, jobs, routes, mocks, load, service, batch, eligible, call, trackerId, delivered, otpMail, approve };
+if (require.main === module) main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

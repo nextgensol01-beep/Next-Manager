@@ -7,6 +7,7 @@ import LiquidGlassDropdown from "@/components/ui/LiquidGlassDropdown";
 import { GlassToggle } from "@/components/ui/liquid-glass/GlassToggle";
 import RichTextEditor, { type EmailEditorVariable } from "./TrackerRichTextEditor";
 import type { TrackerEmailWorkflow, TrackerEmailAttachment, TrackerField, TrackerRuleOperator, TrackerRecipientStrategy } from "@/lib/clientTrackers";
+import { FINANCIAL_YEARS } from "@/lib/utils";
 
 type ManagedDocument = { _id: string; clientId: string; documentName: string; mimeType?: string; fileSize?: number };
 type Option = { label: string; value: string };
@@ -18,7 +19,7 @@ const recipients = [
 ];
 const categories: Option[] = [{ value: "", label: "Any category" }, ...["compliance", "financial", "invoices", "certificates", "other"].map(value => ({ value, label: value[0].toUpperCase() + value.slice(1) }))];
 const kinds = [{ value: "", label: "Any type" }, { value: "general", label: "General document" }, { value: "epr-certificate", label: "EPR certificate" }];
-const years = [{ value: "tracker", label: "This tracker’s FY" }, { value: "any", label: "Any financial year" }];
+const years = [{ value: "tracker", label: "This tracker’s FY" }, { value: "any", label: "Any financial year" }, ...FINANCIAL_YEARS.map(year => ({ value: year, label: `FY ${year}` }))];
 const sources = [{ value: "shared", label: "One shared document for every client" }, { value: "client_latest", label: "Newest matching document for each client" }];
 const ease = [.22, 1, .36, 1] as const;
 const fileSize = (bytes?: number) => bytes == null ? "" : bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -136,7 +137,8 @@ export default function WorkflowDeliveryWorkspace({ workflow, fields, managedDoc
         {attachments.map((attachment, index) => {
           const source = attachment.source || "client_latest", document = source === "shared" ? managedDocuments.find(item => item._id === attachment.documentId) : undefined;
           const title = source === "shared" ? document?.documentName || "Choose a shared document" : "Newest matching document";
-          const detail = source === "shared" ? ["Shared with every client", fileSize(document?.fileSize)].filter(Boolean).join(" · ") : [categories.find(item => item.value === (attachment.category || ""))?.label, kinds.find(item => item.value === (attachment.documentKind || ""))?.label, years.find(item => item.value === (attachment.financialYear || "tracker"))?.label].filter(Boolean).join(" · ");
+          const yearOptions = attachment.financialYear && !years.some(item => item.value === attachment.financialYear) ? [...years, { value: attachment.financialYear, label: `FY ${attachment.financialYear}` }] : years;
+          const detail = [(source === "shared" ? ["Shared with every client", fileSize(document?.fileSize)] : [categories.find(item => item.value === (attachment.category || ""))?.label, kinds.find(item => item.value === (attachment.documentKind || ""))?.label, yearOptions.find(item => item.value === (attachment.financialYear || "tracker"))?.label]).filter(Boolean).join(" · "), attachment.required ? "Required" : "Optional"].join(" · ");
           const Icon = document?.mimeType?.includes("pdf") ? FileText : document?.mimeType?.match(/spreadsheet|excel/) ? FileSpreadsheet : File;
           const condition = attachment.conditionGroup?.conditions[0], field = fields.find(item => item.key === condition?.fieldKey), values = valuesForField(field);
           const needsValue = !["is_empty", "is_not_empty"].includes(condition?.operator || "equals"), open = expandedFile === attachment.id;
@@ -149,6 +151,7 @@ export default function WorkflowDeliveryWorkspace({ workflow, fields, managedDoc
             </div>
             {document?.fileSize != null && document.fileSize > 8 * 1024 * 1024 && <p className="delivery-file-error" role="alert">This file exceeds the 8 MB attachment limit.</p>}
             <DeliveryPanel id={`${id}-file-${attachment.id}`} open={open} reduced={reduced}>
+              <DeliverySelect label={`Attachment ${index + 1} requirement`} value={attachment.required === true ? "required" : "optional"} options={[{ value: "optional", label: "Optional" }, { value: "required", label: "Required" }]} onChange={value => update({ required: value === "required" })} />
               <DeliverySelect label={`Attachment ${index + 1} type`} value={source} options={sources} onChange={value => update({ source: value as "shared" | "client_latest", documentId: undefined })} />
               {source === "shared" ? <>
                 <DeliverySelect label={`Attachment ${index + 1} shared document`} value={attachment.documentId || ""} options={[{ value: "", label: "Choose a document" }, ...managedDocuments.map(item => ({ value: item._id, label: `${item.documentName} · ${item.clientId}` }))]}
@@ -157,7 +160,7 @@ export default function WorkflowDeliveryWorkspace({ workflow, fields, managedDoc
               </> : <div className="delivery-file-filters">
                 <DeliverySelect label={`Attachment ${index + 1} category`} value={attachment.category || ""} options={categories} onChange={value => update({ category: value as TrackerEmailAttachment["category"] || undefined })} />
                 <DeliverySelect label={`Attachment ${index + 1} document type`} value={attachment.documentKind || ""} options={kinds} onChange={value => update({ documentKind: value as TrackerEmailAttachment["documentKind"] || undefined })} />
-                <DeliverySelect label={`Attachment ${index + 1} financial year`} value={attachment.financialYear || "tracker"} options={years} onChange={value => update({ financialYear: value as "tracker" | "any" })} />
+                <DeliverySelect label={`Attachment ${index + 1} financial year`} value={attachment.financialYear || "tracker"} options={yearOptions} onChange={value => update({ financialYear: value })} />
               </div>}
               <label className="delivery-condition-toggle"><input type="checkbox" checked={Boolean(attachment.conditionGroup)} onChange={event => update({ conditionGroup: event.target.checked ? { mode: "ALL", conditions: [{ fieldKey: fields[0]?.key || workflow.mainFieldKey, operator: "equals", value: "" }] } : undefined })} />Attach only when a tracker condition matches</label>
               {condition && <div className="delivery-file-filters">

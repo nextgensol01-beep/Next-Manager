@@ -123,11 +123,11 @@ async function main() {
       };
       const patchCount = () => requests.filter(url => url.pathname.endsWith('/entries/C0')).length;
       await editAmount(2);
-      await page.waitForFunction(() => document.querySelector('tbody tr:first-child input[type="number"]').disabled);
+      await page.waitForFunction(() => document.querySelector('tbody tr:first-child input[type="number"]').getAttribute('aria-busy') === 'true');
       // Toggle a different column while the number response is deliberately delayed.
       await page.$eval('tbody tr:first-child [role="switch"]', node => node.click());
       await page.waitForFunction(() => document.querySelector('tbody tr:first-child [role="switch"]').getAttribute('aria-checked') === 'false');
-      await page.waitForFunction(() => document.querySelector('fieldset')?.getAttribute('aria-busy') === 'false' && !document.querySelector('tbody tr:first-child input[type="number"]').disabled);
+      await page.waitForFunction(() => document.querySelector('fieldset')?.getAttribute('aria-busy') === 'false' && document.querySelector('tbody tr:first-child input[type="number"]').getAttribute('aria-busy') === 'false');
       assert.equal(patchCount(), 2);
       assert.equal(await page.$eval('tbody tr:first-child input[type="number"]', node => node.value), '2');
       assert.equal(await page.$eval('tbody tr:first-child [role="switch"]', node => node.getAttribute('aria-checked')), 'false');
@@ -136,8 +136,8 @@ async function main() {
 
       failNextWrite = true;
       await editAmount(3);
-      await page.waitForFunction(() => document.querySelector('tbody tr:first-child input[type="number"]').disabled);
-      await page.waitForFunction(() => document.querySelector('tbody tr:first-child input[type="number"]').value === '2' && !document.querySelector('tbody tr:first-child input[type="number"]').disabled);
+      await page.waitForFunction(() => document.querySelector('tbody tr:first-child input[type="number"]').getAttribute('aria-busy') === 'true');
+      await page.waitForFunction(() => document.querySelector('tbody tr:first-child input[type="number"]').value === '2' && document.querySelector('tbody tr:first-child input[type="number"]').getAttribute('aria-busy') === 'false');
       assert.equal(entries[0].values.amount, 2);
       console.log('PASS: failed saves roll back the affected cell and reload server values');
 
@@ -146,6 +146,7 @@ async function main() {
       entries[0].values.amount = 9;
       await page.evaluate(() => window.setTrackerMounted(true));
       await page.waitForSelector('tbody tr:first-child input[type="number"]');
+      await page.waitForFunction(() => document.querySelector('fieldset')?.getAttribute('aria-busy') === 'false');
       assert.equal(await page.$eval('tbody tr:first-child input[type="number"]', node => node.value), '9');
       console.log('PASS: reopening in the same session reads changed server values');
 
@@ -237,6 +238,7 @@ async function main() {
     assert(await page.$eval('fieldset', node => node.disabled), 'Failed results cannot be edited as though they matched the new filter');
     assert(await page.$('input[aria-label="Find client"]'), 'A failed request does not remove the filters');
     await clickText('Retry');
+    assert(await page.$eval('fieldset', node => node.disabled), 'Retrying a failed new filter still keeps old results non-interactive');
     await page.waitForFunction(() => !document.querySelector('[role="alert"]') && document.querySelector('fieldset')?.getAttribute('aria-busy') === 'false');
     console.log('PASS: a failed search keeps filters mounted, disables stale edits, and supports retry');
     assert.deepEqual(errors, [], `No unhandled page errors: ${errors.join(', ')}`);

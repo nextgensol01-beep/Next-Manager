@@ -6,6 +6,7 @@ import { connectDB } from "@/lib/mongoose";
 import Document from "@/models/Document";
 import DeletedRecord from "@/models/DeletedRecord";
 import { ensureDocumentOriginActivity, recordActivityEvent } from "@/lib/server/activity-events";
+import { normalizeDocumentFinancialYear } from "@/lib/document-financial-year";
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -41,7 +42,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       : body.documentKind === "target-screenshot"
         ? "target-screenshot"
         : "general";
-    const financialYear = typeof body.financialYear === "string" ? body.financialYear.trim() : "";
+    let financialYear: string | undefined;
+    try { financialYear = normalizeDocumentFinancialYear(Object.hasOwn(body, "financialYear") ? body.financialYear : previousDocument.financialYear); }
+    catch { return NextResponse.json({ error: "Choose a valid financial year (for example, 2025-26)." }, { status: 400 }); }
     if (documentKind === "target-screenshot") {
       if (!financialYear) {
         return NextResponse.json({ error: "Financial year is required for a target screenshot." }, { status: 400 });
@@ -65,10 +68,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         driveLink,
         category,
         documentKind,
-        ...(documentKind === "target-screenshot" ? { financialYear } : {}),
+        ...(financialYear ? { financialYear } : {}),
         ...(uploadedDate ? { uploadedDate } : {}),
       },
-      ...(documentKind === "target-screenshot" ? {} : { $unset: { financialYear: 1 } }),
+      ...(financialYear ? {} : { $unset: { financialYear: 1 } }),
     };
     const updatedDocument = await Document.findByIdAndUpdate(
       id,
@@ -81,7 +84,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       previousDocument.documentName !== documentName ? `renamed from ${previousDocument.documentName}` : "",
       previousDocument.category !== category ? `category changed from ${previousDocument.category || "Other"} to ${category}` : "",
       previousDocument.documentKind !== documentKind ? `purpose changed to ${documentKind.replace(/-/g, " ")}` : "",
-      documentKind === "target-screenshot" && previousDocument.financialYear !== financialYear ? `financial year changed to ${financialYear}` : "",
+      previousDocument.financialYear !== financialYear ? `financial year changed to ${financialYear || "Not applicable"}` : "",
       previousDocument.driveLink !== driveLink ? "Drive link updated" : "",
     ].filter(Boolean);
     await recordActivityEvent({

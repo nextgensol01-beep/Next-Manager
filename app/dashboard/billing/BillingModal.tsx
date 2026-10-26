@@ -7,6 +7,7 @@ import { AnimatePresence, motion, useReducedMotion, type Variants } from "framer
 import toast from "react-hot-toast";
 import { ArrowLeft, Building2, CalendarDays, Check, ChevronRight, FileText, IndianRupee, Plus, Sparkles, Target, Trash2, X } from "lucide-react";
 import Modal from "@/components/ui/Modal";
+import BillingClientCombobox from "./BillingClientCombobox";
 import { FINANCIAL_YEARS, formatCurrency } from "@/lib/utils";
 import type { Billing, BillingType, Client, CreditTransaction, FinancialYearRecord, TargetBillingRow } from "./types";
 import {
@@ -403,14 +404,9 @@ export default function BillingModal({ open, editingBilling, clients, fy, onClos
                   <div><p className="text-sm font-semibold text-default">Account details</p><p className="text-xs text-muted">Choose the client and reporting year.</p></div>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label className="label">Client *</label>
-          <select className="input-field h-12 rounded-2xl bg-white shadow-sm dark:bg-white/[0.06]" value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })} required disabled={Boolean(editingBilling)}>
-            <option value="">Select Client</option>
-            {clients.map((client) => <option key={client.clientId} value={client.clientId}>{client.companyName}</option>)}
-          </select>
-          {editingBilling && <p className="text-xs text-faint mt-1">Client cannot be changed while editing.</p>}
-        </div>
+        <BillingClientCombobox clients={clients} value={form.clientId}
+          onChange={(clientId) => setForm((current) => ({ ...current, clientId }))}
+          disabled={Boolean(editingBilling)} active={open && step === "form"} />
         <div>
           <label className="label">Financial Year *</label>
           <select className="input-field h-12 rounded-2xl bg-white shadow-sm dark:bg-white/[0.06]" value={form.financialYear} onChange={(e) => setForm({ ...form, financialYear: e.target.value })} required disabled={Boolean(editingBilling)}>

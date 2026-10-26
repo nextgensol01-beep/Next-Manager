@@ -32,6 +32,9 @@ export interface IEmailLog extends Document {
     filename: string;
     mimeType: string;
     fileSize: number;
+    category?: string;
+    financialYear?: string;
+    required?: boolean;
   }>;
 }
 
@@ -87,6 +90,9 @@ const EmailLogSchema = new Schema<IEmailLog>(
           filename: String,
           mimeType: String,
           fileSize: Number,
+          category: String,
+          financialYear: String,
+          required: Boolean,
           _id: false,
         },
       ],

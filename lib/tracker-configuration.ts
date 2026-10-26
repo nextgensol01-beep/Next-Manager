@@ -1,14 +1,16 @@
 import { CLIENT_TRACKER_DETAIL_OPTIONS, type ClientTrackerDetailKey, type TrackerField } from "@/lib/clientTrackers";
 import { FIELD_TYPES, LIVE_DATA_SOURCES } from "@/lib/tracker-create";
 import { normalizeTrackerOptionColors } from "@/lib/tracker-option-colors";
+import { trackerClientScope, type TrackerSyncSettings, type TrackerSyncDraft } from "@/lib/tracker-sync";
 
-export type TrackerConfiguration = {
+export type TrackerConfiguration = TrackerSyncSettings & {
   financialYear: string;
   fields: TrackerField[];
   clientColumns: ClientTrackerDetailKey[];
   clientIds: string[];
   /** Opening draft identities distinguish new rows from saved rows with the same key. */
   fieldIdentities?: Record<string, string>;
+  syncRequested?: boolean; syncCount?: number;
 };
 export type TrackerConfigurationChange = {
   id: string; kind: "added" | "removed" | "modified" | "reordered"; label: string;
@@ -23,11 +25,12 @@ export function configurationFields(fields: TrackerField[]): TrackerField[] {
     ...(field.unit ? { unit: field.unit } : {}),
   }));
 }
-export function configurationSnapshot(tracker: {
+export function configurationSnapshot(tracker: TrackerSyncSettings & {
   financialYear?: string; fields: TrackerField[]; clientColumns?: ClientTrackerDetailKey[]; clientIds: string[];
 }): TrackerConfiguration {
   return { financialYear: tracker.financialYear || "", fields: configurationFields(tracker.fields),
     clientColumns: [...(tracker.clientColumns || ["state"])], clientIds: [...tracker.clientIds],
+    clientScope: trackerClientScope(tracker), clientCategories: [...(tracker.clientCategories || [])], clientMembershipMode: tracker.clientMembershipMode || "snapshot",
     fieldIdentities: Object.fromEntries(tracker.fields.filter(field => "uiId" in field).map(field => [(field as TrackerField & { uiId: string }).uiId, field.key])) };
 }
 export function configurationPreviousField(field: TrackerField, baseline: TrackerConfiguration) {
@@ -79,7 +82,15 @@ export function configurationChanges(baseline: TrackerConfiguration, draft: Trac
   if (added) changes.push({ id: "clients-added", kind: "added", label: `${added} client${added === 1 ? "" : "s"} added` });
   if (removed) changes.push({ id: "clients-removed", kind: "removed", label: `${removed} client${removed === 1 ? "" : "s"} removed from the worklist` });
   if (baseline.financialYear !== draft.financialYear) changes.push({ id: "financial-year", kind: "modified", label: `Financial year · ${baseline.financialYear || "No FY"} → ${draft.financialYear || "No FY"}` });
+  if (trackerClientScope(baseline) !== trackerClientScope(draft) || stable([...(baseline.clientCategories || [])].sort()) !== stable([...(draft.clientCategories || [])].sort()))
+    changes.push({ id: "client-audience", kind: "modified", label: "Eligible client audience updated" });
+  if ((baseline.clientMembershipMode || "snapshot") !== (draft.clientMembershipMode || "snapshot"))
+    changes.push({ id: "client-sync", kind: "modified", label: draft.clientMembershipMode === "categorySync" ? "Enable Auto Sync" : "Switch to Manual Sync" });
+  if (draft.syncRequested) changes.push({ id: "client-sync-additions", kind: "added", label: `${draft.syncCount || 0} eligible clients to sync` });
   return changes;
+}
+export function configurationSyncDraft(tracker: TrackerSyncSettings): TrackerSyncDraft {
+  return { clientScope: trackerClientScope(tracker), clientCategories: [...(tracker.clientCategories || [])], clientMembershipMode: tracker.clientMembershipMode || "snapshot" };
 }
 /** A changed source/formula/FY needs a fresh server calculation, not invented preview data. */
 export function canPreviewSavedValue(before: TrackerField | undefined, after: TrackerField, financialYearChanged: boolean) {

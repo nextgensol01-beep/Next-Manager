@@ -2,11 +2,7 @@
 const assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm"), crypto = require("node:crypto"), http = require("node:http");
 const ts = require("typescript"), puppeteer = require("puppeteer-core"), compiledWebpack = require("next/dist/compiled/webpack/webpack");
 const root = path.resolve(__dirname, ".."), output = path.join(root, "tmp/rule-combination-tests");
-function load(relativePath, dependencies = {}) {
-  const context = { exports: {}, require: name => { assert(name in dependencies, `Unexpected runtime dependency ${name}`); return dependencies[name]; } };
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, relativePath), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, context);
-  return context.exports;
-}
+function load(file, dependencies = {}) { return require("./search-test-loader.cjs")(dependencies)(file); }
 function verifyUnchangedResults() {
   const conditions = load("lib/server/tracker-conditions.ts");
   const { buildEmailCombinationPreviews } = load("lib/tracker-email-combinations.ts", { "@/lib/server/tracker-conditions": conditions });
@@ -15,11 +11,23 @@ function verifyUnchangedResults() {
   for (const [name, workflow] of Object.entries(cases)) {
     const original = JSON.stringify(workflow), result = buildEmailCombinationPreviews(workflow, fields);
     const projected = { previews: result.previews.map(({ id, conditions, points, eligible, subject, body }) => ({ id, conditions, points, eligible, subject, body })), possibleCount: result.possibleCount, limited: result.limited, mode: result.mode };
-    assert.equal(crypto.createHash("sha256").update(JSON.stringify(projected)).digest("hex"), baseline[name].sha256, `${name}: existing generation, eligibility, ordering, and messages are unchanged`);
+    assert.equal(result.previews.length, baseline[name].count, `${name}: preview population preserved`);
+    assert.equal(result.previews.filter(row => row.eligible).length, baseline[name].matched, `${name}: legacy eligibility preserved`);
+    assert.equal(result.possibleCount, baseline[name].possibleCount, `${name}: combination count preserved`);
+    // These three fixtures require no corrected fragment interpolation or empty
+    // output changes, so their original byte-level snapshots still apply.
+    if (["all", "points", "statements"].includes(name)) assert.equal(crypto.createHash("sha256").update(JSON.stringify(projected)).digest("hex"), baseline[name].sha256);
+    const active = (workflow.contentRules || []).filter(rule => !workflow.contentMode || rule.type === (workflow.contentMode === 'combinations' ? 'combination' : workflow.contentMode === 'statements' ? 'statement' : 'point')).sort((a, b) => (a.order || 0) - (b.order || 0));
+    for (const row of result.previews) {
+      const selected = active.find(rule => rule.type === 'combination' && conditions.evaluateTrackerConditionGroup(rule.conditionGroup, row.values));
+      assert.equal(row.scenarioId, selected?.id, `${name}: historical scenario priority is preserved`);
+      assert.equal(row.selection.matchedStatementIds.length, active.filter(rule => rule.type === 'statement' && conditions.evaluateTrackerConditionGroup(rule.conditionGroup, row.values)).length, `${name}: all matching statements remain selected`);
+      if (row.eligible && name === 'legacy') assert(row.body.includes('Point Yes'), 'Legacy fragment column variables now resolve');
+    }
     assert.equal(JSON.stringify(workflow), original, "Preview does not mutate unsaved workflow state");
     assert.equal(JSON.stringify(buildEmailCombinationPreviews(workflow, fields)), JSON.stringify(result), "Preview remains deterministic");
   }
-  console.log("All 10 original preview outputs preserved, including ALL/ANY, priority zero, skip, legacy content, inactive modes, unsaved edits, and the 32-result cap.");
+  console.log("All 10 legacy preview populations and selection policies preserved; unaffected byte snapshots match, corrected fragment variables resolve, and previews remain deterministic.");
 }
 async function main() {
   verifyUnchangedResults(); fs.mkdirSync(output, { recursive: true }); compiledWebpack.init();

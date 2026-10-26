@@ -47,7 +47,7 @@ function Fixture() {
     <main className="tracker-modal tracker-email-modal tracker-email-editor-stage is-workflow-editing">
       {messages ? <Workspace key={`${epoch}-${mode}`} mode={mode} rules={rules.filter(rule => rule.type === type)} fields={fields} variables={variables} reduced={reduced}
         onAdd={ruleType => { const id = `new-${Date.now()}`; setRules(current => [...current, { ...initial[0], id, type: ruleType, content: "" }]); return id; }}
-        onUpdate={(id, patch) => setRules(current => current.map(rule => rule.id === id ? { ...rule, ...patch } : rule))}
+        onUpdate={(id, patch) => setRules(current => current.map(rule => rule.id === id ? { ...rule, ...(typeof patch === "function" ? patch(rule) : patch) } : rule))}
         onRemove={id => setRules(current => current.filter(rule => rule.id !== id))}
         onMove={(id, direction) => setRules(current => { const next = [...current]; const index = next.findIndex(rule => rule.id === id); [next[index], next[index + direction]] = [next[index + direction], next[index]]; return next; })}
         onPreview={() => {}} valuesForField={() => ["Yes", "No"]} operatorsForField={() => [{ value: "equals", label: "equals" }, { value: "is_empty", label: "is empty" }]} /> : <p>Another workflow step</p>}

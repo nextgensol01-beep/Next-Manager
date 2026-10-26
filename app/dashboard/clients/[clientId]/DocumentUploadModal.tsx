@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import Modal from "@/components/ui/Modal";
 import type { Document, DocumentCategory } from "./ClientProfileSupport";
+import { FINANCIAL_YEARS } from "@/lib/utils";
 
 type UploadItem = {
   id: string;
@@ -119,6 +120,7 @@ export default function DocumentUploadModal({
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<UploadItem[]>([]);
   const [batchCategory, setBatchCategory] = useState<DocumentCategory>("compliance");
+  const [selectedFinancialYear, setSelectedFinancialYear] = useState(financialYear || "");
   const [uploadPurpose, setUploadPurpose] = useState<"general" | "target-screenshot">(purpose);
   const [dragging, setDragging] = useState(false);
   const [message, setMessage] = useState("");
@@ -138,6 +140,7 @@ export default function DocumentUploadModal({
     setItems([]);
     setMessage("");
     setBatchCategory("compliance");
+    setSelectedFinancialYear(financialYear || "");
     setUploadPurpose(purpose);
   }, [financialYear, open, purpose]);
 
@@ -212,7 +215,7 @@ export default function DocumentUploadModal({
   const uploadOne = async (item: UploadItem) => {
     patchItem(item.id, { status: "uploading", error: undefined, progress: 2 });
     try {
-      const document = await sendItem(item, clientId, uploadPurpose, financialYear, (progress) => patchItem(item.id, { progress }));
+      const document = await sendItem(item, clientId, uploadPurpose, targetScreenshot ? financialYear : selectedFinancialYear || undefined, (progress) => patchItem(item.id, { progress }));
       patchItem(item.id, { status: "complete", progress: 100 });
       onUploaded([document]);
       return true;
@@ -330,6 +333,13 @@ export default function DocumentUploadModal({
             </select>
           </label>
           )}
+          {!targetScreenshot && <label>
+            <span>Financial year</span>
+            <select aria-label="Document financial year" value={selectedFinancialYear} disabled={uploading || completed > 0} onChange={event => setSelectedFinancialYear(event.target.value)}>
+              <option value="">Not applicable</option>
+              {[...new Set([...FINANCIAL_YEARS, ...(financialYear ? [financialYear] : [])])].map(year => <option key={year} value={year}>FY {year}</option>)}
+            </select>
+          </label>}
           <span>{items.length} selected · {displaySize(items.reduce((sum, item) => sum + item.file.size, 0))}</span>
         </div>
 

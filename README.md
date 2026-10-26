@@ -192,3 +192,7 @@ utils/
 - Modal-heavy JSX lives in `ClientProfileModals.tsx`.
 - Keep user-visible text ASCII-safe unless there is a clear reason to use special characters.
 - Run `npm run lint`, `npx tsc --noEmit`, and `npm run build` before shipping meaningful changes.
+
+## Client email delivery
+
+Client campaigns use MongoDB records, secure short server batches and a persistent dashboard browser coordinator. Keep the website open while sending; normal dashboard navigation continues processing. Refresh or closure requires explicit safe resume. Production installs no Inngest package and needs no queue-service keys. See [setup, safety, local-only isolation and verification](docs/email-browser-delivery.md).

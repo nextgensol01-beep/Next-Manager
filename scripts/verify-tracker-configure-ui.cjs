@@ -25,6 +25,7 @@ const fields = [structuredClone(trackerLib.DEFAULT_STATUS_FIELD),
 let tracker = { _id: trackerId, name: 'Monthly client worklist', description: 'Existing tracker', status: 'active', financialYear: '2025-26', fields: structuredClone(fields), clientColumns: ['state'], clientIds: clients.slice(0, 210).map(client => client.clientId) };
 const entries = clients.map(client => ({ _id: client.clientId, clientId: client.clientId, client, updatedAt: '2026-10-08T00:00:00Z', values: { status: 'Done', mail: true, note: `Saved ${client.clientId}`, purchaseUpload: 'Partial', covered: 4, required: 12, coverage: 33.33, combined: 'Ready', priority: 'Second', labels: ['Second', 'Third'], tags: ['Second', 'Third'] } }));
 const requests = [], writes = [];
+const syncPreviews = new Map(), syncExclusions = new Set(['C300']);
 let failWrite = false;
 const json = value => JSON.parse(JSON.stringify(value));
 function compatibility() {
@@ -66,7 +67,15 @@ async function main() {
     else if (url.pathname === '/fixture.css') { response.setHeader('Content-Type', 'text/css'); response.end(css); }
     else if (url.pathname.startsWith('/api/')) {
       requests.push(url); response.setHeader('Content-Type', 'application/json');
-      if (request.method === 'PATCH') {
+      if (request.method === 'POST' && url.pathname.endsWith('/sync')) {
+        let body = ''; request.on('data', chunk => body += chunk); request.on('end', () => {
+          const draft = JSON.parse(body);
+          const missing = clients.filter(client => !tracker.clientIds.includes(client.clientId) && !syncExclusions.has(client.clientId) &&
+            (draft.clientScope === 'all' || draft.clientScope === 'categories' && draft.clientCategories.includes(client.category)));
+          const token = 'preview-' + syncPreviews.size; syncPreviews.set(token, missing.map(client => client.clientId));
+          response.end(JSON.stringify({ existingCount: tracker.clientIds.length, missingCount: missing.length, projectedCount: tracker.clientIds.length + missing.length, clients: missing.slice(0,250), truncated: missing.length > 250, token }));
+        });
+      } else if (request.method === 'PATCH') {
         let body = ''; request.on('data', chunk => body += chunk); request.on('end', () => {
           const change = JSON.parse(body);
           if (url.pathname.includes('/entries/')) {
@@ -82,7 +91,13 @@ async function main() {
                 for (const key of before) if (!after.has(key)) delete entry.values[key];
                 Object.assign(entry.values, trackerLib.initialTrackerValues(change.fields.filter(field => !before.has(field.key))));
               }
-              tracker = { ...tracker, ...change }; response.end(JSON.stringify(tracker));
+              tracker = { ...tracker, ...change };
+              if (change.syncRequested) {
+                const additions = (syncPreviews.get(change.syncPreviewToken) || []).filter(id => !tracker.clientIds.includes(id));
+                tracker.clientIds = [...new Set([...tracker.clientIds, ...additions])];
+                tracker.syncAddedCount = additions.length;
+              }
+              response.end(JSON.stringify(tracker));
             }
           }, 450);
         });
@@ -111,6 +126,49 @@ async function main() {
     assert.equal(await page.$eval('tbody select[aria-label="Priority"]', node => node.dataset.optionColor), 'blue', 'Legacy table uses the same default color as the editor');
     assert.equal(await page.$eval('tbody [role="group"][aria-label="Labels"] label:has(input[aria-label="Third"])', node => node.dataset.optionColor), 'violet');
     await open();
+    if (process.env.TRACKER_CONFIGURE_SYNC_ONLY === '1') {
+      const radio = async (label, choice) => {
+        await page.$$eval(`[role="radiogroup"][aria-label="${label}"] [role="radio"]`, (nodes, choice) => nodes.find(node => node.textContent.startsWith(choice)).click(), choice); await settle();
+      };
+      const syncButton = async label => {
+        await page.$$eval('.configure-workspace button', (nodes, label) => nodes.find(node => node.textContent.trim() === label).click(), label); await settle();
+      };
+      assert.equal(await page.$$eval('[aria-label="Client synchronization"]', nodes => nodes.length), 0, 'Legacy manually selected tracker stays manual');
+      await radio('Eligible client audience', 'By category');
+      for (const category of ['PWP', 'Importer']) await page.$$eval('[aria-label="Eligible categories"] button', (nodes, category) => nodes.find(node => node.textContent === category).click(), category);
+      await settle();
+      await syncButton('Preview sync'); await page.waitForSelector('[aria-label="Client sync preview"]');
+      assert((await text('[aria-label="Client sync preview"]')).includes('New matching clients: 117'));
+      assert((await text('[aria-label="Client sync preview"]')).includes('PWP'));
+      assert((await text('[aria-label="Client sync preview"]')).includes('Importer'));
+      assert.equal(writes.length, 0, 'Preview has no membership writes');
+      await page.screenshot({ path: path.join(output, 'sync-preview-light.png') });
+      await page.evaluate(() => document.documentElement.classList.add('dark')); await settle();
+      await page.screenshot({ path: path.join(output, 'sync-preview-dark.png') });
+      await page.$eval('[aria-label="Client sync preview"] button', node => node.click()); await settle();
+      assert.equal(writes.length, 0, 'Cancelling preview cannot change membership');
+      await syncButton('Preview sync'); await syncButton('Add eligible clients');
+      assert((await text('.configure-workspace')).includes('117 clients ready to add'));
+      assert.equal(writes.length, 0, 'Confirmed additions wait for the existing Save changes action');
+      const savedValues = structuredClone(entries.slice(0,210).map(entry => entry.values));
+      await click('.configure-footer .tracker-modal-primary'); await page.waitForSelector('.configure-workspace', { hidden: true }); await settle();
+      assert.equal(tracker.clientIds.length, 327); assert(!tracker.clientIds.includes('C300'));
+      assert.deepEqual(entries.slice(0,210).map(entry => entry.values), savedValues);
+      await open(); await radio('Client synchronization', 'Auto Sync');
+      const writesBefore = writes.length;
+      await click('.configure-footer .tracker-modal-primary');
+      assert((await text('.create-server-error')).includes('Preview sync')); assert.equal(writes.length, writesBefore);
+      await syncButton('Preview sync'); await syncButton('Enable and sync');
+      await click('.configure-footer .tracker-modal-primary'); await page.waitForSelector('.configure-workspace', { hidden: true }); await settle();
+      assert.equal(tracker.clientMembershipMode, 'categorySync');
+      assert(!requests.some(url => /email.*deliver|messages\/send|drafts/.test(url.pathname)));
+      await open(); assert((await text('.configure-workspace')).includes('Auto Sync enabled'));
+      await page.setViewport({ width: 390, height: 844 }); await settle();
+      await page.screenshot({ path: path.join(output, 'sync-controls-mobile.png') });
+      assert.deepEqual(errors, []);
+      console.log('PASS: actual Configure Manual/Auto controls, PWP/Importer preview and counts, cancel, staged-save confirmation, missing-review guard, preserved marks/exclusions, no email requests, light/dark/mobile.');
+      return;
+    }
     assert.equal((await text('.configure-unsaved')).trim(), 'No unsaved changes'); assert(await page.$eval('.configure-footer .tracker-modal-primary', node => node.disabled));
     assert.equal(await page.$$eval('.configure-changes li', nodes => nodes.length), 0);
     assert((await text('.configure-preview-stats')).includes('210 clients'));

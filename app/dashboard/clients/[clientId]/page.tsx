@@ -1321,7 +1321,7 @@ export default function ClientProfilePage() {
       driveLink: document.driveLink,
       category: document.category || "other",
       documentKind: document.documentKind || "general",
-      financialYear: document.financialYear || selectedFy,
+      financialYear: document.financialYear || "",
     });
     setDocModal(true);
   };
@@ -1946,6 +1946,7 @@ export default function ClientProfilePage() {
     const merge = (records: FYRecord[]) => records.some(record => record.financialYear === saved.financialYear)
       ? records.map(record => record.financialYear === saved.financialYear ? saved : record) : [...records, saved];
     setFyRecords(merge); setSelectedFy(saved.financialYear);
+    setBreakdownRec(current => current?.clientId === saved.clientId && current.financialYear === saved.financialYear ? saved : current);
     await mutateWorkspace(current => current ? { ...current, financialYears: merge(current.financialYears),
       failedSections: current.failedSections.filter(section => section !== "financial years") } : current, { revalidate: false });
     invalidate("/api/financial-year", "/api/dashboard", "/api/activities"); scheduleActivityRefresh();
