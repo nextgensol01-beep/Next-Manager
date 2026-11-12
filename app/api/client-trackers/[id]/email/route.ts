@@ -15,6 +15,8 @@ import EmailLog from "@/models/EmailLog";
 import Document from "@/models/Document";
 import { resolveTrackerLinkedValues } from "@/lib/server/tracker-linked-data";
 import { resolveTrackerComputedValues } from "@/lib/server/tracker-computed-values";
+import { trackedDrafts, trackerDraftBlock } from "@/lib/server/tracker-email-drafts";
+import type { CampaignDraftReview } from "@/lib/tracker-email-delivery-review";
 import {
   type ManagedTrackerEmailDocument,
 } from "@/lib/server/tracker-email-attachments";
@@ -142,7 +144,7 @@ export const POST = withTrackerApiErrors(async function POST(
         attachment.source === "shared" && Boolean(attachment.documentId),
     )
     .map((attachment) => attachment.documentId!);
-  const [clients, contacts, linkedValues, documents] = await Promise.all([
+  const [clients, contacts, linkedValues, documents, existingDrafts] = await Promise.all([
     Client.find({ clientId: { $in: clientIds } })
       .select("clientId companyName category state gstNumber")
       .lean(),
@@ -165,7 +167,9 @@ export const POST = withTrackerApiErrors(async function POST(
           .sort({ uploadedDate: -1, _id: -1 })
           .lean()
       : Promise.resolve([]),
+    trackedDrafts({ trackerId: id, workflowId, mailKind: kind }, { clientIds }),
   ]);
+  const draftByClient = new Map(existingDrafts.map(draft => [draft.clientId, draft]));
   const needsCommunication = JSON.stringify([workflow.conditionGroup, workflow.contentRules]).includes("client.communicationStatus");
   const communicationLogs = needsCommunication ? await EmailLog.find({ trackerId: id, clientId: { $in: clientIds } }).select("clientId status mailKind sentAt communicationStatus").sort({ sentAt: -1, _id: -1 }).lean() : [];
   const communicationByClient = new Map<string, string>();
@@ -176,26 +180,24 @@ export const POST = withTrackerApiErrors(async function POST(
       ? await EmailLog.find({
           trackerId: id,
           workflowId,
+          clientId: { $in: clientIds },
           mailKind: { $in: ["initial", "reminder"] },
           status: "sent",
           sentAt: { $gte: cooldownSince },
         })
-          .select("clientId")
+          .select("clientId deliverySource")
           .lean()
       : [];
   const recentlySentClientIds = new Set(recentLogs.map((log) => log.clientId));
-  const initialSentClientIds = new Set(
-    (
-      await EmailLog.find({
-        trackerId: id,
-        workflowId,
-        mailKind: "initial",
-        status: "sent",
-      })
-        .select("clientId")
-        .lean()
-    ).map((log) => log.clientId),
-  );
+  const initialLogs = await EmailLog.find({
+    trackerId: id,
+    workflowId,
+    clientId: { $in: clientIds },
+    mailKind: "initial",
+    status: "sent",
+  }).select("clientId deliverySource").lean();
+  const initialSentClientIds = new Set(initialLogs.map(log => log.clientId));
+  const sentInGmail = new Set((kind === "initial" ? initialLogs : recentLogs).filter(log => log.deliverySource).map(log => log.clientId));
   const repliedClientIds = new Set(
     kind === "reminder"
       ? (
@@ -285,6 +287,7 @@ export const POST = withTrackerApiErrors(async function POST(
     reason: string;
     reasonCode: string;
     reasons?: string[];
+    gmailDraft?: CampaignDraftReview;
   }> = [];
   const clientMatches: Array<{ clientId: string; companyName: string; category?: string; selection: ReturnType<typeof renderTrackerEmail>["selection"]; sendRuleMatched: boolean }> = [];
   const inspectAttachments = createAttachmentMetadataReader();
@@ -303,6 +306,23 @@ export const POST = withTrackerApiErrors(async function POST(
       legacyWorkflowCondition(workflow.mainFieldKey, workflow.mainValue);
     const sendRuleMatched = evaluateEmailConditionGroup(conditions, context);
     clientMatches.push({ clientId: entry.clientId, companyName, category: client.category, selection: message.selection, sendRuleMatched });
+    const draft = draftByClient.get(entry.clientId);
+    if (draft) {
+      const block = trackerDraftBlock(draft);
+      const suggestion = draft.draftSuggestion;
+      skipped.push({ clientId: entry.clientId, companyName, ...block, gmailDraft: {
+        campaignId: draft.campaignId,
+        state: block.reasonCode === "gmail_draft_review" ? "review" : "pending",
+        canResolve: draft.draftResolution === "review",
+        ...(block.reasonCode === "gmail_draft_pending" && (draft.deliveryId || draft.draftCheckedAt) ? { url: draft.deliveryId ? `https://mail.google.com/mail/#drafts/${encodeURIComponent(draft.deliveryId)}` : "https://mail.google.com/mail/#drafts" } : {}),
+        ...(suggestion ? { suggestion: { messageId: suggestion.messageId, sentAt: suggestion.sentAt.toISOString(), url: `https://mail.google.com/mail/#sent/${encodeURIComponent(suggestion.threadId)}` } } : {}),
+      } });
+      return;
+    }
+    if (sentInGmail.has(entry.clientId) && (kind === "initial" || (sendRuleMatched && initialSentClientIds.has(entry.clientId) && !repliedClientIds.has(entry.clientId)))) {
+      skipped.push({ clientId: entry.clientId, companyName, reason: kind === "initial" ? "Sent via Gmail · Use a reminder campaign" : "Sent via Gmail · Within the seven-day cooldown", reasonCode: "sent_via_gmail" });
+      return;
+    }
     if (!sendRuleMatched) {
       skipped.push({
         clientId: entry.clientId,

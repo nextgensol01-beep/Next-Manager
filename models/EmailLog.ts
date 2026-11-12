@@ -24,6 +24,7 @@ export interface IEmailLog extends Document {
   campaignId?: string;
   gmailMessageId?: string;
   gmailThreadId?: string;
+  deliverySource?: "gmail-draft" | "manual-confirmation";
   communicationStatus?: "sent" | "replied";
   repliedAt?: Date;
   gmailReplyMessageId?: string;
@@ -76,6 +77,7 @@ const EmailLogSchema = new Schema<IEmailLog>(
     campaignId: { type: String, default: "", index: true },
     gmailMessageId: String,
     gmailThreadId: String,
+    deliverySource: { type: String, enum: ["gmail-draft", "manual-confirmation"] },
     communicationStatus: {
       type: String,
       enum: ["sent", "replied"],

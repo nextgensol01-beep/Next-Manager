@@ -7,7 +7,7 @@ Route: `/dev/liquid-glass` (`npm run dev`). The route returns 404 in production 
 The existing implementation had two families:
 
 - `components/ui/liquid-glass/`: `GlassSurface`, `GlassButton`, `GlassToolbar`, `GlassGroup`, `GlassPopover`, `GlassToggle`; `useGlassPointer`, `useGlassEnvironment`, `useGlassMotion`; `types.ts`, `index.ts`, and `liquid-glass.css`. This is the family used by the existing development route and extended here. Existing variants, intensities, radii, exports, and component props remain supported.
-- Production controls: `components/ui/LiquidGlassButton.tsx`, `LiquidGlassDropdown.tsx`, `LiquidGlassLightSurface.tsx`, `useLiquidGlassLight.ts`, plus the liquid-glass, surrounding-light, tray, and pill rules in `app/globals.css`. Those controls include their own reflection and motion behavior. Their styles and APIs were left intact. They are used by clients, quotations, financial-year navigation, and related screens. The shared `GlassToggle` is also used by client trackers.
+- Production controls: `components/ui/LiquidGlassButton.tsx`, `LiquidGlassDropdown.tsx`, `useLiquidGlassLight.ts`, plus the liquid-glass, surrounding-light, tray, and pill rules in `app/globals.css`. Those controls include their own reflection and motion behavior. Their styles and APIs were left intact. They are used by clients, quotations, financial-year navigation, and related screens. The shared `GlassToggle` is also used by client trackers.
 
 There was no existing texture renderer or refractive lens in this family. The original page contained surfaces, a toolbar/group, a switch, a popover, and a Framer Motion shared-layout morph. These capabilities remain in the lab; the latter demonstrations live in `LegacyExperiments.tsx`.
 

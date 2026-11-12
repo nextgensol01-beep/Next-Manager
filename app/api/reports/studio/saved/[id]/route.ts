@@ -1,39 +1,18 @@
+import { serializeSavedReport, validationMessage, type SavedReportRecord } from "@/lib/server/report-studio-saved-record";
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { connectDB } from "@/lib/mongoose";
-import { validateReportStudioConfig, type ReportStudioConfig } from "@/lib/report-studio";
+import { validateReportStudioConfig } from "@/lib/report-studio";
 import { currentSessionUserObjectId } from "@/lib/server/current-session-user";
 import { loadReportStudioCustomFields } from "@/lib/server/report-studio-fields";
+import { hasManualReportFields } from "@/lib/report-manual";
 import ReportStudioSavedReport from "@/models/ReportStudioSavedReport";
 
 const updateReportSchema = z.object({
   name: z.string().trim().min(1, "Report name is required").max(120),
   config: z.unknown(),
 });
-
-type SavedReportRecord = {
-  _id?: unknown;
-  name?: unknown;
-  config?: unknown;
-  createdAt?: unknown;
-  updatedAt?: unknown;
-};
-
-function serializeSavedReport(record: SavedReportRecord) {
-  return {
-    id: String(record._id || ""),
-    name: String(record.name || ""),
-    config: record.config as ReportStudioConfig,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
-  };
-}
-
-function validationMessage(error: unknown) {
-  if (error instanceof z.ZodError) return error.issues.map((issue) => issue.message).join("; ");
-  return error instanceof Error ? error.message : "Invalid saved report configuration";
-}
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const currentUser = await currentSessionUserObjectId();
@@ -45,7 +24,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const parsed = updateReportSchema.parse(body);
     await connectDB();
-    const customFields = await loadReportStudioCustomFields();
+    const customFields = await loadReportStudioCustomFields(hasManualReportFields(body));
     const config = validateReportStudioConfig({
       ...parsed.config as Record<string, unknown>,
       name: parsed.name,

@@ -1163,13 +1163,13 @@ export default function ClientTrackerDetailPage({
     setEmailDeliveryMode(null);
     setEmailComposeOpen(true);
   };
-  const previewEmails = async () => {
+  const previewEmails = async (afterDraftSync = false) => {
     if (!activeWorkflowId) return;
     setEmailLoading(true);
     setEmailPreparationError(null);
-    setEmailPreparationPhase(emailKind === "reminder" ? "replies" : "recipients");
+    setEmailPreparationPhase(emailKind === "reminder" && !afterDraftSync ? "replies" : "recipients");
     try {
-      if (emailKind === "reminder") {
+      if (emailKind === "reminder" && !afterDraftSync) {
         const replyResponse = await fetch(
           `/api/client-trackers/${resolved.id}/email/replies`,
           { method: "POST" },
@@ -1201,12 +1201,12 @@ export default function ClientTrackerDetailPage({
       if (!response.ok)
         throw new Error(result.error || "Unable to prepare email preview.");
       setEmailPreview(result);
-      setRecipientDrafts(
+      setRecipientDrafts(current =>
         Object.fromEntries(
           (result.messages || []).map(
             (message: EmailPreview["messages"][number]) => [
               message.entryId,
-              {
+              (afterDraftSync && current[message.entryId]) || {
                 to: message.suggestedTo?.length
                   ? message.suggestedTo
                   : [message.to],
@@ -1219,12 +1219,36 @@ export default function ClientTrackerDetailPage({
         ),
       );
     } catch (error) {
+      if (afterDraftSync) setEmailPreview(null);
       setEmailPreparationError(error instanceof Error ? error.message : "Unable to prepare email preview.");
       toast.error(
         error instanceof Error
           ? error.message
           : "Unable to prepare email preview.",
       );
+    } finally {
+      setEmailLoading(false);
+      setEmailPreparationPhase(null);
+    }
+  };
+  const updateGmailDrafts = async (request: { action: "sync" } | { action: "sent" | "discarded"; campaignId: string; clientId: string; sentAt?: string; messageId?: string }) => {
+    if (emailLoading || !activeWorkflowId) return;
+    setEmailLoading(true);
+    setEmailPreparationPhase("gmail-drafts");
+    try {
+      const response = await fetch(`/api/client-trackers/${resolved.id}/email/drafts`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...request, workflowId: activeWorkflowId, kind: emailKind }),
+      });
+      const result = await readJsonResponse(response);
+      if (!response.ok) throw new Error(result.error || "Unable to update Gmail drafts.");
+      if (request.action === "sync") {
+        toast.success(result.checked ? `${result.sent} sent · ${result.pending} pending · ${result.review} need review${result.failed ? ` · ${result.failed} could not be checked` : ""}${result.batchFull ? ". Sync again to check more drafts." : ""}` : "No drafts to sync for this campaign.");
+      } else toast.success(request.action === "sent" ? "Gmail send recorded." : "Discarded draft cleared from the campaign.");
+      void refetchEmailActivity();
+      await previewEmails(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update Gmail drafts.");
     } finally {
       setEmailLoading(false);
       setEmailPreparationPhase(null);
@@ -2499,7 +2523,7 @@ export default function ClientTrackerDetailPage({
           workflow={activeWorkflow || null}
           fields={tracker.fields}
         />
-        {activeWorkflow && <WorkflowTrackerClientPreview open={trackerPreviewOpen} onClose={() => setTrackerPreviewOpen(false)} trackerId={String(tracker._id)} workflow={activeWorkflow}
+        {activeWorkflow && <WorkflowTrackerClientPreview open={trackerPreviewOpen} onClose={() => setTrackerPreviewOpen(false)} trackerId={String(tracker._id)} workflow={activeWorkflow} fields={tracker.fields}
           fingerprint={JSON.stringify([activeWorkflow, tracker.fields])} analysis={scenarioAnalysis} onAnalysis={setScenarioAnalysis} initialRuleId={trackerPreviewRuleId} />}
         <EmailDeliveryReviewWorkspace
           open={emailComposeOpen}
@@ -2513,6 +2537,8 @@ export default function ClientTrackerDetailPage({
           onDraft={(id, draft) => setRecipientDrafts(current => ({ ...current, [id]: draft }))}
           busy={emailLoading} phase={emailPreparationPhase} deliveryMode={emailDeliveryMode}
           error={emailPreparationError} onPrepare={() => void previewEmails()}
+          onSyncDrafts={() => void updateGmailDrafts({ action: "sync" })}
+          onResolveDraft={request => void updateGmailDrafts(request)}
           onDrafts={() => prepareDeliveryBatch("draft")} onSend={() => prepareDeliveryBatch("send")}
           signature={gmailSignature} signatureLoading={gmailSignatureLoading}
           onExpand={message => { emailExpandFocusRef.current = document.activeElement as HTMLElement; setPreviewMessage(message); }}
@@ -2568,11 +2594,13 @@ export default function ClientTrackerDetailPage({
                       { method: "POST" },
                     );
                     const result = await readJsonResponse(response);
-                    response.ok
-                      ? toast.success(
+                    if (response.ok) {
+                      toast.success(
                           `Checked ${result.checked} emails; ${result.replied} replies found.`,
-                        )
-                      : toast.error(result.error || "Unable to check replies.");
+                        );
+                    } else {
+                      toast.error(result.error || "Unable to check replies.");
+                    }
                     void refetchEmailActivity();
                   } catch (error) {
                     toast.error(error instanceof Error ? error.message : "Unable to check replies.");
@@ -2938,7 +2966,7 @@ const InteractiveFluidLayer = React.forwardRef<FluidLayerHandle, {
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
     resize();
-    if (active && !reduceMotion) resume();
+    if (activeRef.current && !reduceMotion) resume();
 
     return () => {
       destroyed = true;

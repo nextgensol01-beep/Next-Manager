@@ -1,6 +1,6 @@
 "use client";
 import { SessionProvider, useSession } from "next-auth/react";
-import { Toaster } from "react-hot-toast";
+import toast, { Toaster } from "react-hot-toast";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Modal from "@/components/ui/Modal";
 import { CURRENT_FY, FINANCIAL_YEARS } from "@/lib/utils";
@@ -26,6 +26,7 @@ interface FinancialYearContextValue {
   hasCustomDefault: boolean;
   settings: FinancialYearSettings;
   updateSettings: (next: Partial<FinancialYearSettings>) => void;
+  saveSettings: (next: Partial<FinancialYearSettings>) => Promise<void>;
   setFeatureEnabled: (enabled: boolean) => void;
   setDefaultFinancialYear: (financialYear: string | null) => void;
   applyCurrentFinancialYear: () => void;
@@ -50,6 +51,7 @@ const FinancialYearCtx = createContext<FinancialYearContextValue>({
   hasCustomDefault: false,
   settings: DEFAULT_FINANCIAL_YEAR_SETTINGS,
   updateSettings: () => {},
+  saveSettings: async () => {},
   setFeatureEnabled: () => {},
   setDefaultFinancialYear: () => {},
   applyCurrentFinancialYear: () => {},
@@ -121,7 +123,10 @@ function AppClientProviders({ children, dark }: { children: React.ReactNode; dar
     () => getSessionAccountKey(sessionUser),
     [sessionUser]
   );
-  const searchCacheScope = `${status}:${accountKey}:${(session?.user as { role?: string } | undefined)?.role || ""}`;
+  // NextAuth keeps the current session while refreshing it. Preserve page state
+  // during that refresh, including recovery codes that are only shown once.
+  const scopeStatus = status === "loading" && session ? "authenticated" : status;
+  const searchCacheScope = `${scopeStatus}:${accountKey}:${(session?.user as { role?: string } | undefined)?.role || ""}`;
   // Clear synchronously before children read cache entries from another account
   // or permission level, and remount their per-hook request state on that change.
   setCacheScope(searchCacheScope);
@@ -132,7 +137,9 @@ function AppClientProviders({ children, dark }: { children: React.ReactNode; dar
 
   const [financialYearSettings, setFinancialYearSettings] = useState<FinancialYearSettings>(DEFAULT_FINANCIAL_YEAR_SETTINGS);
   const [loadedFinancialYearAccountKey, setLoadedFinancialYearAccountKey] = useState<string | null>(null);
-  const [accountSettingsReady, setAccountSettingsReady] = useState(false);
+  const settingsRevision = useRef(0);
+  const activeAccount = useRef(accountKey);
+  activeAccount.current = accountKey;
   const [showFinancialYearReminder, setShowFinancialYearReminder] = useState(false);
   const financialYearLoaded = loadedFinancialYearAccountKey === accountKey;
 
@@ -141,49 +148,49 @@ function AppClientProviders({ children, dark }: { children: React.ReactNode; dar
 
     let cancelled = false;
     setLoadedFinancialYearAccountKey(null);
-    setAccountSettingsReady(false);
+    const revision = settingsRevision.current;
 
     const loadSettings = async () => {
       let cachedSettings: FinancialYearSettings | null = null;
 
-      const applySettings = (value: unknown, loadedFromAccount: boolean) => {
-        if (cancelled) return;
+      const applySettings = (value: unknown) => {
+        if (cancelled || revision !== settingsRevision.current) return;
         const prepared = prepareFinancialYearSettings(value);
         setFinancialYearSettings(prepared.settings);
         setShowFinancialYearReminder(prepared.shouldShowReminder);
-        setAccountSettingsReady(loadedFromAccount);
         setLoadedFinancialYearAccountKey(accountKey);
       };
 
       if (status === "authenticated") {
-        const rawCache = window.localStorage.getItem(cacheKey);
+        let rawCache: string | null = null;
+        try { rawCache = window.localStorage.getItem(cacheKey); } catch { /* Storage may be unavailable. */ }
         if (rawCache) {
           try {
             cachedSettings = normalizeFinancialYearSettings(JSON.parse(rawCache));
-            applySettings(cachedSettings, false);
+            applySettings(cachedSettings);
           } catch {
-            window.localStorage.removeItem(cacheKey);
+            try { window.localStorage.removeItem(cacheKey); } catch { /* Optional cache. */ }
           }
         }
 
         try {
           const response = await fetch("/api/financial-year-preference", { cache: "no-store" });
           const body = await response.json().catch(() => null);
-          if (response.ok) {
+          if (response.ok && body?.settings && !cancelled && revision === settingsRevision.current) {
             const accountSettings = normalizeFinancialYearSettings(body?.settings);
-            window.localStorage.setItem(cacheKey, JSON.stringify(accountSettings));
-            applySettings(accountSettings, true);
+            try { window.localStorage.setItem(cacheKey, JSON.stringify(accountSettings)); } catch { /* Optional cache. */ }
+            applySettings(accountSettings);
             return;
           }
         } catch {
           // The account-scoped cache remains available while the server is unreachable.
         }
 
-        applySettings(cachedSettings || DEFAULT_FINANCIAL_YEAR_SETTINGS, false);
+        applySettings(cachedSettings || DEFAULT_FINANCIAL_YEAR_SETTINGS);
         return;
       }
 
-      applySettings(DEFAULT_FINANCIAL_YEAR_SETTINGS, false);
+      applySettings(DEFAULT_FINANCIAL_YEAR_SETTINGS);
     };
 
     loadSettings();
@@ -195,19 +202,29 @@ function AppClientProviders({ children, dark }: { children: React.ReactNode; dar
 
   useEffect(() => {
     if (!financialYearLoaded || status !== "authenticated") return;
-    window.localStorage.setItem(cacheKey, JSON.stringify(financialYearSettings));
-    if (!accountSettingsReady) return;
+    // Loading preferences must never write them back to the account: another
+    // tab/device may already have saved a newer choice.
+    try { window.localStorage.setItem(cacheKey, JSON.stringify(financialYearSettings)); } catch { /* Optional cache. */ }
+  }, [cacheKey, financialYearLoaded, financialYearSettings, status]);
 
-    const timer = window.setTimeout(() => {
-      fetch("/api/financial-year-preference", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings: financialYearSettings }),
-      }).catch(() => {});
-    }, 2000);
-
-    return () => window.clearTimeout(timer);
-  }, [accountSettingsReady, cacheKey, financialYearLoaded, financialYearSettings, status]);
+  const saveSettings = async (next: Partial<FinancialYearSettings>) => {
+    if (status !== "authenticated") throw new Error("Sign in to save settings");
+    const savingAccount = accountKey;
+    // Invalidate any load that started before this explicit user action.
+    settingsRevision.current++;
+    const response = await fetch("/api/financial-year-preference", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: next }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.settings) throw new Error(body?.error || "Failed to save financial year settings");
+    if (activeAccount.current !== savingAccount) return;
+    const prepared = prepareFinancialYearSettings(body.settings);
+    setFinancialYearSettings(prepared.settings);
+    setShowFinancialYearReminder(prepared.shouldShowReminder);
+    setLoadedFinancialYearAccountKey(savingAccount);
+  };
 
   const setFeatureEnabled = (enabled: boolean) => {
     setFinancialYearSettings((current) => normalizeFinancialYearSettings({
@@ -247,15 +264,18 @@ function AppClientProviders({ children, dark }: { children: React.ReactNode; dar
     }
   };
 
-  const applyCurrentFinancialYear = () => {
-    setFinancialYearSettings((current) => normalizeFinancialYearSettings({
-      ...current,
-      enabled: true,
-      defaultFinancialYear: CURRENT_FY,
-      lastKnownCurrentFy: CURRENT_FY,
-      pendingReminderCurrentFy: null,
-    }));
-    setShowFinancialYearReminder(false);
+  const applyCurrentFinancialYear = async () => {
+    try {
+      await saveSettings({
+        enabled: true,
+        defaultFinancialYear: CURRENT_FY,
+        lastKnownCurrentFy: CURRENT_FY,
+        pendingReminderCurrentFy: null,
+      });
+      setShowFinancialYearReminder(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save financial year settings");
+    }
   };
 
   const dismissReminderUntilLater = () => {
@@ -278,6 +298,7 @@ function AppClientProviders({ children, dark }: { children: React.ReactNode; dar
         hasCustomDefault: Boolean(financialYearSettings.enabled && financialYearSettings.defaultFinancialYear),
         settings: financialYearSettings,
         updateSettings,
+        saveSettings,
         setFeatureEnabled,
         setDefaultFinancialYear,
         applyCurrentFinancialYear,

@@ -1,4 +1,5 @@
 import { CURRENT_FY, FINANCIAL_YEARS } from "@/lib/utils";
+import { allocateBillingPayments, paise, money } from "@/lib/billing-report";
 import Client from "@/models/Client";
 import FinancialYear from "@/models/FinancialYear";
 import CreditTransaction from "@/models/CreditTransaction";
@@ -194,10 +195,8 @@ function buildContactSummary(contacts: LinkedContactSummary[]) {
 
 function buildPaymentSummary(billings: FlatRecord[], payments: FlatRecord[]) {
   const annualBillings = billings.filter((billing) => String(billing.billType || "annual_return") === "annual_return");
-  const billingPaid = payments.reduce<number>(
-    (sum, payment) => sum + (payment.paymentType === "advance" ? 0 : (Number(payment.amountPaid) || 0)),
-    0
-  );
+  const allocation = allocateBillingPayments(billings, payments);
+  const billingPaid = money([...allocation.paid.values()].reduce((sum, amount) => sum + amount, 0));
   const advancePaid = payments.reduce<number>(
     (sum, payment) => sum + (payment.paymentType === "advance" ? (Number(payment.amountPaid) || 0) : 0),
     0
@@ -220,7 +219,7 @@ function buildPaymentSummary(billings: FlatRecord[], payments: FlatRecord[]) {
     fyBillingPaid: billingPaid,
     fyAdvancePaid: advancePaid,
     fyTotalReceived: totalReceived,
-    fyPendingAmount: Math.max(0, totalBilled - billingPaid),
+    fyPendingAmount: money(billings.reduce((sum, bill) => sum + Math.max(0, paise(bill.totalAmount) - (allocation.paid.get(String(bill._id)) || 0)), 0)),
     fyPaymentCount: payments.length,
     fyLatestPaymentDate: formatDate(latestPayment?.paymentDate),
     fyPaymentModes: joinUnique(payments.map((payment) => String(payment.paymentMode || ""))),

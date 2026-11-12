@@ -113,6 +113,8 @@ export function safeDeliveryError(error: unknown, status: string): string | null
   if (status === "uncertain" || status === "delivering") return "Gmail outcome could not be confirmed. Review Gmail before retrying.";
   if (status !== "failed") return null;
   const text = String(error || "").toLowerCase();
+  if (text.startsWith("draft pending")) return "A Gmail draft is already pending for this client. Send it in Gmail and sync the campaign.";
+  if (text.startsWith("needs review · check gmail")) return "A previous Gmail draft needs review before this client can be emailed again.";
   if (text.includes("attachment") || text.includes("document")) return "An attachment is unavailable or no longer authorized for this message.";
   if (text.includes("workflow conditions")) return "The client no longer matches this workflow's eligibility conditions.";
   if (text.includes("already sent")) return "An initial email was already sent to this client.";

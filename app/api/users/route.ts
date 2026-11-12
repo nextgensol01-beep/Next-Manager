@@ -4,17 +4,22 @@ import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import {
   isAdminSession,
-  isEnvAdminEmail,
   normalizeLoginIdentifier,
 } from "@/lib/authUsers";
 import User, { type UserGoogleStatus, type UserStatus } from "@/models/User";
 import AuthSession from "@/models/AuthSession";
+import mongoose from "mongoose";
+import { AccountSecurityError, requireSameOrigin } from "@/lib/server/account-security";
 
 const STATUS_VALUES = new Set<UserStatus>(["active", "disabled", "pending", "rejected"]);
 const GOOGLE_STATUS_VALUES = new Set<UserGoogleStatus>(["none", "pending", "approved", "rejected"]);
 type DuplicateClause = { loginId: string } | { email: string };
 
-async function requireAdmin() {
+async function requireAdmin(req?: NextRequest) {
+  if (req) {
+    try { requireSameOrigin(req); }
+    catch (error) { return { session: null, response: NextResponse.json({ error: error instanceof AccountSecurityError ? error.message : "Forbidden" }, { status: 403 }) }; }
+  }
   const session = await getServerSession(authOptions);
   if (!session) {
     return {
@@ -51,6 +56,8 @@ function serializeUser(user: {
   lastLoginProvider?: "credentials" | "google" | null;
   lastLoginIp?: string | null;
   lastLoginUserAgent?: string | null;
+  googleRequestLocation?: string;
+  twoFactorEnabled?: boolean;
   createdAt?: Date | string;
   updatedAt?: Date | string;
 }, lastSession?: {
@@ -92,6 +99,8 @@ function serializeUser(user: {
     lastLoginProvider: user.lastLoginProvider || lastSession?.provider || null,
     lastLoginIp: user.lastLoginIp || lastSession?.ip || "",
     lastLoginUserAgent: user.lastLoginUserAgent || lastSession?.userAgent || "",
+    googleRequestLocation: user.googleRequestLocation || "Unknown",
+    twoFactorEnabled: Boolean(user.twoFactorEnabled),
   };
 }
 
@@ -130,7 +139,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const guard = await requireAdmin();
+  const guard = await requireAdmin(req);
   if (guard.response) return guard.response;
 
   await connectDB();
@@ -141,6 +150,7 @@ export async function POST(req: NextRequest) {
   const loginId = typeof body?.loginId === "string" ? normalizeLoginIdentifier(body.loginId) : "";
   const password = typeof body?.password === "string" ? body.password : "";
   const loginMethod = body?.loginMethod === "google" ? "google" : "password";
+  if (password && (password.length < 12 || Buffer.byteLength(password) > 72)) return NextResponse.json({ error: "Passwords require at least 12 characters and at most 72 UTF-8 bytes" }, { status: 400 });
 
   if (!name) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -169,14 +179,14 @@ export async function POST(req: NextRequest) {
     name,
     email: email || undefined,
     loginId: loginId || undefined,
-    googleId: loginMethod === "google" ? email : null,
+    googleId: null,
     password: loginMethod === "password" ? password : undefined,
     status: "active",
     role: "user",
     loginMethods: [loginMethod],
     googleStatus: loginMethod === "google" ? "approved" : "none",
     googleApprovedAt: loginMethod === "google" ? new Date() : null,
-    emailVerified: loginMethod === "google" ? new Date() : null,
+    emailVerified: null,
   });
 
   await user.save();
@@ -185,18 +195,18 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const guard = await requireAdmin();
+  const guard = await requireAdmin(req);
   if (guard.response) return guard.response;
 
   await connectDB();
 
   const id = new URL(req.url).searchParams.get("id");
-  if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) return NextResponse.json({ error: "Valid id is required" }, { status: 400 });
 
   const user = await User.findById(id);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
-  if (isEnvAdminEmail(user.email)) {
-    return NextResponse.json({ error: "The env admin account cannot be deleted" }, { status: 400 });
+  if (user.role === "admin") {
+    return NextResponse.json({ error: "The admin account cannot be deleted" }, { status: 400 });
   }
 
   await Promise.all([
@@ -208,13 +218,13 @@ export async function DELETE(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const guard = await requireAdmin();
+  const guard = await requireAdmin(req);
   if (guard.response) return guard.response;
 
   await connectDB();
 
   const id = new URL(req.url).searchParams.get("id");
-  if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) return NextResponse.json({ error: "Valid id is required" }, { status: 400 });
 
   const body = await req.json().catch(() => null);
   const user = await User.findById(id);
@@ -227,8 +237,14 @@ export async function PATCH(req: NextRequest) {
     ? body.googleStatus as UserGoogleStatus
     : null;
 
-  if (nextStatus && isEnvAdminEmail(user.email) && nextStatus !== "active") {
-    return NextResponse.json({ error: "The env admin account cannot be disabled or rejected" }, { status: 400 });
+  if (user.role === "admin" && (nextStatus && nextStatus !== "active" || nextGoogleStatus || ["email", "loginId", "password"].some(key => key in (body || {})))) {
+    return NextResponse.json({ error: "Use verified Admin Account settings to change this account" }, { status: 400 });
+  }
+  if ("twoFactorEnabled" in (body || {}) || "recoveryCodeHashes" in (body || {})) {
+    return NextResponse.json({ error: "Only the account owner can change two-factor settings after verification" }, { status: 403 });
+  }
+  if (user.twoFactorEnabled && typeof body?.email === "string" && normalizeLoginIdentifier(body.email) !== user.email) {
+    return NextResponse.json({ error: "The owner must verify changes to the second-factor email" }, { status: 403 });
   }
 
   if (typeof body?.name === "string" && body.name.trim()) {
@@ -239,12 +255,14 @@ export async function PATCH(req: NextRequest) {
     user.loginId = normalizeLoginIdentifier(body.loginId) || undefined;
   }
 
-  if (typeof body?.email === "string") {
+  if (typeof body?.email === "string" && normalizeLoginIdentifier(body.email) !== (user.email || "")) {
     user.email = normalizeLoginIdentifier(body.email) || undefined;
+    user.emailVerified = null;
   }
 
   if (typeof body?.password === "string" && body.password.trim()) {
-    user.password = body.password.trim();
+    if (body.password.length < 12 || Buffer.byteLength(body.password) > 72) return NextResponse.json({ error: "Passwords require at least 12 characters and at most 72 UTF-8 bytes" }, { status: 400 });
+    user.password = body.password;
     if (!user.loginMethods.includes("password")) user.loginMethods.push("password");
   }
 
@@ -252,7 +270,6 @@ export async function PATCH(req: NextRequest) {
     user.status = nextStatus;
     if (nextStatus === "active" && user.loginMethods.includes("google") && user.googleStatus === "approved") {
       user.googleApprovedAt = new Date();
-      user.emailVerified = user.emailVerified || new Date();
     }
   }
 
@@ -262,7 +279,6 @@ export async function PATCH(req: NextRequest) {
       if (!user.loginMethods.includes("google")) user.loginMethods.push("google");
       user.status = "active";
       user.googleApprovedAt = new Date();
-      user.emailVerified = user.emailVerified || new Date();
     } else if (nextGoogleStatus === "pending") {
       if (!user.loginMethods.includes("google")) user.loginMethods.push("google");
       user.googleRequestedAt = new Date();
@@ -275,9 +291,11 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
+  const securityChanged = user.isModified("password") || user.isModified("email") || user.isModified("loginId") || user.isModified("status") || user.isModified("googleStatus");
+  if (securityChanged) user.$inc("securityVersion", 1);
   await user.save();
 
-  if (nextStatus === "disabled" || nextStatus === "rejected") {
+  if (securityChanged || nextStatus === "disabled" || nextStatus === "rejected") {
     await AuthSession.deleteMany({ userId: id });
   } else if (nextGoogleStatus === "rejected" || nextGoogleStatus === "none") {
     await AuthSession.deleteMany({ userId: id, provider: "google" });

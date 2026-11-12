@@ -27,7 +27,13 @@ const workflow = { id: 'W1', name: 'Compliance update for fictional clients', de
 let tracker = { _id: trackerId, name: 'Migration Confirmation with a long tracker title ' + 'T'.repeat(28), description: 'A fictional compliance tracker used for responsive testing only.', financialYear: '2025-26', fields, status: 'active', clientColumns: ['state','address'], clientIds: clients.map(x => x.clientId), clientScope: 'categories', clientCategories: categories, clientMembershipMode: 'categorySync', emailEnabled: true, emailWorkflows: [workflow], updatedAt: '2026-10-22T00:00:00Z' };
 const entries = clients.map((client, i) => ({ _id: 'E' + i, trackerId, clientId: client.clientId, client, updatedAt: '2026-10-22T00:00:00Z', fieldRevisions: {}, values: { status: 'Not Started', ready: true, select: 'First', text: 'Saved text', longText: 'Saved note', number: 4, currency: 4, percentage: 25, quantity: 16, date: '2026-10-22', progress: 25, multiSelect: ['First'], tags: ['First'], linked: true, computed: 25 } }));
 const requests = [], approvals = new Map();
-let saveCount = 0;
+let saveCount = 0, draftState = 'pending';
+const skippedClients = () => [
+  { clientId:'C9',companyName:'Fictional skipped client',reasonCode:'no_recipient',reason:'No selected email contact exists for this fictional client.' },
+  ...(draftState === 'discarded' ? [] : [{ clientId:'C10', companyName:'Fictional drafted client',
+    reasonCode: draftState === 'pending' ? 'gmail_draft_pending' : 'gmail_draft_review', reason: draftState === 'pending' ? 'Draft pending' : 'Needs review',
+    gmailDraft: { campaignId:'fixture-draft', state:draftState, canResolve:draftState === 'review', ...(draftState === 'pending' ? { url:'https://mail.google.com/mail/#drafts/fixture' } : {}) } }]),
+];
 const messages = () => clients.slice(0,3).map((client, i) => ({ entryId: 'E' + i, clientId: client.clientId, companyName: client.companyName,
   to: 'person' + i + '@example.invalid', suggestedTo: ['person' + i + '@example.invalid'], recipients: [{ email: 'person' + i + '@example.invalid', name: 'Fictional person', isPrimary: true }, { email: 'long-contact-address-' + 'a'.repeat(55) + '@example.invalid', name: 'Accounts', isPrimary: false }], subject: 'Fictional update ' + client.companyName,
   body: 'Fictional body only.', html: '<html><body><p>Fictional email body. No real email is sent.</p></body></html>', points: [], statements: [], attachments: [{ documentId: 'D' + i, filename: 'Fictional client certificate ' + 'a'.repeat(100) + '.pdf', mimeType: 'application/pdf', fileSize: 4000, required: true, category: 'certificates', financialYear: '2025-26' }], attachmentWarnings: [{ required: false, code: 'missing_document', message: 'Optional fictional document was not found.' }], attachmentSnapshot: 'fictional-' + i }));
@@ -66,7 +72,12 @@ async function main() {
         const entry=entries.find(e=>e._id===url.pathname.split('/').pop()); assert(entry); const previousValue=entry.values[body.key]; entry.values[body.key]=body.value; entry.fieldRevisions[body.key]=(entry.fieldRevisions[body.key]||0)+1;data={...entry,previousValue};
       } else if(url.pathname.endsWith('/sync')) data={token:'fixture-preview',currentCount:222,additions:0,afterCount:222,clients:[]};
       else if(url.pathname.endsWith('/activity')) data={events:[{_id:'fixture-event',label:clients[0].companyName,detail:'A very long fictional activity update '.repeat(12),actorEmail:'fixture@example.invalid',occurredAt:'2026-10-22T00:00:00Z'}]};
-      else if(url.pathname===trackerPath+'/email') data=req.method==='POST'?{workflow:{id:workflow.id,name:workflow.name,signatureGap:2},messages:messages(),skipped:[{clientId:'C9',companyName:'Fictional skipped client',reasonCode:'no_recipient',reason:'No selected email contact exists for this fictional client.'}]}:{logs:[],summary:{total:12,sent:8,draft:4,reminders:3}};
+      else if(url.pathname===trackerPath+'/email') data=req.method==='POST'?{workflow:{id:workflow.id,name:workflow.name,signatureGap:2},messages:messages(),skipped:skippedClients()}:{logs:[],summary:{total:12,sent:8,draft:4,reminders:3}};
+      else if(url.pathname===trackerPath+'/email/drafts') {
+        assert.equal(body.workflowId, workflow.id); assert.equal(body.kind, 'initial');
+        if (body.action === 'sync') { draftState = 'review'; data = { checked:1, sent:0, pending:0, review:1 }; }
+        else { assert.deepEqual([body.action, body.campaignId, body.clientId], ['discarded', 'fixture-draft', 'C10']); draftState = 'discarded'; data = { success:true }; }
+      }
       else if(url.pathname.includes('/email/deliver')) throw Error('Sending is forbidden in responsive QA');
       else if(url.pathname==='/api/documents') data=[{_id:'D0',clientId:'C0',filename:'Fictional certificate.pdf',category:'certificates',documentKind:'general',fileSize:4000}];
       else if(url.pathname==='/api/email/default-signature') data={signature:'<p>Fictional signature</p>'};
@@ -82,7 +93,7 @@ async function main() {
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   let browser, page; const checks=[], metrics=[];
   try {
-    browser=await puppeteer.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,userDataDir:path.join(task,'browser-profile'),args:['--no-sandbox','--disable-gpu']});
+    browser=await puppeteer.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--no-sandbox','--disable-gpu']});
     page=await browser.newPage();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
     await page.emulateMediaFeatures([{name:'prefers-reduced-motion',value:'reduce'}]);
     const origin='http://127.0.0.1:'+server.address().port;
@@ -152,7 +163,18 @@ async function main() {
     assert(await page.$('.email-review-attachments'));await page.screenshot({path:path.join(task,'email-review-390.png')});
     for(const width of [320,360,430,600,768,820,1024]){await page.setViewport({width,height:844,hasTouch:true});await fit('email-detail-'+width);}await page.setViewport({width:390,height:844,hasTouch:true});await page.$eval('.email-review-detail',n=>n.scrollTop=n.scrollHeight);await fit('email-attachments-scrolled');assert(await page.$eval('.email-review-attachments',n=>{const a=n.getBoundingClientRect(),b=n.closest('.email-review-detail').getBoundingClientRect();return a.right<=b.right&&a.bottom<=b.bottom+1;}));
     await page.click('.email-review-back');await page.$eval('[aria-label="Audience filter"]',n=>[...n.querySelectorAll('button')].find(b=>b.textContent.startsWith('Skipped')).click());await page.click('.email-review-client-row');assert((await page.$eval('.email-review-skipped-detail',n=>n.textContent)).includes('No selected email'));await fit('email-skipped-reason');
-    await page.click('.email-review-back');await page.$eval('[aria-label="Audience filter"]',n=>[...n.querySelectorAll('button')].find(b=>b.textContent.startsWith('Eligible')).click());await page.click('.email-review-client-row');
+    const selectDraft = () => page.$eval('.email-review-client-list', node => [...node.querySelectorAll('button')].find(button => button.textContent.includes('Fictional drafted client')).click());
+    await page.click('.email-review-back'); await selectDraft();
+    assert.equal(await page.$eval('.email-review-draft-actions a', node => node.href), 'https://mail.google.com/mail/#drafts/fixture');
+    await clickText('Sync from Gmail', '.email-review-context');
+    await page.waitForFunction(() => !document.querySelector('.email-review-workspace.is-refreshing') && document.querySelector('.email-review-campaign-summary')?.textContent.includes('2 skipped'));
+    await page.$eval('[aria-label="Audience filter"]',n=>[...n.querySelectorAll('button')].find(b=>b.textContent.startsWith('Skipped')).click());
+    await selectDraft(); await fit('email-gmail-draft-review');
+    page.once('dialog', dialog => void dialog.accept()); await clickText('Confirm discarded', '.email-review-draft-actions');
+    await page.waitForFunction(() => document.querySelector('.email-review-campaign-summary')?.textContent.includes('1 skipped'));
+    assert.equal(draftState, 'discarded');
+    if (await page.$('.email-review-panes.show-detail')) await page.click('.email-review-back');
+    await page.click('.email-review-client-row');
     await page.click('.email-review-send');await page.waitForSelector('.email-authorization-modal');await page.waitForFunction(()=>[...document.querySelectorAll('.email-authorization-modal button')].some(n=>n.textContent==='Send verification code'&&!n.disabled));await fit('authorization-request');await clickText('Send verification code','.email-authorization-modal');
     await page.waitForSelector('input[aria-label="Verification code"]');await fit('authorization-otp');for(const width of [320,360,430,600,768,820]){await page.setViewport({width,height:844,hasTouch:true});await fit('authorization-otp-'+width);}await page.setViewport({width:390,height:844,hasTouch:true});await page.type('input[aria-label="Verification code"]','123456');await clickText('Verify','.email-authorization-modal');await page.waitForSelector('input[aria-label="Send PIN"]');await fit('authorization-pin');await page.type('input[aria-label="Send PIN"]','111111');await clickText('Verify','.email-authorization-modal');await page.waitForSelector('.email-authorization-modal .email-security-hold');await fit('authorization-hold');
     for(let i=0;i<8;i++){await page.keyboard.press('Tab');assert(await page.evaluate(()=>Boolean(document.activeElement.closest('.email-authorization-modal'))),'Authorization must trap focus');}

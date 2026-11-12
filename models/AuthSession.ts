@@ -10,6 +10,9 @@ export interface IAuthSession extends Document {
   expires: Date;
   createdAt: Date;
   updatedAt: Date;
+  securityVersion?: number;
+  lastActivityAt?: Date;
+  recoveryVerifiedAt?: Date;
 }
 
 const AuthSessionSchema = new Schema<IAuthSession>(
@@ -21,6 +24,9 @@ const AuthSessionSchema = new Schema<IAuthSession>(
     ip: { type: String, default: "" },
     location: { type: String, default: "" },
     expires: { type: Date, required: true, index: true },
+    securityVersion: { type: Number, default: 0 },
+    lastActivityAt: { type: Date },
+    recoveryVerifiedAt: { type: Date },
   },
   { timestamps: true }
 );

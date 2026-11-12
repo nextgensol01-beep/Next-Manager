@@ -6,6 +6,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const createLoader = require('./search-test-loader.cjs');
+// Live eligibility resolves values through the immutable field definitions.
+const readyFields = [{ key: 'ready', label: 'Ready', type: 'select', options: ['Yes'] }];
 
 async function encodingAndDownloads() {
   const f = require('./verify-email-delivery-security.cjs');
@@ -78,7 +80,7 @@ async function restartChild(stage, stateFile, resume) {
   } else {
     f.Tracker.rows.push({ _id: f.trackerId, name: 'Restart fixture', status: 'active', emailEnabled: true });
     f.Entry.rows.push(...['one', 'two'].map(clientId => ({ _id: clientId, clientId, trackerId: f.trackerId, values: { ready: 'Yes' } })));
-    f.Campaign.rows.push({ _id: 'restart-fixture', campaignId: 'restart-fixture', trackerId: f.trackerId, workflowId: 'WF1', mailKind: 'initial', mode: 'send', status: 'queued', jobVersion: 2, total: 2, authorizedBy: context.owner, authorizedAt: new Date(), approvalId: 'fixture', batchHash: 'fixture', snapshot: { trackerName: 'Restart fixture', fields: [], workflow: { id: 'WF1', mainFieldKey: 'ready', mainValue: 'Yes' }, actor: { owner: context.owner, userId: context.userId, userEmail: context.userEmail } }, items: ['one', 'two'].map(clientId => ({ ...f.batch('send', clientId).messages[0], status: 'pending' })) });
+    f.Campaign.rows.push({ _id: 'restart-fixture', campaignId: 'restart-fixture', trackerId: f.trackerId, workflowId: 'WF1', mailKind: 'initial', mode: 'send', status: 'queued', jobVersion: 2, total: 2, authorizedBy: context.owner, authorizedAt: new Date(), approvalId: 'fixture', batchHash: 'fixture', snapshot: { trackerName: 'Restart fixture', fields: readyFields, workflow: { id: 'WF1', mainFieldKey: 'ready', mainValue: 'Yes' }, actor: { owner: context.owner, userId: context.userId, userEmail: context.userEmail } }, items: ['one', 'two'].map(clientId => ({ ...f.batch('send', clientId).messages[0], status: 'pending' })) });
   }
   const originalUpdate = f.Campaign.updateOne;
   f.Campaign.updateOne = async (filter, change, options) => {
@@ -122,7 +124,7 @@ async function workerBudgetsAndRelease() {
   f.Tracker.rows.push({ _id: f.trackerId, name: 'Budget fixture', status: 'active', emailEnabled: true });
   const items = ['first', 'second', 'third', 'fourth'].map(clientId => ({ ...f.batch('send', clientId).messages[0], status: 'pending' }));
   f.Entry.rows.push(...items.map(item => ({ _id: item.clientId, clientId: item.clientId, trackerId: f.trackerId, values: { ready: 'Yes' } })));
-  f.Campaign.rows.push({ _id: 'budget', campaignId: 'budget', trackerId: f.trackerId, workflowId: 'WF1', mailKind: 'initial', mode: 'send', status: 'queued', jobVersion: 2, total: items.length, authorizedBy: context.owner, authorizedAt: new Date(), approvalId: 'fixture', batchHash: 'fixture', snapshot: { trackerName: 'Budget fixture', fields: [], workflow: { id: 'WF1', mainFieldKey: 'ready', mainValue: 'Yes' }, actor: { owner: context.owner, userId: context.userId, userEmail: context.userEmail } }, items });
+  f.Campaign.rows.push({ _id: 'budget', campaignId: 'budget', trackerId: f.trackerId, workflowId: 'WF1', mailKind: 'initial', mode: 'send', status: 'queued', jobVersion: 2, total: items.length, authorizedBy: context.owner, authorizedAt: new Date(), approvalId: 'fixture', batchHash: 'fixture', snapshot: { trackerName: 'Budget fixture', fields: readyFields, workflow: { id: 'WF1', mainFieldKey: 'ready', mainValue: 'Yes' }, actor: { owner: context.owner, userId: context.userId, userEmail: context.userEmail } }, items });
   const controller = load('lib/server/email-delivery-controller.ts');
   const claim = await controller.claimDeliveryCoordinator(context, 'budget');
   process.env.EMAIL_DELIVERY_BATCH_SIZE = '5';

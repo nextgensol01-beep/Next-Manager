@@ -125,6 +125,10 @@ async function main() {
   assert(transport[before + 1].mime.includes('filename="B-current.pdf"')); assert(!transport[before + 1].mime.includes('B-newer-after-approval.pdf'));
   await run(campaign); assert.equal(transport.length, before + 2, 'Successful campaign items are never resent');
   assert(f.EmailLog.rows.some(log => log.attachments?.[0]?.filename === 'A-current.pdf' && log.attachments[0].financialYear === '2025-26'));
+  const draftPreview = await call('app/api/client-trackers/[id]/email/route.ts', { workflowId: 'WF1', kind: 'initial' });
+  assert.deepEqual(draftPreview.body.skipped.filter(row => row.reasonCode === 'gmail_draft_pending').map(row => row.clientId), ['A', 'B']);
+  assert(!draftPreview.body.messages.some(row => ['A', 'B'].includes(row.clientId)));
+  campaign.items[0].draftResolution = 'discarded'; // Continue the attachment checks after the Gmail draft is cleared.
   const removed = await accept(batch(selected)), beforeMissing = transport.length; remote.get('drive-A-current').error = 404; await run(removed); assert.equal(removed.items[0].status, 'failed'); assert.equal(transport.length, beforeMissing); delete remote.get('drive-A-current').error;
   const changed = await accept(batch(selected)); remote.get('drive-A-current').revision = 'changed-revision'; await run(changed); assert.equal(changed.items[0].status, 'failed'); assert.equal(transport.length, beforeMissing); remote.get('drive-A-current').revision = createHash('md5').update(remote.get('drive-A-current').bytes).digest('hex');
   const invalid = await call('app/api/client-trackers/[id]/email/deliver/route.ts', { ...batch(selected), messages: [{ ...batch(selected).messages[0], attachments: [] }] }); assert.equal(invalid.status, 409);

@@ -44,7 +44,7 @@ async function main(){
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let browser,page;
   try{
-    browser=await puppeteer.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,userDataDir:fs.mkdtempSync(path.join(output,'profile-')),args:['--no-sandbox','--disable-gpu']});page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
+    browser=await puppeteer.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--no-sandbox','--disable-gpu']});page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
     const button=async(text,scope='body')=>{for(const node of await page.$$(scope+' button'))if((await node.evaluate(el=>el.textContent)).trim()===text){await require('./fixtures/wait-for-stable-control.cjs')(node);await node.click();return;}throw Error('Missing button '+text);};
     const wait=async()=>page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,380)));
     const main='.email-delivery-review-modal';

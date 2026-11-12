@@ -67,7 +67,7 @@ async function main() {
   let browser, page;
   try {
     browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true,
-      userDataDir: path.join(task, 'browser-profile'), args: ['--no-sandbox', '--disable-gpu'] });
+       args: ['--no-sandbox', '--disable-gpu'] });
     page = await browser.newPage(); page.setDefaultTimeout(10000);
     page.on('pageerror', error => errors.push(error.message));
     await page.setRequestInterception(true);

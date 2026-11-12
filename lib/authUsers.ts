@@ -1,4 +1,6 @@
 import type { Session } from "next-auth";
+import { isIP } from "node:net";
+import { normalizeClientIp } from "@/lib/sessionLocation";
 import { connectDB } from "@/lib/mongoose";
 import { getAdminEmail } from "@/lib/adminAuth";
 import User, { type IUser, type UserStatus } from "@/models/User";
@@ -31,9 +33,6 @@ export function isEnvAdminEmail(email: string | null | undefined) {
 export async function isAdminSession(session: Session | null) {
   if (!session) return false;
 
-  const email = session?.user?.email || "";
-  if (isEnvAdminEmail(email)) return true;
-
   const userId = (session?.user as (typeof session.user & { id?: string }) | undefined)?.id;
   if (!userId) return false;
 
@@ -42,12 +41,17 @@ export async function isAdminSession(session: Session | null) {
   return Boolean(user && user.role === "admin" && isActiveUser(user));
 }
 
+export function hasTrustedProxy() {
+  return process.env.VERCEL === "1" || process.env.VERCEL === "true" || process.env.AUTH_TRUST_PROXY === "true";
+}
+
 export function getRequestIp(headers: Headers) {
-  return (
-    headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() ||
-    headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    headers.get("x-real-ip") ||
-    headers.get("cf-connecting-ip") ||
-    ""
-  );
+  // Forwarding headers are trustworthy only behind an ingress that strips client values.
+  if (!hasTrustedProxy()) return "";
+  const isVercel = process.env.VERCEL === "1" || process.env.VERCEL === "true";
+  const forwarded = isVercel
+    ? headers.get("x-vercel-forwarded-for") || headers.get("x-forwarded-for")
+    : headers.get("x-forwarded-for") || headers.get("x-real-ip") || headers.get("cf-connecting-ip");
+  const ip = normalizeClientIp(forwarded);
+  return isIP(ip) ? ip : "";
 }

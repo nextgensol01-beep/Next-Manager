@@ -1,3 +1,4 @@
+import { serializeTemplate } from "@/lib/server/email-message-template-record";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import mongoose from "mongoose";
@@ -11,17 +12,6 @@ const emailMessageTemplatePatchSchema = z.object({
   bodyHtml: z.string().trim().min(1, "Message body is required").max(8000),
   bodyText: z.string().trim().min(1, "Message body is required").max(4000),
 });
-
-function serializeTemplate(template: Record<string, unknown>) {
-  return {
-    _id: String(template._id || ""),
-    name: String(template.name || ""),
-    bodyHtml: String(template.bodyHtml || ""),
-    bodyText: String(template.bodyText || ""),
-    createdAt: template.createdAt,
-    updatedAt: template.updatedAt,
-  };
-}
 
 function getId(id: string) {
   return mongoose.Types.ObjectId.isValid(id) ? id : "";

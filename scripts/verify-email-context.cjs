@@ -111,6 +111,7 @@ async function preparationRoute() {
     '@/models/ClientContact': { find: () => chain(clients.map((client, index) => ({ clientId: client.clientId, personId: 'person-' + index, selectedEmails: [`fixture${index}@example.invalid`] }))) },
     '@/models/Person': { find: () => chain(clients.map((_, index) => ({ _id: 'person-' + index, emails: [`fixture${index}@example.invalid`] }))) },
     '@/models/EmailLog': { find: query => chain(history.filter(row => (!query.mailKind || (typeof query.mailKind === 'object' ? query.mailKind.$in.includes(row.mailKind) : row.mailKind === query.mailKind)) && (!query.sentAt || new Date(row.sentAt) >= query.sentAt.$gte) && (!query.status || row.status === query.status) && (!query.communicationStatus || row.communicationStatus === query.communicationStatus))) },
+    'server-only': {}, '@/models/TrackerEmailCampaign': { aggregate: async () => [] },
     '@/models/Document': {}, '@/lib/server/tracker-linked-data': { resolveTrackerLinkedValues: async () => new Map() }, '@/lib/server/tracker-computed-values': { resolveTrackerComputedValues: (_fields, values) => values },
     '@/lib/server/tracker-attachment-snapshot': { createAttachmentMetadataReader: () => null, prepareTrackerAttachmentSelection: async () => ({ attachments: [], issues: [] }) },
   };

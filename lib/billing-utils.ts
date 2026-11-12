@@ -5,59 +5,17 @@ import {
   type IBillingTargetBreakdownRow,
 } from "@/models/Billing";
 
-let billingSchemaPromise: Promise<void> | null = null;
-
 const roundBillingMoney = (value: number) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 
-/**
- * Backfills legacy bills and replaces the old one-bill-per-client/FY index
- * with a uniqueness rule that applies only to Annual Return bills.
- */
-export function ensureBillingSchema(billingCollection: Collection): Promise<void> {
-  if (billingSchemaPromise) return billingSchemaPromise;
+export const annualReturnBillFilter = {
+  $or: [{ billType: "annual_return" }, { billType: { $exists: false } }],
+};
 
-  billingSchemaPromise = (async () => {
-    await billingCollection.updateMany(
-      { billType: { $exists: false } },
-      { $set: { billType: "annual_return", billTitle: "Annual Return Filing" } }
-    );
-
-    const indexes = await billingCollection.indexes();
-    const legacyIndex = indexes.find((index) => {
-      const keys = index.key as Record<string, number> | undefined;
-      return index.unique === true &&
-        keys?.clientId === 1 &&
-        keys?.financialYear === 1 &&
-        Object.keys(keys).length === 2 &&
-        !index.partialFilterExpression;
-    });
-
-    if (legacyIndex?.name) {
-      await billingCollection.dropIndex(legacyIndex.name).catch((error: unknown) => {
-        const codeName = typeof error === "object" && error && "codeName" in error
-          ? String((error as { codeName?: unknown }).codeName)
-          : "";
-        if (codeName !== "IndexNotFound") throw error;
-      });
-    }
-
-    await billingCollection.createIndex(
-      { clientId: 1, financialYear: 1 },
-      {
-        unique: true,
-        name: "unique_annual_return_billing_per_fy",
-        partialFilterExpression: { billType: "annual_return" },
-      }
-    );
-    // The non-unique lookup index is declared on the Mongoose schema. Do not
-    // recreate it here with a custom name: MongoDB treats an identical key
-    // pattern under a different name as IndexOptionsConflict (code 85).
-  })().catch((error) => {
-    billingSchemaPromise = null;
-    throw error;
-  });
-
-  return billingSchemaPromise;
+/** Present the former backfill defaults without persisting them during a read. */
+export function withLegacyBillingFields<T extends Record<string, unknown>>(bill: T): T {
+  return Object.hasOwn(bill, "billType")
+    ? bill
+    : { ...bill, billType: "annual_return", billTitle: "Annual Return Filing" };
 }
 
 /**

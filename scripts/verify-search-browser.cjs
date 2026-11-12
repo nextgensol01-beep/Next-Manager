@@ -46,7 +46,7 @@ async function main() {
   const executablePath = ['C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(fs.existsSync);
   let browser,page;
   try {
-    browser = await puppeteer.launch({executablePath,headless:true,userDataDir:fs.mkdtempSync(path.join(output,'profile-')),args:['--no-sandbox','--disable-gpu','--no-first-run','--no-default-browser-check']});
+    browser = await puppeteer.launch({executablePath,headless:true,args:['--no-sandbox','--disable-gpu','--no-first-run','--no-default-browser-check']});
     page = await browser.newPage(); await page.setViewport({width:1400,height:1000});
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
     const visit = async screen => {await page.goto(`http://127.0.0.1:${server.address().port}/?screen=${screen}`);};

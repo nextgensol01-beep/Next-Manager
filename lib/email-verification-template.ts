@@ -14,6 +14,7 @@ export type VerificationEmailInput = {
   workflowName?: string;
   emailType?: "initial" | "reminder";
   brand?: Partial<VerificationEmailBrand>;
+  subjectPrefix?: string;
 };
 
 const DEFAULT_BRAND: VerificationEmailBrand = {
@@ -22,8 +23,58 @@ const DEFAULT_BRAND: VerificationEmailBrand = {
   address: "New Delhi, India",
 };
 
-// Existing approval purposes map to recipient-facing copy in one place.
+// All verification purposes share one layout and keep their wording here.
 const PURPOSE_COPY = {
+  "account-login": {
+    subject: "Sign-in verification code",
+    headline: "Verify your sign-in",
+    body: "We received a request to sign in to your NextGen Solutions account. Use the verification code below to finish signing in.",
+  },
+  "account-email-change": {
+    subject: "Account email change verification code",
+    headline: "Confirm your account email change",
+    body: "We received a request to change your account email. Use the verification code below to authorize the change.",
+  },
+  "account-email-verify": {
+    subject: "New email verification code",
+    headline: "Verify your new email address",
+    body: "Use the verification code below to confirm that you have access to this new email address.",
+  },
+  "account-password-change": {
+    subject: "Password change verification code",
+    headline: "Confirm your password change",
+    body: "We received a request to change your account password. Use the verification code below to continue.",
+  },
+  "account-recovery-gmail-change": {
+    subject: "Recovery Gmail change verification code",
+    headline: "Confirm your recovery Gmail change",
+    body: "We received a request to replace your current recovery Gmail. Use the verification code below to authorize the change.",
+  },
+  "account-recovery-gmail-verify": {
+    subject: "New recovery Gmail verification code",
+    headline: "Verify your new recovery Gmail",
+    body: "Use the verification code below to confirm that you have access to the Gmail address you want to use for account security.",
+  },
+  "account-two-factor-enable": {
+    subject: "Enable two-factor authentication verification code",
+    headline: "Enable two-factor authentication",
+    body: "Use the verification code below to turn on email verification for future sign-ins to your account.",
+  },
+  "account-two-factor-disable": {
+    subject: "Disable two-factor authentication verification code",
+    headline: "Disable two-factor authentication",
+    body: "We received a request to turn off email verification at sign-in. Use the verification code below to confirm the change.",
+  },
+  "account-recovery-codes-replace": {
+    subject: "Recovery code replacement verification code",
+    headline: "Replace your recovery codes",
+    body: "Use the verification code below to generate a new set of recovery codes. Any previous recovery codes will stop working.",
+  },
+  "account-email-recovery": {
+    subject: "Email access recovery verification code",
+    headline: "Recover access to your account email",
+    body: "Use the verification code below to confirm this replacement mailbox for future sign-in verification.",
+  },
   "send-pin-update": {
     subject: "Send PIN change verification code",
     headline: "Verify Send PIN change",
@@ -45,6 +96,8 @@ const PURPOSE_COPY = {
     body: "We received a request to change your email delivery protection settings. Use the verification code below to continue.",
   },
 };
+
+export type VerificationEmailPurpose = keyof typeof PURPOSE_COPY | "delivery";
 
 function copyForPurpose(input: VerificationEmailInput) {
   if (input.purpose === "delivery") {
@@ -88,7 +141,7 @@ export function renderVerificationEmail(input: VerificationEmailInput) {
   const brand = { ...DEFAULT_BRAND, ...input.brand };
   const copy = copyForPurpose(input);
   // Keep codes out of notification subjects, matching the existing security-email behavior.
-  const subject = `${brand.name} — ${copy.subject}`;
+  const subject = `${input.subjectPrefix ?? `${brand.name} — `}${copy.subject}`;
   const expiry = `This code expires in ${input.expiryMinutes} ${input.expiryMinutes === 1 ? "minute" : "minutes"}.`;
   const securityNote = "If you did not request this action, ignore this email and do not share the code with anyone.";
   const support = brand.supportEmail?.trim();

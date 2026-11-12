@@ -20,10 +20,13 @@ type TrackerModalProps = {
   className?: string;
   compactHeader?: boolean;
   inert?: boolean;
+  /** Local sheets may tune their backdrop; all existing callers retain Modal defaults. */
+  backdropColor?: string;
+  backdropFilter?: string;
 };
 
 /** A calm, focused sheet used throughout the client-tracker workspace. */
-export default function TrackerModal({ open, onClose, title, subtitle, icon: Icon = ClipboardList, children, footer, size = "xl", fixedHeight = false, scrollable = true, className, compactHeader = false, inert = false }: TrackerModalProps) {
+export default function TrackerModal({ open, onClose, title, subtitle, icon: Icon = ClipboardList, children, footer, size = "xl", fixedHeight = false, scrollable = true, className, compactHeader = false, inert = false, backdropColor, backdropFilter }: TrackerModalProps) {
   const [frame, setFrame] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!open || !frame) return;
@@ -58,7 +61,7 @@ export default function TrackerModal({ open, onClose, title, subtitle, icon: Ico
       // properties live only on its own portal and disappear with that node.
     };
   }, [open, frame]);
-  return <Modal open={open} onClose={onClose} title={title} size={size} hideHeader fluidMotion inert={inert}
+  return <Modal open={open} onClose={onClose} title={title} size={size} hideHeader fluidMotion inert={inert} backdropColor={backdropColor} backdropFilter={backdropFilter}
     className={`tracker-modal ${fixedHeight ? "is-complex-sheet" : ""} ${compactHeader ? "is-header-compact" : ""} ${className || ""} mt-auto ${fixedHeight ? "h-[94dvh] sm:h-[90vh]" : "h-auto"} max-h-[94dvh] rounded-b-none rounded-t-[28px] border-white/70 shadow-[0_34px_110px_rgba(0,0,0,0.28)] backdrop-blur-2xl sm:mt-0 sm:max-h-[90vh] sm:rounded-[28px] dark:border-white/[0.12] dark:shadow-[0_38px_120px_rgba(0,0,0,0.74)]`}
     bgColor="rgba(var(--color-card-rgb),0.92)">
     <div ref={setFrame} className="tracker-modal-frame flex min-h-0 flex-1 flex-col overflow-hidden bg-transparent">

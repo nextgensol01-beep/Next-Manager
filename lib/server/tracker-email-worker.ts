@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { trackedDrafts, trackerDraftBlock } from "@/lib/server/tracker-email-drafts";
 import {
   acquireDeliveryLease,
   securityDatabase,
@@ -96,6 +98,7 @@ export async function processDeliveryJob(campaignId: string, execution: { assert
     }
     await securityAudit(context, "delivery_started", audit);
     const campaignClientIds = [...new Set(campaign.items.filter(item => !item.status || item.status === "pending").slice(0, batchSize).map(item => item.clientId))];
+    const draftBlocks = new Map((await trackedDrafts({ trackerId: id, workflowId: parsed.data.workflowId, mailKind: parsed.data.kind }, { clientIds: campaignClientIds })).map(draft => [draft.clientId, trackerDraftBlock(draft).reason]));
     const existingSentLogs = await EmailLog.find({
       trackerId: id,
       workflowId: parsed.data.workflowId,
@@ -180,7 +183,7 @@ export async function processDeliveryJob(campaignId: string, execution: { assert
         trackerId: id,
         campaignId: campaign.campaignId,
         clientId: message.clientId,
-        status: message.status,
+        status: message.status === "draft" ? { $in: ["draft", "sent"] } : message.status,
       });
       if (!existingLog) {
         const emailLog = await EmailLog.create({
@@ -309,7 +312,9 @@ export async function processDeliveryJob(campaignId: string, execution: { assert
       let materialized: Awaited<ReturnType<typeof materializeTrackerEmailAttachments>> = [];
       let gmailAccepted = false;
       let claimedByRequest = false;
+      const draftBlock = draftBlocks.get(message.clientId);
       try {
+        if (draftBlock) throw new Error(draftBlock);
         if (
           parsed.data.mode === "send" &&
           (await TrackerEmailCampaign.exists({
@@ -398,6 +403,7 @@ export async function processDeliveryJob(campaignId: string, execution: { assert
         await lease.renew();
         await execution.assertOwnership();
         if (Date.now() >= deadline - 2000) break;
+        const draftMessageId = parsed.data.mode === "draft" ? `${randomUUID()}@tracker-mail.nextgensolutions.com` : undefined;
         const claimed = await TrackerEmailCampaign.updateOne(
           { _id: campaign._id, [`items.${index}.status`]: "pending" },
           {
@@ -405,6 +411,7 @@ export async function processDeliveryJob(campaignId: string, execution: { assert
               [`items.${index}.status`]: "delivering",
               [`items.${index}.claimedAt`]: new Date(),
               [`items.${index}.deliveryClaimToken`]: lease.token,
+              ...(draftMessageId ? { [`items.${index}.draftMessageId`]: draftMessageId } : {}),
             },
           },
         );
@@ -419,6 +426,7 @@ export async function processDeliveryJob(campaignId: string, execution: { assert
           signatureGap: workflow?.signatureGap ?? 2,
           attachments,
           mode: parsed.data.mode,
+          ...(draftMessageId ? { messageId: draftMessageId } : {}),
           signal: AbortSignal.timeout(Math.max(1000, Math.min(15_000, deadline - Date.now()))),
         });
         gmailAccepted = true;
@@ -450,6 +458,7 @@ export async function processDeliveryJob(campaignId: string, execution: { assert
           );
         completed += 1;
         message.status = parsed.data.mode === "send" ? "sent" : "draft";
+        if (message.status === "draft") draftBlocks.set(message.clientId, "Draft pending · Send the existing draft in Gmail");
         if (parsed.data.mode === "send") dailyRemaining -= 1;
         const emailLog = await EmailLog.create({
           type: "tracker",
@@ -557,6 +566,7 @@ export async function processDeliveryJob(campaignId: string, execution: { assert
           gmailAccepted ||
           (error instanceof GmailDeliveryError && error.mayHaveDelivered);
         message.status = uncertain ? "uncertain" : "failed";
+        if (uncertain && parsed.data.mode === "draft") draftBlocks.set(message.clientId, "Needs review · Check Gmail before preparing another email");
         const messageText =
           error instanceof Error ? error.message : "Delivery failed";
         const recorded = await TrackerEmailCampaign.updateOne(
@@ -591,6 +601,7 @@ export async function processDeliveryJob(campaignId: string, execution: { assert
           result: uncertain ? "requires_review" : "failed",
           details: { itemIndex: index },
         });
+        if (draftBlock) continue;
         await EmailLog.create({
           type: "tracker",
           to: message.to,

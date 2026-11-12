@@ -9,7 +9,7 @@ import { GlassButton, GlassSurface } from "@/components/ui/liquid-glass";
 import type { TrackerEmailWorkflow } from "@/lib/clientTrackers";
 import { createSearchMatcher } from "@/lib/search/client-search";
 import { skipReasonGroups, skipReasonKey } from "@/lib/email-skip-reasons";
-import { getAdditionalRecipients, initialRecipientDraft, MAX_ADDITIONAL_RECIPIENTS, previewWithGmailSignature, recipientCount, recipientIssue, updateAdditionalRecipients, type EmailPreparationPhase, type EmailPreview, type RecipientDraft } from "@/lib/tracker-email-delivery-review";
+import { getAdditionalRecipients, initialRecipientDraft, MAX_ADDITIONAL_RECIPIENTS, previewWithGmailSignature, recipientCount, recipientIssue, updateAdditionalRecipients, type CampaignDraftReview, type EmailPreparationPhase, type EmailPreview, type RecipientDraft } from "@/lib/tracker-email-delivery-review";
 import EmailPreviewFrame from "./EmailPreviewFrame";
 import { emailMotion } from "./EmailMotionRegion";
 import { useAuthorizationReducedMotion as useReducedMotion } from "./useAuthorizationReducedMotion";
@@ -24,6 +24,8 @@ type Props = {
   onDraft: (id: string, draft: RecipientDraft) => void;
   busy: boolean; phase: EmailPreparationPhase; deliveryMode: "draft" | "send" | null;
   error: string | null; onPrepare: () => void;
+  onSyncDrafts?: () => void;
+  onResolveDraft?: (request: { action: "sent" | "discarded"; campaignId: string; clientId: string; sentAt?: string; messageId?: string }) => void;
   onDrafts: () => void; onSend: () => void;
   signature: string | null; signatureLoading: boolean;
   onExpand: (message: EmailPreview["messages"][number]) => void;
@@ -136,7 +138,7 @@ function PrepareAction({ busy, phase, kind, refresh, disabled, onClick }: {
   refresh: boolean; disabled: boolean; onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const reduced = useReducedMotion();
-  const text = busy ? phase === "replies" ? "Checking reply status…" : kind === "reminder" ? "Preparing recipients…" : "Preparing eligible clients…" : refresh ? "Refresh preview" : "Preview eligible clients";
+  const text = busy ? phase === "gmail-drafts" ? "Checking Gmail drafts…" : phase === "replies" ? "Checking reply status…" : kind === "reminder" ? "Preparing recipients…" : "Preparing eligible clients…" : refresh ? "Refresh preview" : "Preview eligible clients";
   return <motion.button type="button" disabled={disabled || busy} onClick={onClick} aria-busy={busy}
     className={`email-review-prepare-action glass-surface glass-surface--clear glass-surface--pill ${busy ? "email-client-processing" : ""}`}
     layout layoutId="email-preview-action" whileTap={reduced ? undefined : { scale: 0.97 }}
@@ -231,6 +233,37 @@ const ClientRecipientReview = memo(function ClientRecipientReview({ message, dra
   </>;
 });
 
+function GmailDraftReview({ draft, clientId, busy, onResolve }: { draft: CampaignDraftReview; clientId: string; busy: boolean; onResolve: NonNullable<Props["onResolveDraft"]> }) {
+  const [sentTime, setSentTime] = useState("");
+  const resolve = (action: "sent" | "discarded", details: { sentAt?: string; messageId?: string } = {}) => {
+    onResolve({ campaignId: draft.campaignId, clientId, action, ...details });
+  };
+  return <div className="email-review-draft-actions space-y-3">
+    {draft.url && <a className="text-brand-500 underline" href={draft.url} target="_blank" rel="noreferrer">Open draft in Gmail</a>}
+    {draft.state === "review" && !draft.canResolve && <p>Sync from Gmail to check whether this draft was sent or discarded.</p>}
+    {draft.canResolve && <>
+      {draft.suggestion && <div className="flex flex-wrap items-center gap-2">
+        <a className="text-brand-500 underline" href={draft.suggestion.url} target="_blank" rel="noreferrer">Review possible match in Gmail</a>
+        <GlassButton disabled={busy} onClick={() => {
+          if (window.confirm("Confirm that this Gmail message was sent to the intended client for this workflow?")) resolve("sent", { messageId: draft.suggestion?.messageId });
+        }}>Confirm matched send</GlassButton>
+      </div>}
+      <p>After checking Gmail, record the actual send time or confirm that the draft was discarded.</p>
+      <label className="flex flex-wrap items-center gap-2">Sent time (local)
+        <input className="rounded-md border border-base bg-surface px-2 py-1" type="datetime-local" step="1" value={sentTime} disabled={busy} onChange={event => setSentTime(event.target.value)} />
+      </label>
+      <div className="flex flex-wrap gap-2">
+        <GlassButton disabled={busy || !sentTime} onClick={() => {
+          if (window.confirm("Confirm that this email was manually sent to the intended client in Gmail?")) resolve("sent", { sentAt: new Date(sentTime).toISOString() });
+        }}>Mark sent</GlassButton>
+        <GlassButton disabled={busy} onClick={() => {
+          if (window.confirm("Confirm that the draft was discarded in Gmail and no email was sent to this client?")) resolve("discarded");
+        }}>Confirm discarded</GlassButton>
+      </div>
+    </>}
+  </div>;
+}
+
 export default function EmailDeliveryReviewWorkspace(props: Props) {
   const { open, preview, busy, phase } = props;
   const reduced = useReducedMotion(), group = useId();
@@ -260,7 +293,7 @@ export default function EmailDeliveryReviewWorkspace(props: Props) {
   const reasonGroups = useMemo(() => skipReasonGroups(preview?.skipped || []), [preview]);
   const rows = useMemo(() => {
     const matcher = createSearchMatcher(search);
-    const all = tab === "eligible" ? (preview?.messages || []).map(message => ({ key: message.entryId, clientId: message.clientId, companyName: message.companyName, reason: "" }))
+    const all: Array<EmailPreview["skipped"][number] & { key: string }> = tab === "eligible" ? (preview?.messages || []).map(message => ({ key: message.entryId, clientId: message.clientId, companyName: message.companyName, reason: "" }))
       : (preview?.skipped || []).map((client, index) => ({ ...client, key: `skipped:${client.clientId}:${index}` }));
     return all.filter(row => (tab !== "skipped" || !reasonFilter || skipReasonKey(row) === reasonFilter)
       && [row.companyName, row.clientId, preparedCategories[row.clientId]].some(matcher));
@@ -302,7 +335,10 @@ export default function EmailDeliveryReviewWorkspace(props: Props) {
         <div className="email-review-scope"><Users size={15} /><div>{!reviewing && <span>Audience scope</span>}<strong>{scope}</strong>{!reviewing && <p>{props.selectedCount ? "Only the selected rows will be evaluated." : "Eligibility rules will determine who is included."}</p>}</div>
           {reviewing && <span className="email-review-campaign-summary">{preview?.messages.length} eligible · {preview?.skipped.length} skipped</span>}
         </div>
-        {reviewing && <div className="email-review-refresh-action">{prepareAction}</div>}
+        {reviewing && <div className="email-review-refresh-action flex flex-wrap items-center gap-2">
+          {props.onSyncDrafts && preview?.skipped.some(row => row.gmailDraft) && <GlassButton disabled={busy} onClick={props.onSyncDrafts}>Sync from Gmail</GlassButton>}
+          {prepareAction}
+        </div>}
       </div>
       {props.error && <div className="email-review-error" role="alert"><CircleAlert size={16} /><div><strong>Unable to prepare email preview.</strong><p>{props.error}</p></div><button type="button" onClick={props.onPrepare} disabled={busy}>Try again <ArrowUpRight size={13} /></button></div>}
         {!reviewing ? <motion.div key="prepare" className="email-review-ready" initial={false} exit={{ opacity: 0, y: reduced ? 0 : -5 }} transition={{ duration: reduced ? 0 : 0.15 }}>
@@ -362,7 +398,9 @@ export default function EmailDeliveryReviewWorkspace(props: Props) {
               </div>}
               {selectedMessage ? <ClientRecipientReview message={selectedMessage} draft={props.drafts[selectedMessage.entryId] || initialRecipientDraft(selectedMessage)} kind={props.kind} disabled={busy}
                 signature={props.signature} signatureLoading={props.signatureLoading} signatureGap={preview?.workflow.signatureGap ?? 2} onChange={draft => props.onDraft(selectedMessage.entryId, draft)} onExpand={() => props.onExpand(selectedMessage)} />
-                : selectedRow?.reason ? <div className="email-review-skipped-detail"><span className="email-review-eyebrow">Skipped client</span><h2>{selectedRow.companyName}</h2><p className="email-review-skipped-id">{selectedRow.clientId}</p><div><CircleAlert size={21} /><h3>This client was skipped</h3><p>{selectedRow.reason}</p></div></div>
+                : selectedRow?.reason ? <div className="email-review-skipped-detail"><span className="email-review-eyebrow">Skipped client</span><h2>{selectedRow.companyName}</h2><p className="email-review-skipped-id">{selectedRow.clientId}</p><div><CircleAlert size={21} /><h3>This client was skipped</h3><p>{selectedRow.reason}</p>
+                  {selectedRow.gmailDraft && props.onResolveDraft && <GmailDraftReview key={`${selectedRow.gmailDraft.campaignId}:${selectedRow.clientId}`} draft={selectedRow.gmailDraft} clientId={selectedRow.clientId} busy={busy} onResolve={props.onResolveDraft} />}
+                </div></div>
                   : <div className="email-review-detail-empty"><Mail size={28} /><h3>Select a client to review</h3><p>Inspect recipients and the personalised email from the audience list.</p></div>}
             </div>
           </section>

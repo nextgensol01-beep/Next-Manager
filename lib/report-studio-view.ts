@@ -12,7 +12,10 @@ export function targetProgress(target: number | null | undefined, achieved: numb
 }
 
 export function rankReportRows(rows: ReportStudioResultRow[], metric: string, limit = 20) {
-  return rows.map((row, index) => ({ row, index, value: Number(row.values[metric]) || 0 }))
+  return rows.flatMap((row, index) => {
+    const value = row.values[metric];
+    return typeof value === "number" && Number.isFinite(value) ? [{ row, index, value }] : [];
+  })
     .sort((a, b) => b.value - a.value).slice(0, limit);
 }
 

@@ -1,39 +1,12 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const Module = require("node:module");
-const path = require("node:path");
-const ts = require("typescript");
-
-const filename = path.resolve(__dirname, "../lib/report-studio.ts");
-const source = fs.readFileSync(filename, "utf8");
-const output = ts.transpileModule(source, {
-  compilerOptions: {
-    module: ts.ModuleKind.CommonJS,
-    target: ts.ScriptTarget.ES2022,
-    esModuleInterop: true,
-  },
-  fileName: filename,
-}).outputText;
-
-const originalLoad = Module._load;
-Module._load = function loadReportStudioDependency(request, parent, isMain) {
-  if (request === "@/lib/quotationRules") return { QUOTATION_STATUSES: ["Draft", "Accepted"] };
-  if (request === "@/lib/annualReturnStatus") return { ANNUAL_RETURN_STATUSES: ["In Progress", "Verified"] };
-  return originalLoad.call(this, request, parent, isMain);
-};
-
-const loaded = new Module(filename, module);
-loaded.filename = filename;
-loaded.paths = Module._nodeModulePaths(path.dirname(filename));
-loaded._compile(output, filename);
-Module._load = originalLoad;
+const load = require("./search-test-loader.cjs")();
 
 const {
   buildReportStudioCustomFields,
   createAcceptedTargetStudioConfig,
   reportStudioCustomFieldKey,
   validateReportStudioConfig,
-} = loaded.exports;
+} = load("lib/report-studio.ts");
 
 const customFields = buildReportStudioCustomFields([
   { key: "accountManager", label: "Account Manager", type: "text", active: true, applicableCategories: ["Producer"] },

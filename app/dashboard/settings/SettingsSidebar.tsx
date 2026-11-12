@@ -36,13 +36,14 @@ export const SETTINGS_TABS: TabDef[] = [
 ];
 
 /** iOS-style toggle */
-function InlineToggle({ checked, onChange }: { checked: boolean; onChange: (e: React.MouseEvent) => void }) {
+function InlineToggle({ checked, onChange, disabled }: { checked: boolean; onChange: (e: React.MouseEvent) => void; disabled?: boolean }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       onClick={onChange}
+      disabled={disabled}
       className={`relative inline-flex flex-shrink-0 rounded-full transition-colors duration-200 focus:outline-none ${
         checked ? "bg-[#34C759]" : "bg-[var(--color-border)]"
       }`}
@@ -76,7 +77,9 @@ interface SettingsSidebarProps {
 }
 
 export default function SettingsSidebar({ activeTab, onSelect, mobile = false }: SettingsSidebarProps) {
-  const { settings, setFeatureEnabled, isLoaded } = useFinancialYearPreference();
+  const { settings, saveSettings, isLoaded } = useFinancialYearPreference();
+  const [savingFinancialYear, setSavingFinancialYear] = useState(false);
+  const savingFinancialYearRef = useRef(false);
   const { users } = useSettingsSearch();
   const [search, setSearch] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
@@ -87,17 +90,15 @@ export default function SettingsSidebar({ activeTab, onSelect, mobile = false }:
 
   const handleToggle = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (savingFinancialYearRef.current || !isLoaded) return;
+    savingFinancialYearRef.current = true;
+    setSavingFinancialYear(true);
     const next = !settings.enabled;
-    setFeatureEnabled(next);
     try {
-      const response = await fetch("/api/financial-year-preference", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings: { ...settings, enabled: next, pendingReminderCurrentFy: next ? settings.pendingReminderCurrentFy : null } }),
-      });
-      if (!response.ok) { setFeatureEnabled(!next); toast.error("Failed to update FY setting"); }
-      else toast.success(next ? "FY override enabled" : "FY override disabled");
-    } catch { setFeatureEnabled(!next); toast.error("Failed to update FY setting"); }
+      await saveSettings({ enabled: next });
+      toast.success(next ? "FY override enabled" : "FY override disabled");
+    } catch { toast.error("Failed to update FY setting"); }
+    finally { savingFinancialYearRef.current = false; setSavingFinancialYear(false); }
   };
 
   // Build search results from query
@@ -185,7 +186,7 @@ export default function SettingsSidebar({ activeTab, onSelect, mobile = false }:
                 <span className="flex-1 text-[16px] font-normal text-default">{tab.label}</span>
                 {isGeneral ? (
                   isLoaded ? (
-                    <InlineToggle checked={settings.enabled} onChange={handleToggle} />
+                    <InlineToggle checked={settings.enabled} onChange={handleToggle} disabled={savingFinancialYear} />
                   ) : (
                     <div className="rounded-full bg-[var(--color-border)] opacity-40" style={{ width: "44px", height: "24px" }} />
                   )

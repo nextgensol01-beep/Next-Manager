@@ -159,7 +159,7 @@ async function main() {
     await app.prepare(); const handler = app.getRequestHandler();
     nextServer = http.createServer((req,res) => handler(req,res)); await new Promise(r => nextServer.listen(nextPort, '127.0.0.1', r));
     nextServer.on('connection', socket => { sockets.add(socket);socket.on('close',()=>sockets.delete(socket)); });
-    browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, userDataDir: path.join(task,'browser-profile'), args: ['--no-sandbox'], });
+    browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true,  args: ['--no-sandbox'], });
     const page = await browser.newPage(); await page.setViewport({ width: 1400, height: 1000 }); page.setDefaultTimeout(90000);
     const pageErrors = []; page.on('pageerror', error => pageErrors.push(error.message));
     await page.evaluateOnNewDocument(() => {

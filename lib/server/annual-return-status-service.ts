@@ -30,9 +30,14 @@ export async function syncAnnualReturnStatus(
   const clientId = String(clientIdValue || "").trim();
   const financialYear = String(financialYearValue || "").trim();
   if (!clientId || !financialYear) return { status: null, changed: false };
+  const key = { clientId, financialYear };
+  const findStatus = () => AnnualReturn.findOne(key).select("status").lean<{
+    _id: unknown;
+    status?: AnnualReturnStatus;
+  } | null>();
 
   const [current, client, invoices, hasUpload, hasBilling, quotations] = await Promise.all([
-    AnnualReturn.findOne({ clientId, financialYear }).select("status"),
+    findStatus(),
     Client.findOne({ clientId }).select("category").lean(),
     Invoice.find({ clientId, financialYear })
       .select("invoiceType status fromDate toDate createdAt updatedAt")
@@ -57,7 +62,8 @@ export async function syncAnnualReturnStatus(
     hasAcceptedQuotation,
   });
 
-  const currentStatus = current?.status as AnnualReturnStatus | undefined;
+  // A legacy record without a status previously received the Mongoose default.
+  const currentStatus = current && (current.status === undefined ? "Pending" : current.status);
   const nextStatus = deriveAutomaticAnnualReturnStatus({
     currentStatus,
     hasWorkflowActivity,
@@ -68,10 +74,26 @@ export async function syncAnnualReturnStatus(
     return { status: nextStatus, changed: false };
   }
 
-  await AnnualReturn.findOneAndUpdate(
-    { clientId, financialYear },
-    { $set: { status: nextStatus } },
-    { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true },
-  );
-  return { status: nextStatus, changed: true };
+  // Automatic reconciliation must not overwrite a filing decision made after this read.
+  if (current) {
+    const updated = await AnnualReturn.findOneAndUpdate(
+      { _id: current._id, status: current.status === undefined ? { $exists: false } : { $eq: current.status, $exists: true } },
+      { $set: { status: nextStatus } },
+      { new: true, runValidators: true },
+    );
+    if (updated) return { status: nextStatus, changed: true };
+  } else {
+    try {
+      await AnnualReturn.create({ ...key, status: nextStatus });
+      return { status: nextStatus, changed: true };
+    } catch (error) {
+      if (!error || typeof error !== "object" || !("code" in error) || error.code !== 11000) throw error;
+      const inserted = await findStatus();
+      if (!inserted) throw error;
+      return { status: inserted.status ?? "Pending", changed: false };
+    }
+  }
+
+  const latest = await findStatus();
+  return { status: latest ? latest.status ?? "Pending" : null, changed: false };
 }

@@ -1,4 +1,11 @@
 export type EmailRecipient = { email: string; name: string; designation: string; isPrimary: boolean };
+export type CampaignDraftReview = {
+  campaignId: string;
+  state: "pending" | "review";
+  canResolve?: boolean;
+  url?: string;
+  suggestion?: { messageId: string; url: string; sentAt: string };
+};
 export type EmailPreview = {
   workflow: { id: string; name: string; signatureGap?: number };
   scenarioSummary?: Array<{ id: string; name: string; matched: number; selected: number; eligible: number }>;
@@ -13,12 +20,12 @@ export type EmailPreview = {
     attachmentWarnings?: Array<{ ruleId: string; code: string; message: string; required: boolean }>;
     attachmentSnapshot?: string;
   }>;
-  skipped: Array<{ clientId: string; companyName: string; reason: string; reasonCode?: string }>;
+  skipped: Array<{ clientId: string; companyName: string; reason: string; reasonCode?: string; gmailDraft?: CampaignDraftReview }>;
 };
 export type AdditionalEmailRecipient = { id: string; email: string; kind: "to" | "cc" };
 export const MAX_ADDITIONAL_RECIPIENTS = 5;
 export type RecipientDraft = { to: string[]; cc: string[]; additionalTo: string; additionalCc: string; additionalRecipients?: AdditionalEmailRecipient[] };
-export type EmailPreparationPhase = "replies" | "recipients" | null;
+export type EmailPreparationPhase = "replies" | "recipients" | "gmail-drafts" | null;
 
 export function initialRecipientDraft(message: EmailPreview["messages"][number]): RecipientDraft {
   return { to: message.suggestedTo?.length ? message.suggestedTo : [message.to], cc: [], additionalTo: "", additionalCc: "" };

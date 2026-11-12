@@ -3,6 +3,7 @@ import "./globals.css";
 import "../components/ui/liquid-glass/liquid-glass.css";
 import "./clients-premium.css";
 import "./client-profile-premium.css";
+import "./scenario-test-material.css";
 import "./tracker-create.css";
 import "./tracker-configure.css";
 import "./financial-year-modal.css";

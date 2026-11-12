@@ -110,8 +110,7 @@ async function main() {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); let browser, page;
   try {
-    const userDataDir = fs.mkdtempSync(path.join(output, 'profile-'));
-    browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', userDataDir, headless: true, args: ['--no-sandbox', '--disable-gpu', '--no-first-run'] });
+    browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe',  headless: true, args: ['--no-sandbox', '--disable-gpu', '--no-first-run'] });
     page = await browser.newPage(); const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.setViewport({ width: 1440, height: 1000 }); await page.goto(`http://127.0.0.1:${server.address().port}`);
     const settle = () => page.evaluate(() => new Promise(resolve => setTimeout(resolve, 430)));

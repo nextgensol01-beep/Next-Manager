@@ -1,6 +1,7 @@
 export type InvoiceCoverageType = "sale" | "purchase";
 
 export type InvoiceCoverageInput = {
+  _id?: unknown;
   invoiceType?: string | null;
   status?: string | null;
   fromDate?: string | Date | null;
@@ -109,20 +110,19 @@ function summarizeTypeCoverage(coveredKeys: Set<string>, fy: string): InvoiceTyp
 }
 
 function invoiceTimestamp(invoice: InvoiceCoverageInput) {
-  const date = parseDate(invoice.updatedAt || invoice.createdAt);
-  return date ? date.getTime() : 0;
+  const timestamp = new Date(invoice.updatedAt || invoice.createdAt || 0).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function isReceivedCoverageStatus(status?: string | null) {
   return !status || status === "Received" || status === "Nil / No Invoice";
 }
 
-export function buildInvoiceCoverageSummary(
+export function invoiceMonthStatuses(
   invoices: InvoiceCoverageInput[],
   fy: string,
-): InvoiceCoverageSummary {
-  const monthLabels = getFinancialYearMonths(fy).map((month) => month.label);
-  const latestByTypeMonth: Record<InvoiceCoverageType, Map<string, { status?: string | null; timestamp: number }>> = {
+) {
+  const latestByTypeMonth: Record<InvoiceCoverageType, Map<string, { status?: string | null; timestamp: number; tie: string }>> = {
     sale: new Map(),
     purchase: new Map(),
   };
@@ -131,13 +131,19 @@ export function buildInvoiceCoverageSummary(
     if (invoice.invoiceType !== "sale" && invoice.invoiceType !== "purchase") return;
     const type = invoice.invoiceType as InvoiceCoverageType;
     const timestamp = invoiceTimestamp(invoice);
+    const tie = `${String(invoice._id || "")}:${isReceivedCoverageStatus(invoice.status) ? "0" : "1"}:${invoice.status || ""}`;
     getCoveredInvoiceMonths(invoice.fromDate, invoice.toDate, fy).forEach((key) => {
       const existing = latestByTypeMonth[type].get(key);
-      if (!existing || timestamp >= existing.timestamp) {
-        latestByTypeMonth[type].set(key, { status: invoice.status, timestamp });
+      if (!existing || timestamp > existing.timestamp || (timestamp === existing.timestamp && tie > existing.tie)) {
+        latestByTypeMonth[type].set(key, { status: invoice.status, timestamp, tie });
       }
     });
   });
+  return latestByTypeMonth;
+}
+
+export function buildInvoiceCoverageSummary(invoices: InvoiceCoverageInput[], fy: string, latestByTypeMonth = invoiceMonthStatuses(invoices, fy)): InvoiceCoverageSummary {
+  const monthLabels = getFinancialYearMonths(fy).map((month) => month.label);
 
   const covered: Record<InvoiceCoverageType, Set<string>> = {
     sale: new Set<string>(),

@@ -17,6 +17,7 @@ import Person from "@/models/Person";
 import { connectDB } from "@/lib/mongoose";
 import { errorResponse, requireSession } from "@/lib/route-utils";
 import { buildInvoiceCoverageSummary } from "@/lib/invoiceCoverage";
+import { executeBillingReport } from "@/lib/server/billing-report-service";
 
 type FlatRecord = Record<string, unknown>;
 
@@ -47,6 +48,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       ClientContact.find({ clientId }).select("personId designation isPrimaryContact").lean() as Promise<FlatRecord[]>,
     ]);
     if (!client) return NextResponse.json({ error: "Client not found" }, { status: 404 });
+    const financialReport = await executeBillingReport({ financialYear, view: "company" }, true, clientId);
+    const financial = financialReport.companies.find(company => company.clientId === clientId) || null;
 
     const quotationIds = quotations.map((quotation) => String(quotation._id || "")).filter(Boolean);
     const revisions = quotationIds.length > 0 ? await QuotationRevision.find({ quotationId: { $in: quotationIds } }).select("quotationId revisionNumber grandTotal").lean() as FlatRecord[] : [];
@@ -64,6 +67,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         grandTotal: revisionValues.get(`${String(quotation._id)}:${Number(quotation.currentRevisionNumber) || 0}`) || 0,
       })),
       billing,
+      financial,
       payments,
       annualReturn,
       invoiceCoverage: buildInvoiceCoverageSummary(invoices, financialYear),

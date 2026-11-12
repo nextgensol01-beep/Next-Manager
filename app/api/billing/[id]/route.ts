@@ -1,94 +1,13 @@
+import { fetchBillingAggregated } from "@/lib/server/billing-read";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { normalizeBillingBody } from "@/lib/billing-utils";
 import { connectDB } from "@/lib/mongoose";
 import Billing from "@/models/Billing";
-import Payment from "@/models/Payment";
 import DeletedRecord from "@/models/DeletedRecord";
 import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
 import { recordActivityEvent } from "@/lib/server/activity-events";
-
-
-// ── Re-fetch a billing doc through the full aggregation pipeline so the
-// response always has the same shape as GET (totalPaid, pendingAmount, etc.)
-async function fetchBillingAggregated(id: unknown) {
-  const { ObjectId } = await import("mongodb");
-  const _id = typeof id === "string" ? new ObjectId(id) : id;
-  const [doc] = await Billing.collection
-    .aggregate([
-      { $match: { _id } },
-      {
-        $lookup: {
-          from: Payment.collection.name,
-          let: {
-            billingRecordId: { $toString: "$_id" },
-            billingClientId: "$clientId",
-            billingFinancialYear: "$financialYear",
-            billingType: { $ifNull: ["$billType", "annual_return"] },
-          },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $ne: ["$paymentType", "advance"] },
-                    {
-                      $or: [
-                        { $eq: ["$billingId", "$$billingRecordId"] },
-                        {
-                          $and: [
-                            { $eq: ["$$billingType", "annual_return"] },
-                            { $eq: ["$clientId", "$$billingClientId"] },
-                            { $eq: ["$financialYear", "$$billingFinancialYear"] },
-                            { $in: [{ $ifNull: ["$billingId", ""] }, ["", null]] },
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                },
-              },
-            },
-            { $group: { _id: null, totalPaid: { $sum: "$amountPaid" } } },
-          ],
-          as: "paymentTotals",
-        },
-      },
-      {
-        $addFields: {
-          totalPaid: { $ifNull: [{ $first: "$paymentTotals.totalPaid" }, 0] },
-        },
-      },
-      { $unset: "paymentTotals" },
-      {
-        $addFields: {
-          pendingAmount: { $max: [0, { $subtract: ["$totalAmount", "$totalPaid"] }] },
-          paymentPercentage: {
-            $cond: [
-              { $gt: ["$totalAmount", 0] },
-              { $min: [100, { $multiply: [{ $divide: ["$totalPaid", "$totalAmount"] }, 100] }] },
-              0,
-            ],
-          },
-          paymentStatus: {
-            $switch: {
-              branches: [
-                {
-                  case: { $lte: [{ $max: [0, { $subtract: ["$totalAmount", "$totalPaid"] }] }, 0] },
-                  then: "Paid",
-                },
-                { case: { $gt: ["$totalPaid", 0] }, then: "Partial" },
-              ],
-              default: "Unpaid",
-            },
-          },
-        },
-      },
-    ])
-    .toArray();
-  return doc ?? null;
-}
 
 // PATCH — lightweight update for invoice status only
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

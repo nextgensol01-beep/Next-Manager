@@ -1,6 +1,5 @@
 "use client";
 
-import { readJsonResponse } from "@/lib/http-response";
 import { useState, useEffect } from "react";
 import { BellRing } from "lucide-react";
 import toast from "react-hot-toast";
@@ -88,7 +87,7 @@ export default function GeneralPanel() {
     settings,
     currentFinancialYear,
     effectiveFinancialYear,
-    updateSettings,
+    saveSettings,
   } = useFinancialYearPreference();
 
   const [featureEnabled, setFeatureEnabledDraft] = useState(false);
@@ -101,21 +100,14 @@ export default function GeneralPanel() {
     setDefaultFinancialYearDraft(settings.defaultFinancialYear || "");
   }, [isLoaded, settings.defaultFinancialYear, settings.enabled]);
 
-  const saveFinancialYearSettings = async (nextSettings: typeof settings) => {
+  const saveFinancialYearSettings = async (nextSettings: Partial<typeof settings>) => {
     setSaving(true);
     try {
-      const response = await fetch("/api/financial-year-preference", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings: nextSettings }),
-      });
-      const body = await readJsonResponse(response).catch(() => null);
-      if (!response.ok) {
-        toast.error(body?.error || "Failed to save financial year settings");
-        return false;
-      }
-      updateSettings(body?.settings || nextSettings);
+      await saveSettings(nextSettings);
       return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save financial year settings");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -123,9 +115,9 @@ export default function GeneralPanel() {
 
   const handleSave = async () => {
     const nextSettings = {
-      ...settings,
       enabled: featureEnabled,
       defaultFinancialYear: defaultFinancialYear || null,
+      lastKnownCurrentFy: currentFinancialYear,
     };
     if (await saveFinancialYearSettings(nextSettings)) {
       toast.success("Settings saved");
@@ -133,8 +125,7 @@ export default function GeneralPanel() {
   };
 
   const handleDisable = async () => {
-    const nextSettings = { ...settings, enabled: false, pendingReminderCurrentFy: null };
-    setFeatureEnabledDraft(false);
+    const nextSettings = { enabled: false, pendingReminderCurrentFy: null };
     if (await saveFinancialYearSettings(nextSettings)) {
       toast.success("FY override disabled");
     }

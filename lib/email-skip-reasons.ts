@@ -3,6 +3,9 @@ import type { EmailPreview } from "./tracker-email-delivery-review";
 const labels: Record<string, string> = {
   conditions_not_matched: "Eligibility conditions",
   initial_already_sent: "Initial email already sent",
+  sent_via_gmail: "Sent via Gmail",
+  gmail_draft_pending: "Draft pending",
+  gmail_draft_review: "Draft needs review",
   initial_required: "Initial email required",
   replied: "Client replied",
   recently_sent: "7-day cooldown",

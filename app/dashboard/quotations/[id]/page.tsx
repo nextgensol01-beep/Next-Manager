@@ -273,7 +273,7 @@ const STANDARD_SERVICES = [
   { label: "CAT-III Recycling Credit Procurement", category: "CAT-III", type: "Recycling", description: "CAT-III Recycling Credit Procurement" },
   { label: "CAT-IV Recycling Credit Procurement", category: "CAT-IV", type: "Recycling", description: "CAT-IV Recycling Credit Procurement" },
   { label: "EOL Co-processing Waste-to-Energy", category: "CAT-I", type: "Co-processing", description: "EOL Co-processing Waste-to-Energy" },
-  { label: "EOL Road Construction Compliance", category: "CAT-I", type: "EOL", description: "EOL Road Construction Compliance" },
+  { label: "CAT-I EOL Credit Procurement", category: "CAT-I", type: "EOL", description: "CAT-I EOL Credit Procurement" },
   { label: "Energy Recovery Compliance Services", category: "CAT-I", type: "Energy Recovery", description: "Energy Recovery Compliance Services" },
 ];
 
@@ -877,7 +877,7 @@ function getEmailDraftUnavailableMessage(status: QuotationStatus) {
     case "Rejected":
       return "Rejected quotation cannot be drafted again.";
     case "Expired":
-      return "Expired quotation cannot be drafted again. Create a new revision if needed.";
+      return "Expired quotation cannot be drafted again. Duplicate it to create a new quotation if needed.";
     default:
       return "";
   }
@@ -1183,6 +1183,7 @@ const shouldSyncStandardDescription = (description: string) => {
   const normalized = description.trim();
   return !normalized
     || normalized === "EPR Credit Procurement"
+    || normalized === "EOL Road Construction Compliance"
     || STANDARD_SERVICES.some(service => service.description === normalized)
     || /^CAT-(?:I|II|III|IV) (?:Recycling|EOL|Co-processing|Energy Recovery|Other) Credit Procurement$/.test(normalized);
 };

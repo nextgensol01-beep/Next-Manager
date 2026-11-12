@@ -4,37 +4,9 @@ import ExcelJS from "exceljs";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import { buildCustomClientExportData, getFieldConfig } from "@/lib/server/custom-client-export";
-import { finaliseReadableReportSheet } from "@/lib/server/excel-report-style";
+import { applyHeaderStyle, applyDataStyle, finaliseReadableReportSheet } from "@/lib/server/excel-report-style";
 
-const HEADER_COLOR = "FF2D47E2";
 
-function applyHeaderStyle(row: ExcelJS.Row) {
-  row.eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_COLOR } };
-    cell.alignment = { horizontal: "center", vertical: "middle" };
-    cell.border = { bottom: { style: "thin", color: { argb: "FF1E30A8" } } };
-  });
-  row.height = 22;
-}
-
-function applyDataStyle(row: ExcelJS.Row, idx: number) {
-  row.eachCell({ includeEmpty: true }, (cell) => {
-    cell.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: idx % 2 === 0 ? "FFDBEAFE" : "FFFFFFFF" },
-    };
-    cell.border = {
-      top: { style: "thin", color: { argb: "FFE2E8F0" } },
-      left: { style: "thin", color: { argb: "FFE2E8F0" } },
-      bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
-      right: { style: "thin", color: { argb: "FFE2E8F0" } },
-    };
-    cell.alignment = { vertical: "middle" };
-  });
-  row.height = 18;
-}
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);

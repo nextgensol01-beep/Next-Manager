@@ -12,6 +12,9 @@ import AuthAccount from "@/models/AuthAccount";
 import AuthSession from "@/models/AuthSession";
 import AuthVerificationToken from "@/models/AuthVerificationToken";
 import { isActiveUser, normalizeLoginIdentifier } from "@/lib/authUsers";
+import { headers } from "next/headers";
+import { requestMetadata } from "@/lib/server/account-security-mail";
+import { recordVerifiedLogin } from "@/lib/server/account-security";
 
 type UserDocument = {
   _id: { toString(): string };
@@ -47,19 +50,10 @@ const isObjectId = (id: string) => mongoose.Types.ObjectId.isValid(id);
 
 export function MongooseAuthAdapter(): Adapter {
   return {
-    async createUser(user: Omit<AdapterUser, "id">) {
-      await connectDB();
-      const created = await User.create({
-        name: user.name || user.email,
-        email: user.email ? normalizeLoginIdentifier(user.email) : undefined,
-        emailVerified: user.emailVerified,
-        image: user.image,
-        status: "active",
-        loginMethods: ["google"],
-        googleStatus: "approved",
-        googleApprovedAt: new Date(),
-      });
-      return toAdapterUser(created);
+    async createUser() {
+      // The verified Google callback provisions requests before this adapter runs.
+      // An adapter fallback must never bypass administrator approval.
+      throw new Error("Google account must be approved before session creation");
     },
 
     async getUser(id: string) {
@@ -115,6 +109,8 @@ export function MongooseAuthAdapter(): Adapter {
 
     async linkAccount(account: AdapterAccount) {
       await connectDB();
+      const user = await User.findById(account.userId);
+      if (!user || !isActiveUser(user) || user.googleStatus !== "approved" || user.googleId !== account.providerAccountId) throw new Error("Google identity is not approved");
       const created = await AuthAccount.findOneAndUpdate(
         {
           provider: account.provider,
@@ -127,8 +123,6 @@ export function MongooseAuthAdapter(): Adapter {
         $addToSet: { loginMethods: "google" },
         $set: {
           googleId: account.provider === "google" ? account.providerAccountId : undefined,
-          googleStatus: account.provider === "google" ? "approved" : undefined,
-          googleApprovedAt: new Date(),
         },
       });
       return created as unknown as AdapterAccount;
@@ -143,31 +137,35 @@ export function MongooseAuthAdapter(): Adapter {
 
     async createSession(session: AdapterSession) {
       await connectDB();
+      const user = await User.findById(session.userId);
+      if (!user || !isActiveUser(user) || user.googleStatus !== "approved" || user.twoFactorEnabled) throw new Error("Account cannot create an unverified session");
       const googleAccount = await AuthAccount.findOne({
         userId: session.userId,
         provider: "google",
       }).select("_id").lean();
       const provider = googleAccount ? "google" : "credentials";
-      const created = await AuthSession.create({ ...session, provider });
-      await User.findByIdAndUpdate(session.userId, {
-        $set: {
-          lastLoginAt: new Date(),
-          lastLoginProvider: provider,
-        },
-      });
+      const requestHeaders = new Headers(await headers());
+      const created = await AuthSession.create({ ...session, provider, ...requestMetadata(requestHeaders), securityVersion: user.securityVersion || 0, lastActivityAt: new Date() });
+      await recordVerifiedLogin(user, provider, requestHeaders);
       return toAdapterSession(created);
     },
 
     async getSessionAndUser(sessionToken: string) {
       await connectDB();
       const session = await AuthSession.findOne({ sessionToken });
-      if (!session) return null;
+      if (!session || session.expires <= new Date()) return null;
 
       const user = await User.findById(session.userId);
       if (!user) return null;
-      if (!isActiveUser(user)) {
+      if (!isActiveUser(user) || (session.securityVersion || 0) !== (user.securityVersion || 0) || (session.provider === "google" && user.googleStatus !== "approved")) {
         await AuthSession.findOneAndDelete({ sessionToken });
         return null;
+      }
+
+      // Throttled server-side activity; no browser polling or geolocation calls.
+      const activity = session.lastActivityAt || session.createdAt;
+      if (!activity || Date.now() - activity.getTime() > 5 * 60_000) {
+        await AuthSession.updateOne({ _id: session._id, lastActivityAt: session.lastActivityAt }, { $set: { lastActivityAt: new Date() } });
       }
 
       return {

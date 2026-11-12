@@ -21,6 +21,24 @@ function LoginForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [hasGoogleProvider, setHasGoogleProvider] = useState(false);
+  const [secondFactor, setSecondFactor] = useState(false);
+  const [code, setCode] = useState("");
+  const [useRecovery, setUseRecovery] = useState(false);
+  const [retryAt, setRetryAt] = useState(0);
+  const [resendSeconds, setResendSeconds] = useState(0);
+
+  useEffect(() => {
+    if (status !== "unauthenticated") return;
+    let mounted = true;
+    fetch("/api/auth/second-factor", { cache: "no-store" }).then(response => response.json()).then(body => { if (mounted && body.required) { setSecondFactor(true); setRetryAt(Date.now() + 60_000); } }).catch(() => {});
+    return () => { mounted = false; };
+  }, [status]);
+  useEffect(() => {
+    if (!secondFactor) return;
+    const tick = () => setResendSeconds(Math.max(0, Math.ceil((retryAt - Date.now()) / 1000)));
+    tick(); const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [secondFactor, retryAt]);
 
   useEffect(() => {
     if (session) router.push(safeCallbackUrl);
@@ -48,7 +66,15 @@ function LoginForm() {
 
   useEffect(() => {
     const err = searchParams.get("error");
-    if (err === "AccessDenied") {
+    if (err === "GooglePending") {
+      setError("Your Google identity has been verified. Your access request is awaiting administrator approval.");
+    } else if (err === "GoogleRejected") {
+      setError("Access for this Google account has been rejected or disabled. Contact the administrator.");
+    } else if (err === "RateLimited") {
+      setError("Too many attempts. Please try again later.");
+    } else if (err === "VerificationUnavailable") {
+      setError("Email verification is temporarily unavailable. Please try signing in again.");
+    } else if (err === "AccessDenied") {
       setError("Your Google account is waiting for admin approval or has been disabled.");
     } else if (err === "OAuthSignin" || err === "OAuthCallback" || err === "OAuthCreateAccount") {
       setError("Google sign in failed. Check your Google OAuth client ID, secret, and redirect URI.");
@@ -76,14 +102,19 @@ function LoginForm() {
     setError("");
     setLoading(true);
     try {
-      const response = await fetch("/api/auth/admin-login", {
+      const response = await fetch(secondFactor ? "/api/auth/second-factor" : "/api/auth/admin-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(secondFactor ? useRecovery ? { recoveryCode: code } : { code } : { email, password }),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
         setError(body?.error || "Invalid email or password.");
+        return;
+      }
+      if (body?.secondFactor) {
+        setSecondFactor(true); setPassword(""); setCode(""); setRetryAt(Date.now() + 60_000);
+        if (body.deliveryUnavailable) setError("Email delivery is unavailable. Use a saved recovery code or retry later.");
         return;
       }
 
@@ -152,6 +183,7 @@ function LoginForm() {
 
           {/* Email/Password form */}
           <form onSubmit={handleSubmit} className="space-y-4">
+            {secondFactor ? <div className="space-y-3"><p className="text-sm text-slate-300">{useRecovery ? "Enter one saved recovery code. Each code works once." : "Enter the website verification code sent to your account email. It expires in 5 minutes."}</p><label className="block space-y-2 text-sm text-slate-300"><span>{useRecovery ? "Recovery code" : "Email verification code"}</span><input className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white" autoComplete={useRecovery ? "off" : "one-time-code"} inputMode={useRecovery ? "text" : "numeric"} required value={code} onChange={event => setCode(event.target.value)} /></label><div className="flex flex-wrap gap-3 text-xs text-brand-400"><button type="button" disabled={loading} onClick={() => { setUseRecovery(value => !value); setCode(""); }}>{useRecovery ? "Use email code" : "Lost email access? Use a recovery code"}</button><button type="button" disabled={loading || resendSeconds > 0} onClick={async () => { setLoading(true); setError(""); try { const response = await fetch("/api/auth/second-factor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resend: true }) }); const body = await response.json(); if (!response.ok) setError(body.error || "Unable to resend code"); else { setRetryAt(Date.now() + 60_000); setCode(""); if (body.deliveryUnavailable) setError("Email delivery is unavailable. Use a saved recovery code."); } } catch { setError("Unable to resend code"); } finally { setLoading(false); } }}>{resendSeconds > 0 ? `Resend in ${resendSeconds}s` : "Resend code"}</button><button type="button" onClick={() => { setSecondFactor(false); setCode(""); setError(""); }}>Start again</button></div></div> : <>
             <div>
               <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
                 Login ID or Email
@@ -192,6 +224,7 @@ function LoginForm() {
               </div>
             </div>
 
+            </>}
             <button
               type="submit"
               disabled={loading}
@@ -200,13 +233,13 @@ function LoginForm() {
               {loading ? (
                 <><Loader2 className="w-4 h-4 animate-spin" /> Signing in...</>
               ) : (
-                "Sign In"
+                secondFactor ? "Verify & Sign In" : "Sign In"
               )}
             </button>
           </form>
 
           {/* Google — only shown if configured */}
-          {hasGoogleProvider && (
+          {hasGoogleProvider && !secondFactor && (
             <div className="mt-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="flex-1 h-px bg-white/10" />

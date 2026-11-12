@@ -58,7 +58,7 @@ async function main() {
   const port = server.address().port, base = 'http://127.0.0.1:' + port;
   try {
     app = require('next')({ dev: true, dir: project, hostname: '127.0.0.1', port }); await app.prepare(); handler = app.getRequestHandler();
-    browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, userDataDir: fs.mkdtempSync(path.join(output, 'profile-')), args: ['--no-sandbox'] });
+    browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true,  args: ['--no-sandbox'] });
     const page = await browser.newPage(); await page.setViewport({ width: 1440, height: 1000 });
     page.setDefaultTimeout(60000); const errors = []; page.on('pageerror', error => errors.push(error.message));
     const control = async values => { const response = await fetch(base + '/api/__fixture/control?' + new URLSearchParams(values)); assert(response.ok); };

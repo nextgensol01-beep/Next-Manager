@@ -55,6 +55,16 @@ async function main() {
   assert(dynamic.text.includes("help+otp@example.com"));
   assert.throws(() => renderVerificationEmail({ ...sample, brand: { supportEmail: 'x" onmouseover="alert(1)' } }));
   const purposeCases = [
+    ["account-login", "Verify your sign-in", "Sign-in verification code", "finish signing in"],
+    ["account-email-change", "Confirm your account email change", "Account email change verification code", "authorize the change"],
+    ["account-email-verify", "Verify your new email address", "New email verification code", "access to this new email address"],
+    ["account-password-change", "Confirm your password change", "Password change verification code", "change your account password"],
+    ["account-recovery-gmail-change", "Confirm your recovery Gmail change", "Recovery Gmail change verification code", "replace your current recovery Gmail"],
+    ["account-recovery-gmail-verify", "Verify your new recovery Gmail", "New recovery Gmail verification code", "use for account security"],
+    ["account-two-factor-enable", "Enable two-factor authentication", "Enable two-factor authentication verification code", "turn on email verification"],
+    ["account-two-factor-disable", "Disable two-factor authentication", "Disable two-factor authentication verification code", "turn off email verification"],
+    ["account-recovery-codes-replace", "Replace your recovery codes", "Recovery code replacement verification code", "Any previous recovery codes will stop working"],
+    ["account-email-recovery", "Recover access to your account email", "Email access recovery verification code", "confirm this replacement mailbox"],
     ["delivery", "Approve email delivery", "Email delivery verification code", "delivery of 32 client emails"],
     ["send-pin-update", "Verify Send PIN change", "Send PIN change verification code", "change your Email Delivery Send PIN"],
     ["approval-email-verify", "Verify your approval email", "Approval email verification code", "verifies this email address"],
@@ -130,7 +140,6 @@ async function main() {
     const browser = await puppeteer.launch({
       executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe",
       headless: true,
-      userDataDir: fs.mkdtempSync(path.join(output, "profile-")),
       args: ["--no-sandbox", "--disable-dev-shm-usage"],
     });
     try {

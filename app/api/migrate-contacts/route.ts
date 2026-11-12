@@ -1,12 +1,11 @@
 /**
  * ONE-TIME migration: converts legacy Contact documents into Person + ClientContact records.
  * Safe to run multiple times (skips already-migrated).
- * Call: GET /api/migrate-contacts
+ * Administrator maintenance: POST /api/migrate-contacts
  */
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
+import { withAdminMaintenance } from "@/lib/server/maintenance-api";
 import Contact from "@/models/Contact";
 import Client from "@/models/Client";
 import Person from "@/models/Person";
@@ -16,9 +15,7 @@ import {
   sameStringArray,
 } from "@/lib/clientContactSelections";
 
-export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export const POST = withAdminMaintenance(async () => {
   await connectDB();
 
   const contacts = await Contact.find({});
@@ -93,4 +90,4 @@ export async function GET() {
     message: `Migration complete. Persons created: ${created}, merged: ${merged}, ClientContact links skipped: ${skipped}, selections backfilled: ${backfilled}`,
     created, merged, skipped, backfilled,
   });
-}
+});

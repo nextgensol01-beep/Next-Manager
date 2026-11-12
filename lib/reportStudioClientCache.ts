@@ -21,8 +21,8 @@ function stableValue(value: unknown): unknown {
   );
 }
 
-function cacheKey(config: ReportStudioConfig) {
-  return JSON.stringify(stableValue(config));
+function cacheKey(config: ReportStudioConfig, scope: string) {
+  return JSON.stringify([scope, stableValue(config)]);
 }
 
 function pruneCache() {
@@ -33,8 +33,8 @@ function pruneCache() {
   oldest.forEach(([key]) => responseCache.delete(key));
 }
 
-export function getCachedReportStudio(config: ReportStudioConfig) {
-  const key = cacheKey(config);
+export function getCachedReportStudio(config: ReportStudioConfig, scope: string) {
+  const key = cacheKey(config, scope);
   const cached = responseCache.get(key);
   if (!cached) return null;
   if (Date.now() - cached.storedAt >= CACHE_TTL_MS) {
@@ -44,16 +44,16 @@ export function getCachedReportStudio(config: ReportStudioConfig) {
   return cached.data;
 }
 
-export async function fetchReportStudio(config: ReportStudioConfig, options: { refresh?: boolean } = {}) {
-  const key = cacheKey(config);
-  if (!options.refresh) {
-    const cached = getCachedReportStudio(config);
+export async function fetchReportStudio(config: ReportStudioConfig, options: { refresh?: boolean; scope?: string } = {}) {
+  const key = options.scope ? cacheKey(config, options.scope) : null;
+  if (!options.refresh && options.scope) {
+    const cached = getCachedReportStudio(config, options.scope);
     if (cached) return cached;
   }
 
   // Reuse the active request even for a refresh. Starting a second identical
   // database report cannot make the result fresher than the one already running.
-  const pending = pendingRequests.get(key);
+  const pending = key ? pendingRequests.get(key) : null;
   if (pending) return pending;
 
   const request = fetch("/api/reports/studio", {
@@ -65,14 +65,16 @@ export async function fetchReportStudio(config: ReportStudioConfig, options: { r
     const body = await readJsonResponse(response).catch(() => null);
     if (!response.ok) throw new Error(body?.error || "Unable to run report");
     const data = body as ReportStudioResponse;
-    responseCache.set(key, { data, storedAt: Date.now() });
-    pruneCache();
+    if (key) {
+      responseCache.set(key, { data, storedAt: Date.now() });
+      pruneCache();
+    }
     return data;
   }).finally(() => {
-    pendingRequests.delete(key);
+    if (key) pendingRequests.delete(key);
   });
 
-  pendingRequests.set(key, request);
+  if (key) pendingRequests.set(key, request);
   return request;
 }
 

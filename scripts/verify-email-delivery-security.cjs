@@ -31,6 +31,8 @@ function expression(value, object, variables = {}) {
   }
   if ("$size" in value)
     return expression(value.$size, object, variables).length;
+  if ("$ifNull" in value)
+    return expression(value.$ifNull, object, variables).find(item => item != null);
   if ("$concatArrays" in value)
     return expression(value.$concatArrays, object, variables).flat();
   if ("$lt" in value) {
@@ -106,7 +108,7 @@ function set(object, path, value, remove = false) {
   if (remove) delete target[parts.at(-1)];
   else target[parts.at(-1)] = copy(value);
 }
-function update(object, change, inserted = false) {
+function update(object, change, inserted = false, filter = {}) {
   if (Array.isArray(change)) {
     for (const stage of change)
       for (const [key, value] of Object.entries(stage.$set))
@@ -116,12 +118,14 @@ function update(object, change, inserted = false) {
   if (inserted)
     for (const [key, value] of Object.entries(change.$setOnInsert || {}))
       set(object, key, value);
+  const matchedItem = filter.items?.$elemMatch && object.items.findIndex(item => matches(item, filter.items.$elemMatch));
+  const positionalPath = key => key.replace("items.$.", `items.${matchedItem}.`);
   for (const [key, value] of Object.entries(change.$set || {}))
-    set(object, key, value);
+    set(object, positionalPath(key), value);
   for (const [key, value] of Object.entries(change.$inc || {}))
     set(object, key, (at(object, key) || 0) + value);
   for (const key of Object.keys(change.$unset || {}))
-    set(object, key, undefined, true);
+    set(object, positionalPath(key), undefined, true);
 }
 function project(value, fields) {
   if (value == null) return value;
@@ -220,7 +224,7 @@ function databaseModel(defaults = {}, unique) {
       }
       if (!row) return Promise.resolve({ matchedCount: 0, modifiedCount: 0 });
       const before = JSON.stringify(row);
-      update(row, change, inserted);
+      update(row, change, inserted, filter);
       return Promise.resolve({
         matchedCount: 1,
         modifiedCount: Number(before !== JSON.stringify(row)),
@@ -232,10 +236,15 @@ function databaseModel(defaults = {}, unique) {
         .forEach((row) => update(row, change));
       return Promise.resolve({});
     },
-    findOneAndUpdate(filter, change) {
-      const row = rows.find((row) => matches(row, filter));
+    findOneAndUpdate(filter, change, options = {}) {
+      let row = rows.find((row) => matches(row, filter));
+      const inserted = !row && options.upsert;
+      if (inserted) {
+        row = { _id: randomUUID(), ...copy(defaults), ...copy(filter) };
+        rows.push(row);
+      }
       if (!row) return query(null);
-      update(row, change);
+      update(row, change, inserted, filter);
       return query(row);
     },
     aggregate(stages) {
@@ -249,7 +258,20 @@ function databaseModel(defaults = {}, unique) {
           result = result.flatMap((row) =>
             row[field].map((item) => ({ ...row, [field]: item })),
           );
-        } else if (stage.$count)
+        } else if (stage.$project) {
+          result = result.map(row => Object.fromEntries(Object.entries(stage.$project)
+            .filter(([, value]) => value !== 0)
+            .map(([key, value]) => [key, value === 1 ? row[key] : expression(value, row)])));
+        } else if (stage.$sort) result = [...result].sort((a, b) => {
+          for (const [key, direction] of Object.entries(stage.$sort)) {
+            const left = a[key] ?? 0, right = b[key] ?? 0;
+            if (left < right) return -direction;
+            if (left > right) return direction;
+          }
+          return 0;
+        });
+        else if (stage.$limit) result = result.slice(0, stage.$limit);
+        else if (stage.$count)
           result = result.length ? [{ [stage.$count]: result.length }] : [];
         else throw Error("Unsupported aggregate stage");
       }
@@ -300,6 +322,7 @@ class GmailDeliveryError extends Error {
   }
 }
 const gmail = {
+  gmailMailboxToken: async () => "isolated-gmail-token",
   GmailDeliveryError,
   async deliverThroughGmail(message) {
     if (message.subject.includes("verification code")) {
@@ -375,6 +398,7 @@ const routes = {
   verify: load("app/api/client-trackers/[id]/email/approval/verify/route.ts"),
   resend: load("app/api/client-trackers/[id]/email/approval/resend/route.ts"),
   deliver: load("app/api/client-trackers/[id]/email/deliver/route.ts"),
+  drafts: load("app/api/client-trackers/[id]/email/drafts/route.ts"),
   activity: load("app/api/settings/email-delivery-security/activity/route.ts"),
 };
 const trackerId = "0123456789abcdef01234567";
@@ -1082,6 +1106,74 @@ async function main() {
     1,
   );
   assert.equal(delivered.at(-1).mode, "draft");
+  {
+  const draftRecord = Campaign.rows.find(row => row.campaignId === draft.campaignId).items[0];
+  assert.equal(delivered.at(-1).messageId, draftRecord.draftMessageId);
+  const duplicateDraft = { ...copy(draft), campaignId: randomUUID() };
+  const beforeDraftRetry = delivered.length;
+  assert.equal((await call("deliver", { ...duplicateDraft, confirmed: true })).body.failed, 1);
+  const staleSend = { ...copy(draft), campaignId: randomUUID(), mode: "send" };
+  const staleApproval = await approve(staleSend, "246810");
+  assert.equal((await call("deliver", { ...staleSend, approvalId: staleApproval, confirmed: true })).body.failed, 1);
+  assert.equal(delivered.length, beforeDraftRetry, "Both draft and direct-send retries must stop before Gmail");
+
+  const legacy = batch("draft"), discarded = batch("draft");
+  for (const item of [legacy, discarded]) {
+    eligible(item);
+    assert.equal((await call("deliver", { ...item, confirmed: true })).body.completed, 1);
+  }
+  const legacyRecord = Campaign.rows.find(row => row.campaignId === legacy.campaignId).items[0];
+  const discardedRecord = Campaign.rows.find(row => row.campaignId === discarded.campaignId).items[0];
+  delete legacyRecord.draftMessageId;
+  const created = new Date(Date.now() - 30_000);
+  for (const row of [draftRecord, legacyRecord, discardedRecord]) row.claimedAt = created;
+  const sentAt = new Date(Date.now() - 10_000);
+  const gmailMessage = (id, record) => ({ id, threadId: `${id}-thread`, internalDate: String(+sentAt), labelIds: ["SENT"], payload: { headers: [
+    { name: "Message-ID", value: `<${record.draftMessageId || "old@example.com"}>` },
+    { name: "Subject", value: record.subject }, { name: "To", value: `Client <${record.to[0]}>` },
+  ] } });
+  const originalFetch = global.fetch;
+  let pending = true;
+  global.fetch = async (input, options) => {
+    const url = new URL(input);
+    assert.equal(url.hostname, "gmail.googleapis.com");
+    assert.equal(options.method, undefined, "Draft reconciliation never writes to Gmail");
+    if (url.pathname.endsWith(`/drafts/${draftRecord.deliveryId}`) && pending) return Response.json({ id: draftRecord.deliveryId });
+    if (url.pathname.includes("/drafts/")) return new Response(null, { status: 404 });
+    if (url.pathname.endsWith("/messages")) {
+      const query = url.searchParams.get("q");
+      if (query === `rfc822msgid:${draftRecord.draftMessageId}`) return Response.json({ messages: [{ id: "exact" }] });
+      if (query.includes(legacyRecord.to[0])) return Response.json({ messages: [{ id: "candidate" }] });
+      return Response.json({});
+    }
+    if (url.pathname.endsWith("/exact")) return Response.json(gmailMessage("exact", draftRecord));
+    if (url.pathname.endsWith("/candidate")) return Response.json(gmailMessage("candidate", legacyRecord));
+    throw Error(`Unexpected Gmail request ${url.pathname}`);
+  };
+  const draftScope = { workflowId: draft.workflowId, kind: draft.kind };
+  try {
+    assert.equal((await call("drafts", { ...draftScope, action: "sync" }, "POST", { headers: { "sec-fetch-site": "cross-site" } })).status, 403);
+    const firstSync = (await call("drafts", { ...draftScope, action: "sync" })).body;
+    assert.deepEqual([firstSync.pending, firstSync.sent, firstSync.review], [1, 0, 2]);
+    assert.equal(legacyRecord.draftSuggestion.messageId, "candidate");
+    assert.equal(EmailLog.rows.find(log => log.campaignId === legacy.campaignId).status, "draft");
+    pending = false;
+    assert.equal((await call("drafts", { ...draftScope, action: "sync" })).body.sent, 1);
+    assert.equal((await call("drafts", { ...draftScope, action: "sync" })).body.sent, 0);
+    assert.equal(draftRecord.draftResolution, "sent");
+    const sentLog = EmailLog.rows.find(log => log.campaignId === draft.campaignId);
+    assert.equal(sentLog.status, "sent");
+    assert.equal(sentLog.gmailMessageId, "exact");
+    assert.equal(+sentLog.sentAt, +sentAt);
+    assert.equal((await call("drafts", { ...draftScope, action: "sent", campaignId: legacy.campaignId, clientId: legacyRecord.clientId, messageId: "candidate" })).status, 200);
+    assert.equal(legacyRecord.draftResolution, "sent");
+    assert.equal((await call("drafts", { ...draftScope, action: "discarded", campaignId: discarded.campaignId, clientId: discardedRecord.clientId })).status, 200);
+    assert.equal(discardedRecord.draftResolution, "discarded");
+  } finally { global.fetch = originalFetch; }
+  const afterDiscard = { ...copy(discarded), campaignId: randomUUID() };
+  assert.equal((await call("deliver", { ...afterDiscard, confirmed: true })).body.completed, 1);
+  console.log("PASS: duplicate draft and stale send blocking, bounded Gmail reconciliation, pending/legacy/confirmed/discarded transitions, and Gmail send timestamps.");
+  }
   for (const scenario of [
     "outside-tracker",
     "ineligible",

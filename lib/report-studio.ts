@@ -2,12 +2,18 @@ import { z } from "zod";
 import { QUOTATION_STATUSES } from "@/lib/quotationRules";
 import { ANNUAL_RETURN_STATUSES } from "@/lib/annualReturnStatus";
 import type { ClientCustomFieldDefinition, ClientCustomFieldType } from "@/lib/clientCustomFields";
+import { REPORT_DETAIL_SOURCES, REPORT_DETAIL_DATASETS, isReportDetailSource, isBillingAnalysisSource, type BillingAnalysisSource } from "./report-datasets";
+import { BILLING_SCOPE_FIELDS, billingOutputFields } from "./report-billing-fields";
+import { manualFieldId, type ReportManualField } from "./report-manual";
+import { DETAIL_MONTHS, FINANCE_FIELDS, REPORT_COMPARISON_SOURCES } from "./report-layouts";
 
 export const REPORT_STUDIO_SOURCE_IDS = [
   "clients", "financial-years", "pibo-targets", "pwp-credits", "annual-returns",
   "invoice-tracking", "quotations", "billing", "payments", "cpcb-uploads",
-  "credit-transactions", "documents", "tasks", "activities", "contacts",
+  "credit-transactions", "documents", "tasks", "activities", "contacts", "client-directory",
+  ...REPORT_DETAIL_SOURCES,
 ] as const;
+export const REPORT_GROUP_LIMIT = 3;
 export type ReportStudioSource = (typeof REPORT_STUDIO_SOURCE_IDS)[number];
 
 export const REPORT_STUDIO_SOURCES: Array<{
@@ -16,14 +22,15 @@ export const REPORT_STUDIO_SOURCES: Array<{
   description: string;
   grain: string;
 }> = [
-  { id: "clients", label: "Clients", description: "Client records with safely aggregated related data", grain: "One row per client" },
+  { id: "clients", label: "Client and FY overview", description: "Client records with safely aggregated related data", grain: "One row per client for the selected FY" },
+  { id: "client-directory", label: "Client directory", description: "Company details, registrations and client-scoped fields", grain: "One row per client" },
   { id: "financial-years", label: "Financial Year Records", description: "Clients having a record for the selected financial year", grain: "One row per client and selected FY" },
   { id: "pibo-targets", label: "PIBO Targets", description: "Producer, Importer, and Brand Owner target obligations", grain: "One row per PIBO client and selected FY" },
   { id: "pwp-credits", label: "PWP Credits", description: "Generated, sold, and remaining PWP credits", grain: "One row per PWP client and selected FY" },
   { id: "annual-returns", label: "Annual Returns", description: "Clients with an Annual Return record in the selected FY", grain: "One row per client Annual Return" },
   { id: "invoice-tracking", label: "Invoice Tracking", description: "Sale and purchase invoice coverage by client", grain: "One row per client and selected FY" },
   { id: "quotations", label: "Linked Quotations", description: "Clients with quotations linked by clientId", grain: "One row per client with linked quotation aggregates" },
-  { id: "billing", label: "Billing", description: "Clients with a billing record in the selected FY", grain: "One row per client billing" },
+  { id: "billing", label: "Billing summary (legacy)", description: "Clients with a billing record in the selected FY", grain: "One row per client billing" },
   { id: "payments", label: "Payments", description: "Clients with payments received in the selected FY", grain: "One row per paying client" },
   { id: "cpcb-uploads", label: "CPCB Uploads", description: "CPCB upload records by client and financial year", grain: "One row per client upload summary" },
   { id: "credit-transactions", label: "Credit Transactions", description: "Inbound and outbound credit movement by client", grain: "One row per client transaction summary" },
@@ -31,6 +38,7 @@ export const REPORT_STUDIO_SOURCES: Array<{
   { id: "tasks", label: "Tasks & Follow-ups", description: "Client work items and overdue actions", grain: "One row per client task summary" },
   { id: "activities", label: "Activities", description: "Persisted client timeline activity", grain: "One row per client activity summary" },
   { id: "contacts", label: "People & Contacts", description: "People related to one or more saved clients", grain: "One row per client contact summary" },
+  ...REPORT_DETAIL_SOURCES.map(id => ({ id, label: REPORT_DETAIL_DATASETS[id].label, grain: REPORT_DETAIL_DATASETS[id].grain, description: REPORT_DETAIL_DATASETS[id].date })),
 ];
 
 export type ReportStudioFieldType = "string" | "string-list" | "currency-list" | "number" | "quantity" | "currency" | "percentage" | "boolean" | "date";
@@ -39,7 +47,7 @@ export type ReportStudioAggregate = "first" | "sum" | "average" | "count-distinc
 
 export const REPORT_STUDIO_OPERATOR_IDS = [
   "eq", "neq", "gt", "lt", "gte", "lte", "contains", "not_contains",
-  "empty", "not_empty", "between", "in", "not_in", "before", "after",
+  "empty", "not_empty", "between", "in", "not_in", "before", "after", "same_set",
 ] as const;
 export type ReportStudioOperator = (typeof REPORT_STUDIO_OPERATOR_IDS)[number];
 
@@ -59,12 +67,13 @@ export const REPORT_STUDIO_OPERATOR_LABELS: Record<ReportStudioOperator, string>
   not_in: "is not one of",
   before: "is before",
   after: "is after",
+  same_set: "matches this exact set",
 };
 
 const STRING_OPERATORS: ReportStudioOperator[] = ["eq", "neq", "contains", "not_contains", "empty", "not_empty", "in", "not_in"];
 const NUMBER_OPERATORS: ReportStudioOperator[] = ["eq", "neq", "gt", "lt", "gte", "lte", "between", "empty", "not_empty"];
-const DATE_OPERATORS: ReportStudioOperator[] = ["eq", "neq", "before", "after", "between", "empty", "not_empty"];
-const BOOLEAN_OPERATORS: ReportStudioOperator[] = ["eq", "neq"];
+const DATE_OPERATORS: ReportStudioOperator[] = ["eq", "neq", "before", "after", "gte", "lte", "between", "empty", "not_empty"];
+const BOOLEAN_OPERATORS: ReportStudioOperator[] = ["eq", "neq", "empty", "not_empty"];
 
 export type ReportStudioFieldDefinition = {
   id: string;
@@ -85,17 +94,38 @@ function field(definition: Omit<ReportStudioFieldDefinition, "operators" | "aggr
   const operators = definition.operators || (
     definition.type === "date" ? DATE_OPERATORS
       : definition.type === "boolean" ? BOOLEAN_OPERATORS
-        : ["number", "quantity", "currency", "percentage"].includes(definition.type) ? NUMBER_OPERATORS
+        : definition.type.endsWith("-list") ? [...STRING_OPERATORS, "same_set" as const]
+          : ["number", "quantity", "currency", "percentage"].includes(definition.type) ? NUMBER_OPERATORS
           : STRING_OPERATORS
   );
   return { ...definition, operators, aggregate: definition.aggregate || (definition.role === "metric" ? "sum" : "first") };
 }
 
-const ALL_SOURCES = [...REPORT_STUDIO_SOURCE_IDS];
+const ALL_SOURCES = REPORT_STUDIO_SOURCE_IDS.filter(source => !isReportDetailSource(source));
 const CLIENT_CATEGORIES = ["PWP", "Producer", "Importer", "Brand Owner", "SIMP"];
+export const REPORT_DECISIONS = ["Yes", "No", "Partial", "Unknown", "Not Applicable"];
+const readinessField = (id: string, label: string, description: string) => field({ id, label, shortLabel: label, description, group: "Calculated data", type: "string", role: "dimension", options: REPORT_DECISIONS, sources: ALL_SOURCES });
+
+const DETAIL_FIELDS: Record<string, [string, ReportStudioFieldType]> = {
+  "record.reference": ["Reference", "string"], "record.status": ["Status", "string"], "record.date": ["Date", "date"],
+  "record.revision": ["Revision", "string"], "record.amount": ["Recorded amount", "currency"], "record.billingState": ["Billing link", "string"],
+  "record.paid": ["Allocated payments", "currency"], "record.outstanding": ["Outstanding", "currency"], "record.mode": ["Type / mode", "string"],
+  "record.seller": ["Seller", "string"], "record.buyer": ["Buyer", "string"], "record.quantity": ["Quantity", "quantity"],
+  "record.rates": ["Category rates", "currency-list"], "record.direction": ["Invoice direction", "string"], "record.sent": ["Sent", "number"],
+  "record.drafts": ["Drafts", "number"], "record.failed": ["Failed", "number"], "record.invoiceCount": ["Invoice count", "number"],
+  "record.allocation": ["Reconciliation status", "string"], "record.reviewReason": ["Reconciliation reason", "string"],
+};
 
 const BASE_FIELDS: ReportStudioFieldDefinition[] = [
-  field({ id: "target.overall.progress", label: "Target Progress", shortLabel: "Progress", description: "Achievement divided by target; clients with no target have no percentage", group: "Overall Targets", type: "percentage", role: "metric", aggregate: "average", sources: ALL_SOURCES }),
+  readinessField("calculated.targetComplete", "EPR target achieved", "Coverage calculated separately by plastic category and credit type"),
+  readinessField("calculated.purchaseComplete", "Purchase invoice coverage complete", "Whether all purchase months are covered, including recorded nil months"),
+  readinessField("calculated.saleComplete", "Sale invoice coverage complete", "Whether all sale months are covered, including recorded nil months"),
+  readinessField("calculated.invoicesComplete", "Invoice coverage complete", "Whether all sale and purchase months are covered"),
+  readinessField("calculated.fullyPaid", "Fully settled", "Whether allocated payments cover every bill in the selected FY"),
+  readinessField("calculated.overdue", "Payment overdue", "Outstanding bills past their recorded due date"),
+  readinessField("calculated.unbilled", "Accepted quotation awaiting billing", "Accepted quotations without a source-linked bill"),
+  readinessField("calculated.filingReady", "Annual Return ready for filing", "Current workflow prerequisites for an unfiled Annual Return"),
+  field({ id: "target.overall.progress", label: "Verified Target Coverage", shortLabel: "Coverage", description: "Covered quantity divided by verified target after capping each category and credit type", group: "Overall Targets", type: "percentage", role: "metric", aggregate: "average", sources: ALL_SOURCES }),
   field({ id: "client.companyName", label: "Company Name", shortLabel: "Client", description: "Saved client company name", group: "Client", type: "string", role: "dimension", sources: ALL_SOURCES }),
   field({ id: "client.legalName", label: "Legal Name", shortLabel: "Legal Name", description: "Saved legal entity name", group: "Client", type: "string", role: "dimension", sources: ALL_SOURCES }),
   field({ id: "client.clientId", label: "Client ID", shortLabel: "Client ID", description: "Relational client identifier", group: "Client", type: "string", role: "dimension", sources: ALL_SOURCES }),
@@ -103,6 +133,7 @@ const BASE_FIELDS: ReportStudioFieldDefinition[] = [
   field({ id: "client.state", label: "State", shortLabel: "State", description: "Client registration state", group: "Client", type: "string", role: "dimension", sources: ALL_SOURCES }),
   field({ id: "client.gstNumber", label: "GST Number", shortLabel: "GST", description: "Saved client GST registration number", group: "Client", type: "string", role: "dimension", sources: ALL_SOURCES }),
   field({ id: "client.registrationNumber", label: "Registration Number", shortLabel: "Registration", description: "Saved EPR or registration number", group: "Client", type: "string", role: "dimension", sources: ALL_SOURCES }),
+  field({ id: "client.registrationRecorded", label: "Registration Record", shortLabel: "Registration record", description: "Whether a registration number is recorded in the client profile", group: "Client", type: "string", role: "dimension", options: ["Recorded", "Missing"], sources: ALL_SOURCES }),
   field({ id: "client.registrationDate", label: "Client Added Date", shortLabel: "Added", description: "Date the saved client record was created", group: "Client", type: "date", role: "dimension", sources: ALL_SOURCES }),
   field({ id: "client.registeredThisFY", label: "Registered This FY", shortLabel: "New This FY", description: "Whether the client was added during the selected financial year", group: "Client", type: "boolean", role: "dimension", sources: ALL_SOURCES }),
   field({ id: "client.count", label: "Client Count", shortLabel: "Clients", description: "Distinct qualifying clients", group: "Client", type: "number", role: "metric", aggregate: "sum", sources: ALL_SOURCES }),
@@ -110,11 +141,16 @@ const BASE_FIELDS: ReportStudioFieldDefinition[] = [
   field({ id: "financialYear.hasRecord", label: "FY Record Exists", shortLabel: "FY Record", description: "Whether the client has a Financial Year record", group: "Financial Year", type: "boolean", role: "dimension", sources: ALL_SOURCES }),
   field({ id: "quotation.statuses", label: "Linked Quotation Status", shortLabel: "Quote Status", description: "Statuses of quotations linked by clientId in the selected FY", group: "Quotations", type: "string-list", role: "dimension", options: [...QUOTATION_STATUSES], sources: ALL_SOURCES }),
   field({ id: "quotation.acceptedCount", label: "Accepted Quotation Count", shortLabel: "Accepted Quotes", description: "Count of linked accepted quotations", group: "Quotations", type: "number", role: "metric", sources: ALL_SOURCES }),
+  field({ id: "quotation.unbilledCount", label: "Unbilled Accepted Quotations", shortLabel: "Unbilled quotes", description: "Accepted quotations without a source-linked bill", group: "Quotations", type: "number", role: "metric", sources: ALL_SOURCES }),
+  field({ id: "target.overall.covered", label: "Covered Target", shortLabel: "Covered", description: "Recorded credits counted toward the target after capping each category and credit type", group: "Overall Targets", type: "quantity", role: "metric", sources: ALL_SOURCES }),
   field({ id: "quotation.count", label: "Linked Quotation Count", shortLabel: "Quotations", description: "All linked quotations in the selected FY", group: "Quotations", type: "number", role: "metric", sources: ALL_SOURCES }),
   field({ id: "quotation.acceptedValue", label: "Accepted Quotation Value", shortLabel: "Accepted Value", description: "Value of current revisions for linked accepted quotations", group: "Quotations", type: "currency", role: "metric", sources: ALL_SOURCES }),
   field({ id: "quotation.numbers", label: "Quotation Numbers", shortLabel: "Quotations", description: "Linked quotation numbers in the selected FY", group: "Quotations", type: "string-list", role: "dimension", sources: ALL_SOURCES }),
   field({ id: "billing.total", label: "Total Billing", shortLabel: "Billed", description: "Billing total for the selected FY", group: "Billing & Payments", type: "currency", role: "metric", sources: ALL_SOURCES }),
-  field({ id: "payment.received", label: "Payment Received", shortLabel: "Received", description: "Payments recorded for the selected FY", group: "Billing & Payments", type: "currency", role: "metric", sources: ALL_SOURCES }),
+  field({ id: "payment.received", label: "Allocated Payments", shortLabel: "Allocated paid", description: "Payments allocated to selected FY bills; excludes unapplied advances and unresolved links", group: "Billing & Payments", type: "currency", role: "metric", sources: ALL_SOURCES }),
+  field({ id: "billing.count", label: "Bill Count", shortLabel: "Bills", description: "All billing records for the selected FY", group: "Billing & Payments", type: "number", role: "metric", sources: ALL_SOURCES }),
+  field({ id: "payment.advance", label: "Unapplied Advance Balance", shortLabel: "Advance balance", description: "Remaining client advance balance across financial years; not deducted from outstanding", group: "Billing & Payments", type: "currency", role: "metric", sources: ALL_SOURCES }),
+  field({ id: "billing.annualReturnCreated", label: "Annual Return Bill Exists", shortLabel: "AR bill", description: "Annual Return workflow billing prerequisite", group: "Compliance", type: "boolean", role: "dimension", sources: ALL_SOURCES }),
   field({ id: "payment.count", label: "Payment Count", shortLabel: "Payments", description: "Payment records in the selected FY", group: "Billing & Payments", type: "number", role: "metric", sources: ALL_SOURCES }),
   field({ id: "billing.outstanding", label: "Outstanding", shortLabel: "Outstanding", description: "Billing total minus payments received", group: "Billing & Payments", type: "currency", role: "metric", sources: ALL_SOURCES }),
   field({ id: "billing.invoiceCreated", label: "Billing Invoice Created", shortLabel: "Invoice Created", description: "Whether the billing workflow has created an invoice", group: "Billing & Payments", type: "boolean", role: "dimension", sources: ALL_SOURCES }),
@@ -122,8 +158,8 @@ const BASE_FIELDS: ReportStudioFieldDefinition[] = [
   field({ id: "annualReturn.status", label: "Annual Return Status", shortLabel: "AR Status", description: "Annual Return status for the selected FY", group: "Compliance", type: "string", role: "dimension", options: [...ANNUAL_RETURN_STATUSES, "Not recorded"], sources: ALL_SOURCES }),
   field({ id: "annualReturn.completionPercent", label: "Annual Return Workflow Progress %", shortLabel: "AR Progress %", description: "Progress through invoice coverage, upload, billing, accepted quotation where required, filing, and verification; Not Required is excluded", group: "Compliance", type: "percentage", role: "metric", aggregate: "average", sources: ALL_SOURCES }),
   field({ id: "invoice.recordCount", label: "Invoice Tracking Records", shortLabel: "Invoices", description: "Sale and purchase invoice tracking records", group: "Compliance", type: "number", role: "metric", sources: ALL_SOURCES }),
-  field({ id: "invoice.saleMonthsReceived", label: "Sale Months Received", shortLabel: "Sale Months", description: "Covered sale-invoice months in the selected FY", group: "Compliance", type: "number", role: "metric", sources: ALL_SOURCES }),
-  field({ id: "invoice.purchaseMonthsReceived", label: "Purchase Months Received", shortLabel: "Purchase Months", description: "Covered purchase-invoice months in the selected FY", group: "Compliance", type: "number", role: "metric", sources: ALL_SOURCES }),
+  field({ id: "invoice.saleMonthsReceived", label: "Sale Months Covered", shortLabel: "Sale Months", description: "Covered sale-invoice months in the selected FY, including NIL declarations", group: "Compliance", type: "number", role: "metric", sources: ALL_SOURCES }),
+  field({ id: "invoice.purchaseMonthsReceived", label: "Purchase Months Covered", shortLabel: "Purchase Months", description: "Covered purchase-invoice months in the selected FY, including NIL declarations", group: "Compliance", type: "number", role: "metric", sources: ALL_SOURCES }),
   field({ id: "invoice.coveragePercent", label: "Invoice Coverage %", shortLabel: "Invoice Coverage", description: "Covered sale and purchase months out of 24 applicable slots", group: "Compliance", type: "percentage", role: "metric", aggregate: "average", sources: ALL_SOURCES }),
   field({ id: "upload.quantity", label: "CPCB Uploaded Quantity", shortLabel: "Upload Qty", description: "CPCB upload quantity without inferring workflow progress", group: "Compliance", type: "quantity", role: "metric", sources: ALL_SOURCES }),
   field({ id: "upload.recordCount", label: "CPCB Upload Records", shortLabel: "Uploads", description: "Number of CPCB upload entries", group: "Compliance", type: "number", role: "metric", sources: ALL_SOURCES }),
@@ -330,6 +366,11 @@ const filterGroupSchema: z.ZodType<ReportStudioFilterGroup> = z.object({
   logic: z.enum(["and", "or"]),
   children: z.array(filterNodeSchema).max(30),
 });
+const calculatedColumnSchema = z.object({
+  id: z.string().regex(/^rule\.[a-f\d-]{36}$/i),
+  label: z.string().trim().min(1).max(100),
+  condition: filterGroupSchema.refine(group => group.children.length > 0, "Add at least one condition."),
+});
 
 export const REPORT_STUDIO_ANALYSIS_TRANSFORMS = ["presence", "value", "range", "timePeriod"] as const;
 export type ReportStudioAnalysisTransform = (typeof REPORT_STUDIO_ANALYSIS_TRANSFORMS)[number];
@@ -346,11 +387,19 @@ export const reportStudioConfigSchema = z.object({
   name: z.string().trim().max(120).default("Untitled report"),
   source: z.enum(REPORT_STUDIO_SOURCE_IDS).default("clients"),
   financialYear: z.string().trim().min(1),
+  version: z.literal(2).optional(),
+  calculatedColumns: z.array(calculatedColumnSchema).max(12).optional(),
   columns: z.array(z.string().trim().min(1)).min(1).max(120),
   filters: filterGroupSchema,
+  billingScope: z.object({
+    years: z.array(z.string().regex(/^\d{4}-\d{2}$/)).max(10).optional(),
+    filters: filterGroupSchema.optional(),
+  }).strict().optional(),
+  comparisonYears: z.array(z.string().regex(/^\d{4}-\d{2}$/)).max(5).optional(),
+  paymentPeriod: z.enum(["receipt", "recorded"]).optional(),
   search: z.string().trim().max(120).default(""),
   metrics: z.array(z.string().trim().min(1)).max(20).default([]),
-  groupBy: z.array(z.string().trim().min(1)).max(2).default([]),
+  groupBy: z.array(z.string().trim().min(1)).max(REPORT_GROUP_LIMIT).default([]),
   sort: z.array(z.object({ field: z.string().trim().min(1), direction: z.enum(["asc", "desc"]) })).max(3).default([]),
   businessResultIds: z.array(z.string().trim().min(1).max(120))
     .min(1, "Select at least one Business Result")
@@ -371,6 +420,9 @@ export type ReportStudioResultRow = {
   id: string;
   values: Record<string, ReportStudioCellValue>;
   clientIds: string[];
+  href?: string;
+  drilldownFilters?: ReportStudioFilterGroup["children"];
+  billingDrilldown?: { source: BillingAnalysisSource; clientId: string; financialYear: string; billId?: string };
 };
 export type ReportStudioResultValue = {
   id: string;
@@ -417,7 +469,9 @@ export type ReportStudioResponse = {
   summary: {
     matchedClients: number;
     focusOptions?: Array<{ field: string; operator: "eq" | "gt" | "lt"; value: string | number; label: string; count: number }>;
-    metrics: Array<{ field: string; label: string; type: ReportStudioFieldType; value: number }>;
+    metrics: Array<{ field: string; label: string; type: ReportStudioFieldType; value: number | null }>;
+    subtotals?: Array<{ dimensions: string[]; rows: ReportStudioResultRow[]; totalRows: number }>;
+    targetCoverage?: Record<string, number | null>;
     businessResults: ReportStudioResultValue[];
     businessResultOptions: ReportStudioResultValue[];
     automaticBusinessResultIds: string[];
@@ -429,14 +483,91 @@ export type ReportStudioResponse = {
   quality: { messages: string[] };
 };
 
+export function reportManualDefinition(definition: ReportManualField): ReportStudioFieldDefinition {
+  return field({ id: manualFieldId(definition.id), label: definition.label, shortLabel: definition.label,
+    description: definition.scope === "client" ? "Manual value shared across financial years" : "Manual value for the selected client and financial year",
+    group: "Manual data", type: definition.type === "select" || definition.type === "text" ? "string" : definition.type,
+    role: "dimension", options: definition.type === "boolean" ? ["true", "false"] : definition.options.length ? definition.options : undefined,
+    sources: definition.scope === "client" ? ALL_SOURCES : ALL_SOURCES.filter(source => source !== "client-directory") });
+}
+
+export function reportCalculatedDefinitions(columns: ReportStudioConfig["calculatedColumns"] = []) {
+  return columns.map(column => field({ id: column.id, label: column.label, shortLabel: column.label, description: "Calculated from your report conditions",
+    group: "Calculated data", type: "string", role: "dimension", options: REPORT_DECISIONS }));
+}
+
+const detailIdentityFields = BASE_FIELDS.filter(definition => ["client.companyName", "client.clientId", "client.category", "client.state", "financialYear.year"].includes(definition.id));
+export const billingScopeFields = [...detailIdentityFields, ...BILLING_SCOPE_FIELDS.map(definition => field({ ...definition, shortLabel: definition.label }))];
+
+const detailExtras: Record<string, [string, ReportStudioFieldType]> = {
+  ...FINANCE_FIELDS,
+  "record.chargeType": ["Charge type", "string"], "record.description": ["Description", "string"],
+  "record.rate": ["Rate", "currency"], "record.taxable": ["Taxable amount", "currency"],
+  "record.gstRate": ["GST rate", "percentage"], "record.gst": ["GST", "currency"],
+  "record.category": ["Category", "string"], "record.month": ["Month", "string"], "record.day": ["Calendar date", "date"],
+  "coverage.target": ["Target obligation", "quantity"], "coverage.achieved": ["Achieved quantity", "quantity"],
+  "coverage.covered": ["Covered quantity", "quantity"], "coverage.pending": ["Pending quantity", "quantity"],
+  "coverage.excess": ["Excess quantity", "quantity"], "coverage.percent": ["Coverage percentage", "percentage"],
+  "invoice.received": ["Months received", "number"], "invoice.covered": ["Months covered", "number"],
+  "invoice.missing": ["Missing months", "number"], "invoice.partial": ["Partial months", "number"],
+  "invoice.nil": ["NIL months", "number"], "invoice.unknown": ["Unknown months", "number"],
+  "invoice.complete": ["All 12 months received?", "string"], "invoice.coverageComplete": ["All 12 months covered?", "string"],
+  "invoice.status": ["Invoice status", "string"],
+  "credit.purchaseQuantity": ["Purchased quantity", "quantity"], "credit.saleQuantity": ["Sold quantity", "quantity"],
+  "credit.purchaseValue": ["Purchase value", "currency"], "credit.saleValue": ["Sale value", "currency"],
+  ...Object.fromEntries(DETAIL_MONTHS.map((label, index) => [`invoice.month.${index + 1}`, [label, "string"]] as const)),
+};
+
 export function fieldsForSource(source: ReportStudioSource, additionalFields: ReportStudioFieldDefinition[] = []) {
+  if (isReportDetailSource(source)) {
+    const dataset = REPORT_DETAIL_DATASETS[source];
+    const extra = source === "invoice-coverage" ? ["invoice.coverageComplete", ...DETAIL_MONTHS.map((_, index) => `invoice.month.${index + 1}`)] :
+      source === "invoice-months" ? ["record.status", "invoice.received", "invoice.covered", "invoice.missing", "invoice.partial", "invoice.nil", "invoice.unknown"] :
+      ["finance-activity", "payment-register", "advance-register"].includes(source)
+        ? ["record.reference", "record.mode", "record.allocation", "record.reviewReason", ...Object.keys(FINANCE_FIELDS).filter(id =>
+          source === "finance-activity" ? !["finance.allocated", "finance.unallocated", "finance.appliedAdvance"].includes(id) :
+            !["finance.billed", "finance.billAllocated", "finance.outstanding"].includes(id))] : [];
+    const ids = [...new Set([...dataset.columns, ...extra, ...(dataset.columns.includes("record.date") ? ["record.month", "record.day"] : [])])];
+    return [...detailIdentityFields,
+      field({ id: "record.count", label: "Record count", shortLabel: "Records", description: "Count of matching source rows.", group: "Record", type: "number", role: "metric" }),
+      ...(isBillingAnalysisSource(source) ? billingOutputFields(source).map(definition => field({ ...definition, shortLabel: definition.label })) : []),
+      ...ids.filter(id => Object.hasOwn(DETAIL_FIELDS, id) || Object.hasOwn(detailExtras, id)).map(id => {
+        const [label, type] = DETAIL_FIELDS[id] ?? detailExtras[id];
+        const title = id === "record.date" ? dataset.date : id === "record.status" && source === "invoice-months" ? "Stored invoice status" : label;
+        const group = id.startsWith("invoice.month.") ? "April–March status" : id.startsWith("invoice.") ? "Invoice coverage" :
+          id.startsWith("finance.") ? "Financial measures and dates" : id.startsWith("coverage.") ? "Target coverage" : "Record";
+        const nonAdditive = id === "record.rate" || id === "record.amount" && ["payment-register", "quotation-revisions"].includes(source);
+        const options = id === "record.direction" && ["invoice-coverage", "invoice-months", "credit-perspectives"].includes(source) ? ["Purchase", "Sale"]
+          : id === "record.direction" && source === "target-breakdown" ? ["Recycling", "EOL"]
+          : id === "invoice.status" || id.startsWith("invoice.month.") ? ["Received", "Partial", "NIL", "Missing", "Unknown"]
+          : ["invoice.complete", "invoice.coverageComplete"].includes(id) ? ["Yes", "No", "Partial", "Unknown"] : undefined;
+        return field({ id, label: title, shortLabel: title, description: `${title} for this ${dataset.grain.replace(/^One row per /, "")}`, group, type, options,
+          role: !nonAdditive && ["number", "currency", "quantity", "percentage"].includes(type) && id !== "record.gstRate" ? "metric" : "dimension",
+          ...(id === "coverage.percent" ? { aggregate: "average" as const } : {}) });
+      }), ...additionalFields.filter(definition => definition.id.startsWith("rule."))];
+  }
+  if (source === "client-directory") return [...REPORT_STUDIO_FIELDS, ...additionalFields].filter(definition =>
+    (!definition.sources || definition.sources.includes(source)) && definition.id !== "client.registeredThisFY" &&
+    (definition.id.startsWith("client.") || ["custom.", "manual.", "rule.", "contact."].some(prefix => definition.id.startsWith(prefix))));
   return [...REPORT_STUDIO_FIELDS, ...additionalFields]
     .filter((definition) => !definition.sources || definition.sources.includes(source));
 }
 
 export function validateReportStudioConfig(input: unknown, additionalFields: ReportStudioFieldDefinition[] = []): ReportStudioConfig {
   const config = reportStudioConfigSchema.parse(input);
-  const allowedFields = new Map(fieldsForSource(config.source, additionalFields).map((definition) => [definition.id, definition]));
+  if (isReportDetailSource(config.source) && !(input as { analysis?: unknown }).analysis) {
+    config.analysis.field = REPORT_DETAIL_DATASETS[config.source].columns[0];
+  }
+  const ruleFields = reportCalculatedDefinitions(config.calculatedColumns);
+  if (new Set(ruleFields.map(definition => definition.id)).size !== ruleFields.length) throw new Error("Calculated field IDs must be unique");
+  const allowedFields = new Map(fieldsForSource(config.source, [...additionalFields, ...ruleFields]).map((definition) => [definition.id, definition]));
+  if (config.billingScope && !isBillingAnalysisSource(config.source)) throw new Error("Invalid billing scope for this dataset.");
+  if (config.comparisonYears?.length && !REPORT_COMPARISON_SOURCES.has(config.source)) throw new Error("Comparison years are unavailable for this dataset.");
+  if (config.paymentPeriod && config.source !== "payment-register") throw new Error("Payment period is unavailable for this dataset.");
+  if (REPORT_COMPARISON_SOURCES.has(config.source) && !/^\d{4}-\d{2}$/.test(config.financialYear)) throw new Error("Invalid report financial year.");
+  if (new Set(config.groupBy).size !== config.groupBy.length) throw new Error("Grouping dimensions must be unique.");
+  if (config.view === "pivot" && config.groupBy.length > 2) throw new Error("Pivot uses two grouping dimensions. Choose Table for three levels.");
+  if (isBillingAnalysisSource(config.source) && !/^\d{4}-\d{2}$/.test(config.financialYear)) throw new Error("Invalid billing financial year.");
   const referenced = [
     ...config.columns,
     ...config.metrics,
@@ -444,13 +575,26 @@ export function validateReportStudioConfig(input: unknown, additionalFields: Rep
     ...config.sort.map((entry) => entry.field),
     config.analysis.field,
   ];
-  const visitFilters = (group: ReportStudioFilterGroup) => {
+  const visitFilters = (group: ReportStudioFilterGroup, rule = false, depth = 1, fields = allowedFields) => {
+    if (depth > 8) throw new Error("Filter groups can be nested up to eight levels");
+    if (rule && !group.children.length) throw new Error("Every calculated condition group needs a condition.");
     group.children.forEach((child) => {
-      if (child.kind === "group") visitFilters(child);
+      if (child.kind === "group") visitFilters(child, rule, depth + 1, fields);
       else {
-        const definition = allowedFields.get(child.field);
+        const definition = fields.get(child.field);
         if (!definition) throw new Error(`Field is not available for this source: ${child.field}`);
+        if (rule && child.field.startsWith("rule.")) throw new Error(`Invalid calculated condition for ${definition.label}`);
         if (!definition.operators.includes(child.operator)) throw new Error(`Operator is not allowed for ${definition.label}`);
+        if (!["empty", "not_empty"].includes(child.operator) && (rule || ["before", "after", "between", "gt", "gte", "lt", "lte"].includes(child.operator))) {
+          const valid = (value: ReportStudioFilterValue | undefined): boolean => {
+            if (["in", "not_in", "same_set"].includes(child.operator)) return Array.isArray(value) && value.length > 0;
+            if (["number", "quantity", "currency", "percentage"].includes(definition.type)) return typeof value === "number" && Number.isFinite(value);
+            if (definition.type === "date") return typeof value === "string" && Number.isFinite(Date.parse(value));
+            if (definition.type === "boolean") return value === true || value === false;
+            return typeof value === "string" && value.trim().length > 0;
+          };
+          if (!valid(child.value) || child.operator === "between" && !valid(child.secondValue)) throw new Error(`Enter a valid value for ${definition.label}`);
+        }
       }
     });
   };
@@ -475,6 +619,8 @@ export function validateReportStudioConfig(input: unknown, additionalFields: Rep
     throw new Error(`Time-period analysis requires a date field: ${analysisField.label}`);
   }
   visitFilters(config.filters);
+  if (config.billingScope?.filters) visitFilters(config.billingScope.filters, false, 1, new Map(billingScopeFields.map(definition => [definition.id, definition])));
+  config.calculatedColumns?.forEach(column => visitFilters(column.condition, true));
   return config;
 }
 

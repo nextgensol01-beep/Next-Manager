@@ -14,7 +14,7 @@ async function main() {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); let browser;
   try {
-    browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, userDataDir: path.join(output, 'profile'), args: ['--no-sandbox'] });
+    browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true,  args: ['--no-sandbox'] });
     const page = await browser.newPage(), errors = []; page.on('pageerror', error => { errors.push(error.message); console.error(error.stack); }); await page.setViewport({ width: 1240, height: 1000 });
     await page.goto('http://127.0.0.1:' + server.address().port); await page.waitForSelector('.workflow-message-surface');
     const clickText = async (selector, text) => { for (const node of await page.$$(selector)) if ((await node.evaluate(node => node.textContent.trim())) === text) { await require('./fixtures/wait-for-stable-control.cjs')(node); await node.click(); return; } throw Error('Missing ' + text); };

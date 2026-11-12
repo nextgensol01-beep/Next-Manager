@@ -107,12 +107,33 @@ export async function PATCH(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => null);
-  const settings = normalizeSettings(body?.settings || body);
+  const settings = body?.settings ?? body;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+    return NextResponse.json({ error: "Settings are required" }, { status: 400 });
+  }
+  // Patch only fields explicitly supplied. Missing or invalid data must never
+  // become a disabled override or erase a previously saved financial year.
+  const fields = ["enabled", "defaultFinancialYear", "lastKnownCurrentFy", "pendingReminderCurrentFy"] as const;
+  const updates: Record<string, boolean | string | null> = {};
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(settings, field)) continue;
+    const value = settings[field];
+    if (field === "enabled" ? typeof value !== "boolean" : value !== null && !isValidFinancialYear(value)) {
+      return NextResponse.json({ error: `Invalid ${field}` }, { status: 400 });
+    }
+    updates[`financialYearSettings.${field}`] = value;
+  }
+  if (!Object.keys(updates).length) {
+    return NextResponse.json({ error: "No valid settings supplied" }, { status: 400 });
+  }
+  if (settings.enabled === false || settings.defaultFinancialYear === null || settings.defaultFinancialYear === CURRENT_FY) {
+    updates["financialYearSettings.pendingReminderCurrentFy"] = null;
+  }
 
   await connectDB();
   const user = await User.collection.findOneAndUpdate(
     { _id: userObjectId },
-    { $set: { financialYearSettings: settings } },
+    { $set: updates },
     { returnDocument: "after", projection: { financialYearSettings: 1 } }
   ) as {
     financialYearSettings?: IUserFinancialYearSettings | null;

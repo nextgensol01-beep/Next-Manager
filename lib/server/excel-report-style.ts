@@ -143,3 +143,32 @@ export function finaliseReadableReportSheet(
     }
   }
 }
+
+const HEADER_COLOR = "FF2D47E2";
+
+export function applyHeaderStyle(row: ExcelJS.Row) {
+  row.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_COLOR } };
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+    cell.border = { bottom: { style: "thin", color: { argb: "FF1E30A8" } } };
+  });
+  row.height = 22;
+}
+
+export function applyDataStyle(row: ExcelJS.Row, idx: number) {
+  row.eachCell({ includeEmpty: true }, (cell) => {
+    cell.fill = {
+      type: "pattern", pattern: "solid",
+      fgColor: { argb: idx % 2 === 0 ? "FFDBEAFE" : "FFFFFFFF" },
+    };
+    cell.border = {
+      top:    { style: "thin", color: { argb: "FFE2E8F0" } },
+      left:   { style: "thin", color: { argb: "FFE2E8F0" } },
+      bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
+      right:  { style: "thin", color: { argb: "FFE2E8F0" } },
+    };
+    cell.alignment = { vertical: "middle" };
+  });
+  row.height = 18;
+}

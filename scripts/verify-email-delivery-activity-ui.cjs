@@ -52,7 +52,7 @@ async function main() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); const base = 'http://127.0.0.1:' + server.address().port;
   let browser, page;
   try {
-    browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, userDataDir: fs.mkdtempSync(path.join(output, 'profile-')), args: ['--no-sandbox'] });
+    browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true,  args: ['--no-sandbox'] });
     page = await browser.newPage(); const errors = []; page.on('pageerror', error => errors.push(error.message));
     const wait = ms => page.evaluate(ms => new Promise(resolve => setTimeout(resolve, ms)), ms);
     const click = async text => { for (const node of await page.$$('button')) if ((await node.evaluate(node => node.textContent)).trim() === text) { await require('./fixtures/wait-for-stable-control.cjs')(node); return node.click(); } throw Error('Missing button ' + text); };

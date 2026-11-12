@@ -3,23 +3,19 @@
  * from the clientcontacts collection, which was created by an older
  * version of the ClientContact schema that used contactId instead of personId.
  *
- * Call once: GET /api/fix-indexes
+ * Administrator maintenance: POST /api/fix-indexes
  * Safe to call multiple times.
  */
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
+import { withAdminMaintenance } from "@/lib/server/maintenance-api";
 import mongoose from "mongoose";
 
-export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
+export const POST = withAdminMaintenance(async () => {
   await connectDB();
 
   const db = mongoose.connection.db;
-  if (!db) return NextResponse.json({ error: "DB not connected" }, { status: 500 });
+  if (!db) throw new Error("DB not connected");
 
   const collection = db.collection("clientcontacts");
   const results: Record<string, string> = {};
@@ -34,23 +30,15 @@ export async function GET() {
     try {
       await collection.dropIndex(indexName);
       results[indexName] = "dropped";
-    } catch (e: unknown) {
-      // Index doesn't exist — that's fine
-      const msg = e instanceof Error ? e.message : String(e);
-      results[indexName] = msg.includes("index not found") || msg.includes("IndexNotFound")
-        ? "already gone"
-        : `error: ${msg}`;
+    } catch (error) {
+      if (!error || typeof error !== "object" || !("code" in error) || error.code !== 27) throw error;
+      results[indexName] = "already gone";
     }
   }
 
   // Recreate the correct indexes to be sure
-  try {
-    await collection.createIndex({ clientId: 1, personId: 1 }, { unique: true, name: "clientId_1_personId_1" });
-    results["clientId_1_personId_1"] = "ensured";
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    results["clientId_1_personId_1"] = `already exists or error: ${msg}`;
-  }
+  await collection.createIndex({ clientId: 1, personId: 1 }, { unique: true, name: "clientId_1_personId_1" });
+  results["clientId_1_personId_1"] = "ensured";
 
   return NextResponse.json({ success: true, results });
-}
+});

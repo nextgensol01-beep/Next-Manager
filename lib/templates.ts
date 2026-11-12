@@ -1,5 +1,5 @@
-// Auto-generated: HTML templates inlined to avoid fs.readFileSync on Vercel serverless
-// Edit the source files in /templates/ then re-run scripts/inline-templates.ts
+// Auto-generated: HTML templates inlined for serverless execution.
+// Edit templates/*.html, then run npm run templates:build.
 
 export const PAYMENT_REMINDER = `<!DOCTYPE html>
 <html lang="en">
@@ -340,4 +340,3 @@ export const ANNUAL_RETURN_CONFIRMATION = `<!DOCTYPE html>
 </body>
 </html>
 `;
-

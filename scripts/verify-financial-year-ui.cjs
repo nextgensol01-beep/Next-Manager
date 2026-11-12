@@ -121,6 +121,12 @@ async function main() {
       context: root,
       entry: path.join(__dirname, "fixtures/financial-year.tsx"),
       output: { path: output, filename: "fixture.js" },
+      // The standalone fixture does not run Next's build-time image config injection.
+      plugins: [
+        new compiledWebpack.webpack.DefinePlugin({
+          "process.env.__NEXT_IMAGE_OPTS": "undefined",
+        }),
+      ],
       resolve: {
         extensions: [".tsx", ".ts", ".js", ".cjs"],
         alias: {
@@ -334,7 +340,6 @@ async function main() {
   try {
     browser = await puppeteer.launch({
       executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe",
-      userDataDir: fs.mkdtempSync(path.join(output, "profile-")),
       headless: true,
       args: ["--no-sandbox", "--disable-gpu", "--no-first-run"],
     });
@@ -348,6 +353,14 @@ async function main() {
     const settle = () =>
       page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 420)));
     const clickText = async (label, scope = "button") => {
+      await page.waitForFunction(
+        (selector, text) => Array.from(document.querySelectorAll(selector)).some(
+          (node) => node.textContent.trim() === text && node.getClientRects().length,
+        ),
+        { timeout: 5_000 },
+        scope,
+        label,
+      );
       await page.$$eval(
         scope,
         (nodes, label) => {

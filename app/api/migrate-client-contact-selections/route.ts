@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
+import { withAdminMaintenance } from "@/lib/server/maintenance-api";
 import Person from "@/models/Person";
 import ClientContact from "@/models/ClientContact";
 import {
@@ -12,12 +11,9 @@ import {
 /**
  * Backfills selected phones/emails for existing ClientContact records.
  * Safe to run multiple times.
- * Call: GET /api/migrate-client-contact-selections
+ * Administrator maintenance: POST /api/migrate-client-contact-selections
  */
-export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
+export const POST = withAdminMaintenance(async () => {
   await connectDB();
 
   const links = await ClientContact.find({});
@@ -61,4 +57,4 @@ export async function GET() {
     missingPersons,
     message: `Client contact selections backfilled. Updated: ${updated}, skipped: ${skipped}, missing persons: ${missingPersons}`,
   });
-}
+});

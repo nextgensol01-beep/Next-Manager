@@ -1,10 +1,12 @@
+import { serializeSavedReport, validationMessage, type SavedReportRecord } from "@/lib/server/report-studio-saved-record";
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { connectDB } from "@/lib/mongoose";
-import { validateReportStudioConfig, type ReportStudioConfig, type ReportStudioFieldDefinition } from "@/lib/report-studio";
+import { validateReportStudioConfig, type ReportStudioFieldDefinition } from "@/lib/report-studio";
 import { currentSessionUserObjectId } from "@/lib/server/current-session-user";
 import { loadReportStudioCustomFields } from "@/lib/server/report-studio-fields";
+import { hasManualReportFields } from "@/lib/report-manual";
 import ReportStudioSavedReport from "@/models/ReportStudioSavedReport";
 
 const MAX_SAVED_REPORTS = 100;
@@ -18,29 +20,6 @@ const singleReportSchema = z.object({
 const bulkMigrationSchema = z.object({
   reports: z.array(singleReportSchema).max(MAX_SAVED_REPORTS),
 });
-
-type SavedReportRecord = {
-  _id?: unknown;
-  name?: unknown;
-  config?: unknown;
-  createdAt?: unknown;
-  updatedAt?: unknown;
-};
-
-function serializeSavedReport(record: SavedReportRecord) {
-  return {
-    id: String(record._id || ""),
-    name: String(record.name || ""),
-    config: record.config as ReportStudioConfig,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
-  };
-}
-
-function validationMessage(error: unknown) {
-  if (error instanceof z.ZodError) return error.issues.map((issue) => issue.message).join("; ");
-  return error instanceof Error ? error.message : "Invalid saved report configuration";
-}
 
 function normalizedReport(value: unknown, customFields: ReportStudioFieldDefinition[]) {
   const parsed = singleReportSchema.parse(value);
@@ -74,7 +53,7 @@ export async function POST(req: NextRequest) {
   await connectDB();
 
   try {
-    const customFields = await loadReportStudioCustomFields();
+    const customFields = await loadReportStudioCustomFields(hasManualReportFields(body));
     if (body && typeof body === "object" && "reports" in body) {
       const migration = bulkMigrationSchema.parse(body);
       const reports = migration.reports.map((report) => normalizedReport(report, customFields));

@@ -8,7 +8,7 @@ import Quotation from "@/models/Quotation";
 import QuotationRevision from "@/models/QuotationRevision";
 import { mongoObjectIdSchema, validationErrorMessage } from "@/lib/quotationValidation";
 import { syncAnnualReturnStatus } from "@/lib/server/annual-return-status-service";
-import { ensureBillingSchema } from "@/lib/billing-utils";
+import { annualReturnBillFilter } from "@/lib/billing-utils";
 import { roundMoney } from "@/lib/quotationRules";
 
 function quotationTargetBreakdown(items: Array<{
@@ -49,11 +49,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  await connectDB();
-  await ensureBillingSchema(Billing.collection);
   const { id } = await params;
   const parsedId = mongoObjectIdSchema.safeParse(id);
   if (!parsedId.success) return NextResponse.json({ error: validationErrorMessage(parsedId.error) }, { status: 400 });
+  await connectDB();
 
   const quotation = await Quotation.findById(id).lean();
   if (!quotation) return NextResponse.json({ error: "Quotation not found" }, { status: 404 });
@@ -74,7 +73,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   await connectDB();
-  await ensureBillingSchema(Billing.collection);
   const { id } = await params;
   const parsedId = mongoObjectIdSchema.safeParse(id);
   if (!parsedId.success) return NextResponse.json({ error: validationErrorMessage(parsedId.error) }, { status: 400 });
@@ -132,7 +130,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
   const sourceNote = `Accepted quotation ${quotation.quotationNumber} (Rev ${revision.revisionNumber})`;
 
-  const existing = await Billing.findOne({ clientId: quotation.clientId, financialYear: quotation.financialYear, billType: "annual_return" });
+  const existing = await Billing.findOne({ clientId: quotation.clientId, financialYear: quotation.financialYear, ...annualReturnBillFilter });
   let billing;
   let created = false;
   if (existing) {

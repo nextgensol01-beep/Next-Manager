@@ -115,7 +115,8 @@ const BillingSchema = new Schema<IBilling>(
     invoiceDate: { type: Date, default: null },
     invoiceAmount: { type: Number, default: null },
   },
-  { timestamps: true }
+  // The operator migration manages billing indexes independently of web traffic.
+  { timestamps: true, autoCreate: false, autoIndex: false }
 );
 
 BillingSchema.pre("save", function (next) {

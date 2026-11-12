@@ -1,6 +1,8 @@
 import {
+  billingScopeFields,
   reportStudioCustomFieldKey,
-  reportStudioFieldMap,
+  fieldsForSource,
+  reportCalculatedDefinitions,
   validateReportStudioConfig,
   type ReportStudioCellValue,
   type ReportStudioAnalysisBucket,
@@ -27,12 +29,16 @@ import ActivityEvent from "@/models/ActivityEvent";
 import ClientContact from "@/models/ClientContact";
 import Person from "@/models/Person";
 import { loadReportStudioCustomFields } from "@/lib/server/report-studio-fields";
+import { hasManualReportFields } from "@/lib/report-manual";
+import { manualReportValues } from "./report-manual-data";
+import { isBillingAnalysisSource, isReportDetailSource } from "@/lib/report-datasets";
+import { money, paise } from "@/lib/billing-report";
+import { sumQuantities } from "@/lib/financial-year-coverage";
+import { loadReportDetail, type ReportDatasetRow } from "./report-detail-datasets";
+import { loadBillingAnalysis } from "./report-billing-analysis";
 
-type StudioBaseRow = {
-  id: string;
-  clientId: string;
-  values: Record<string, ReportStudioCellValue>;
-};
+type StudioBaseRow = ReportDatasetRow;
+const billingScopeFieldMap = new Map(billingScopeFields.map(field => [field.id, field]));
 
 type RelatedStats = {
   documentCount: number;
@@ -58,6 +64,17 @@ const PIBO_CATEGORIES = new Set(["Producer", "Importer", "Brand Owner"]);
 
 function targetValue(row: ReportClientRow, fieldId: string): number | null {
   if (!PIBO_CATEGORIES.has(row.clientCategory)) return null;
+  const coverage = row.targetCoverage;
+  if (coverage) {
+    const key = (measure: string) => measure === "achieved" ? "recorded" : measure === "remaining" ? "pending" : measure as "target" | "covered";
+    const overall = fieldId.match(/^target\.overall\.(target|achieved|remaining|covered)$/);
+    if (overall) return coverage[key(overall[1])];
+    const category = fieldId.match(/^target\.cat([1-4])\.(recycling|eol|total)\.(target|achieved|remaining)$/);
+    if (!category) return null;
+    const [, id, type, measure] = category;
+    const total = coverage.categories.find(entry => entry.categoryId === id);
+    return (type === "total" ? total : total?.buckets.find(bucket => bucket.type === type.toUpperCase()))?.[key(measure)] ?? null;
+  }
   const overall = fieldId.match(/^target\.overall\.(target|achieved|remaining)$/);
   if (overall) {
     if (!row.financialYearRecorded && overall[1] !== "achieved") return null;
@@ -100,7 +117,7 @@ function categoryRateValue(row: ReportClientRow, fieldId: string): number[] | nu
     return distinctRates(items);
   }
 
-  if (!row.billingCreated || !row.billingInvoiceCreated) return null;
+  if (!row.annualBillingCreated || !row.annualBillingInvoiceCreated) return null;
   return distinctRates(row.billingTargetBreakdown.filter(matchesDimension));
 }
 
@@ -131,7 +148,7 @@ function resolveValue(
     const text = String(value).trim();
     return text || null;
   }
-  if (fieldId === "target.overall.progress") return PIBO_CATEGORIES.has(row.clientCategory) && row.financialYearRecorded && row.targetTotal > 0 ? row.achievedTotal / row.targetTotal * 100 : null;
+  if (fieldId === "target.overall.progress") return row.targetCoverage?.percentage ?? null;
   if (fieldId.startsWith("target.")) return targetValue(row, fieldId);
   if (fieldId.startsWith("quotation.rate.") || fieldId.startsWith("billing.rate.")) return categoryRateValue(row, fieldId);
   switch (fieldId) {
@@ -142,6 +159,7 @@ function resolveValue(
     case "client.state": return row.state;
     case "client.gstNumber": return row.gstNumber || null;
     case "client.registrationNumber": return row.registrationNumber || null;
+    case "client.registrationRecorded": return row.registrationNumber?.trim() ? "Recorded" : "Missing";
     case "client.registrationDate": return row.clientCreatedAt || null;
     case "client.registeredThisFY": return registeredInFinancialYear(row.clientCreatedAt, row.financialYear);
     case "client.count": return 1;
@@ -149,6 +167,7 @@ function resolveValue(
     case "financialYear.hasRecord": return row.financialYearRecorded;
     case "quotation.statuses": return Array.from(new Set(row.quotations.map((quotation) => quotation.status).filter(Boolean)));
     case "quotation.acceptedCount": return row.acceptedQuotationCount;
+    case "quotation.unbilledCount": return row.unbilledAcceptedCount ?? null;
     case "quotation.count": return row.quotationCount;
     case "quotation.acceptedValue": return row.acceptedQuotationValue;
     case "quotation.numbers": return row.quotations.map((quotation) => quotation.quotationNumber).filter(Boolean);
@@ -158,6 +177,9 @@ function resolveValue(
     case "billing.invoiceCreated": return row.billingCreated ? row.billingInvoiceCreated : null;
     case "payment.status": return row.paymentStatus;
     case "payment.count": return row.paymentCount;
+    case "billing.count": return row.billingCount;
+    case "billing.annualReturnCreated": return row.annualBillingCreated;
+    case "payment.advance": return row.advanceBalance;
     case "annualReturn.status": return row.annualReturnStatus;
     case "annualReturn.completionPercent": return annualReturnWorkflowProgressPercent({
       status: row.annualReturnStatus,
@@ -165,15 +187,15 @@ function resolveValue(
       invoiceCoveragePercent: row.invoiceCoveragePercent,
       hasUpload: row.uploadRecordCount > 0,
       uploadRecordCount: row.uploadRecordCount,
-      hasBilling: row.billingCreated,
+      hasBilling: row.annualBillingCreated,
       hasAcceptedQuotation: row.acceptedQuotationCount > 0,
       hasSentQuotation: row.sentQuotationCount > 0,
       linkedQuotationCount: row.quotationCount,
     });
     case "invoice.recordCount": return row.invoiceCount;
-    case "invoice.saleMonthsReceived": return row.invoiceCount > 0 ? row.invoiceSaleMonthsReceived : null;
-    case "invoice.purchaseMonthsReceived": return row.invoiceCount > 0 ? row.invoicePurchaseMonthsReceived : null;
-    case "invoice.coveragePercent": return row.invoiceCount > 0 ? row.invoiceCoveragePercent : null;
+    case "invoice.saleMonthsReceived": return (row.invoiceMonthsObserved?.sale ?? row.invoiceCount) > 0 ? row.invoiceSaleMonthsReceived : null;
+    case "invoice.purchaseMonthsReceived": return (row.invoiceMonthsObserved?.purchase ?? row.invoiceCount) > 0 ? row.invoicePurchaseMonthsReceived : null;
+    case "invoice.coveragePercent": return (row.invoiceMonthsObserved ? row.invoiceMonthsObserved.sale + row.invoiceMonthsObserved.purchase : row.invoiceCount) > 0 ? row.invoiceCoveragePercent : null;
     case "upload.quantity": return row.uploadRecordCount > 0 ? row.uploadQuantity : null;
     case "upload.recordCount": return row.uploadRecordCount;
     case "pwp.generated": return row.clientCategory === "PWP" && row.financialYearRecorded ? row.generatedCredits : null;
@@ -188,8 +210,33 @@ function resolveValue(
     case "activity.count": return related.activityCount;
     case "contact.count": return related.contactCount;
     case "contact.primaryNames": return related.primaryContactNames;
+    case "calculated.targetComplete": {
+      if (!PIBO_CATEGORIES.has(row.clientCategory) || row.targetCoverage?.status === "No target") return "Not Applicable";
+      switch (row.targetCoverage?.status) {
+        case "Fully achieved": return "Yes";
+        case "Partially achieved": return "Partial";
+        case "Not started": return "No";
+        default: return "Unknown";
+      }
+    }
+    case "calculated.purchaseComplete": return coverageDecision(row.invoiceMonthsObserved?.purchase ?? row.invoiceCount, row.invoicePurchaseMonthsReceived, 12);
+    case "calculated.saleComplete": return coverageDecision(row.invoiceMonthsObserved?.sale ?? row.invoiceCount, row.invoiceSaleMonthsReceived, 12);
+    case "calculated.invoicesComplete": return coverageDecision(row.invoiceMonthsObserved ? row.invoiceMonthsObserved.sale + row.invoiceMonthsObserved.purchase : row.invoiceCount, row.invoiceSaleMonthsReceived + row.invoicePurchaseMonthsReceived, 24);
+    case "calculated.fullyPaid": return ({ all: "Unknown", "no-billing": "Not Applicable", paid: "Yes", partial: "Partial", unpaid: "No" })[row.paymentStatus];
+    case "calculated.overdue": return !row.billingCreated ? "Not Applicable" : row.overdueBills == null ? "Unknown" : row.overdueBills > 0 ? "Yes" : "No";
+    case "calculated.unbilled": return row.acceptedQuotationCount === 0 ? "Not Applicable" : row.unbilledAcceptedCount == null ? "Unknown" : row.unbilledAcceptedCount > 0 ? "Yes" : "No";
+    case "calculated.filingReady": {
+      if (["Filed", "Verified", "Not Required This FY"].includes(row.annualReturnStatus)) return "Not Applicable";
+      if (row.annualReturnStatus === "Not recorded" || (row.invoiceMonthsObserved ? row.invoiceMonthsObserved.sale + row.invoiceMonthsObserved.purchase : row.invoiceCount) === 0) return "Unknown";
+      return annualReturnPrerequisitesComplete({ clientCategory: row.clientCategory, invoiceCoveragePercent: row.invoiceCoveragePercent,
+        hasUpload: row.uploadRecordCount > 0, hasBilling: row.annualBillingCreated, hasAcceptedQuotation: row.acceptedQuotationCount > 0 }) ? "Yes" : "No";
+    }
     default: return null;
   }
+}
+
+function coverageDecision(records: number, covered: number, expected: number) {
+  return records === 0 ? "Unknown" : covered === expected ? "Yes" : covered > 0 ? "Partial" : "No";
 }
 
 function isEmpty(value: ReportStudioCellValue) {
@@ -215,18 +262,20 @@ function comparable(value: ReportStudioCellValue) {
 function equalValue(actual: ReportStudioCellValue, expected: unknown) {
   if (Array.isArray(actual)) return actual.some((entry) => String(entry).toLowerCase() === String(expected ?? "").toLowerCase());
   if (typeof actual === "boolean") return actual === expected || String(actual) === String(expected);
-  if (typeof actual === "number") return actual === Number(expected);
+  if (typeof actual === "number") return expected != null && expected !== "" && actual === Number(expected);
   return String(actual ?? "").toLowerCase() === String(expected ?? "").toLowerCase();
 }
 
-function matchesCondition(values: Record<string, ReportStudioCellValue>, condition: ReportStudioFilterClause) {
+function matchesCondition(values: Record<string, ReportStudioCellValue>, condition: ReportStudioFilterClause, type?: ReportStudioFieldDefinition["type"]) {
   const actual = values[condition.field] ?? null;
   const expected = condition.value;
+  if (isEmpty(actual) && !["empty", "not_empty"].includes(condition.operator)) return false;
   switch (condition.operator) {
     case "empty": return isEmpty(actual);
     case "not_empty": return !isEmpty(actual);
-    case "eq": return equalValue(actual, expected);
+    case "eq": return type === "date" && typeof expected === "string" && /^\d{4}-\d{2}-\d{2}$/.test(expected) ? String(actual || "").slice(0, 10) === expected : equalValue(actual, expected);
     case "neq": return !equalValue(actual, expected);
+    case "same_set": return Array.isArray(actual) && Array.isArray(expected) && listKey(actual) === listKey(expected);
     case "contains": {
       if (Array.isArray(actual)) return actual.some((entry) => String(entry).toLowerCase().includes(String(expected ?? "").toLowerCase()));
       return String(actual ?? "").toLowerCase().includes(String(expected ?? "").toLowerCase());
@@ -248,6 +297,11 @@ function matchesCondition(values: Record<string, ReportStudioCellValue>, conditi
         : !blocked.includes(String(actual ?? "").toLowerCase());
     }
     case "between": {
+      if (type === "date") {
+        const [current, lower, upper] = [actual, expected, condition.secondValue].map(value => Date.parse(String(value ?? "")));
+        if (![current, lower, upper].every(Number.isFinite)) return false;
+        return current >= lower && (String(condition.secondValue).length === 10 ? current < upper + 86_400_000 : current <= upper);
+      }
       const current = comparable(actual);
       const lower = comparable(condition.value as ReportStudioCellValue);
       const upper = comparable(condition.secondValue as ReportStudioCellValue);
@@ -259,13 +313,16 @@ function matchesCondition(values: Record<string, ReportStudioCellValue>, conditi
     case "lte":
     case "before":
     case "after": {
-      const current = condition.operator === "before" || condition.operator === "after"
+      if (actual == null || expected == null || actual === "" || expected === "") return false;
+      const isDate = type === "date" || condition.operator === "before" || condition.operator === "after";
+      const current = isDate
         ? Date.parse(String(actual ?? ""))
         : Number(actual);
-      const compareTo = condition.operator === "before" || condition.operator === "after"
+      const compareTo = isDate
         ? Date.parse(String(expected ?? ""))
         : Number(expected);
       if (!Number.isFinite(current) || !Number.isFinite(compareTo)) return false;
+      if (isDate && condition.operator === "lte" && typeof expected === "string" && expected.length === 10) return current < compareTo + 86_400_000;
       if (condition.operator === "gt" || condition.operator === "after") return current > compareTo;
       if (condition.operator === "gte") return current >= compareTo;
       if (condition.operator === "lt" || condition.operator === "before") return current < compareTo;
@@ -275,12 +332,27 @@ function matchesCondition(values: Record<string, ReportStudioCellValue>, conditi
   }
 }
 
-function matchesFilterGroup(values: Record<string, ReportStudioCellValue>, group: ReportStudioFilterGroup): boolean {
+const listKey = (items: Array<string | number>) => JSON.stringify([...new Set(items.map(value => typeof value === "string" ? value.toLowerCase() : value))].sort());
+
+function matchesFilterGroup(values: Record<string, ReportStudioCellValue>, group: ReportStudioFilterGroup, fields: Map<string, ReportStudioFieldDefinition>): boolean {
   if (group.children.length === 0) return true;
   const results = group.children.map((child) => (
-    child.kind === "group" ? matchesFilterGroup(values, child) : matchesCondition(values, child)
+    child.kind === "group" ? matchesFilterGroup(values, child, fields) : matchesCondition(values, child, fields.get(child.field)?.type)
   ));
   return group.logic === "and" ? results.every(Boolean) : results.some(Boolean);
+}
+
+function evaluateRule(values: StudioBaseRow["values"], group: ReportStudioFilterGroup, fields: Map<string, ReportStudioFieldDefinition>): boolean | null {
+  let unknown = false;
+  for (const child of group.children) {
+    const value = child.kind === "group" ? evaluateRule(values, child, fields) :
+      !["empty", "not_empty"].includes(child.operator) && (isEmpty(values[child.field] ?? null) ||
+        (values[child.field] === "Unknown" || values[child.field] === "Not Applicable") && values[child.field] !== child.value)
+        ? null : matchesCondition(values, child, fields.get(child.field)?.type);
+    if (value === (group.logic === "or")) return value;
+    if (value === null) unknown = true;
+  }
+  return unknown ? null : group.logic === "and";
 }
 
 function sourceMatches(row: ReportClientRow, config: ReportStudioConfig, related: RelatedStats) {
@@ -302,9 +374,24 @@ function sourceMatches(row: ReportClientRow, config: ReportStudioConfig, related
 }
 
 function aggregateMetric(rows: StudioBaseRow[], definition: ReportStudioFieldDefinition) {
+  if (definition.id === "target.overall.progress") return verifiedTargetProgress(rows, "target.overall");
+  if (definition.id === "coverage.percent") {
+    const target = rows.map(row => row.values["coverage.target"]);
+    const covered = rows.map(row => row.values["coverage.covered"]);
+    if (!target.every(value => typeof value === "number") || !covered.every(value => typeof value === "number")) return null;
+    const obligation = sumQuantities(target);
+    return obligation > 0 ? sumQuantities(covered) / obligation * 100 : null;
+  }
   const values = rows.map((row) => row.values[definition.id]).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-  if (definition.aggregate === "average") return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  if (definition.aggregate === "average") return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
   if (definition.aggregate === "count-distinct") return new Set(values).size;
+  if (!values.length && definition.id !== "client.count") return null;
+  if (definition.type === "currency" && /^(bill|charge|finance|credit)\./.test(definition.id)) {
+    return values.length === rows.length ? money(values.reduce((total, value) => total + paise(value), 0)) : null;
+  }
+  if (definition.id === "bill.overdueCount" || (definition.type === "quantity" && /^(charge\.cat|coverage\.|credit\.)/.test(definition.id))) {
+    return values.length === rows.length ? sumQuantities(values) : null;
+  }
   return values.reduce((sum, value) => sum + value, 0);
 }
 
@@ -313,7 +400,7 @@ const BUSINESS_RESULT_FIELD_DEPENDENCIES: Record<string, string[]> = {
   "overall-target": ["target.overall.target"],
   "overall-achieved": ["target.overall.achieved"],
   "overall-remaining": ["target.overall.remaining"],
-  "overall-completion": ["target.overall.target", "target.overall.achieved"],
+  "overall-completion": ["target.overall.target", "target.overall.covered"],
   "outstanding-fees": ["billing.outstanding"],
   "no-documents": ["document.count"],
   "overdue-followups": ["task.overdueCount"],
@@ -321,7 +408,7 @@ const BUSINESS_RESULT_FIELD_DEPENDENCIES: Record<string, string[]> = {
   "target-total": ["target.overall.target"],
   "target-achieved": ["target.overall.achieved"],
   "target-remaining": ["target.overall.remaining"],
-  "target-completion": ["target.overall.target", "target.overall.achieved"],
+  "target-completion": ["target.overall.target", "target.overall.covered"],
   "credits-generated": ["pwp.generated"],
   "credits-sold": ["pwp.sold"],
   "credits-available": ["pwp.remaining"],
@@ -329,7 +416,7 @@ const BUSINESS_RESULT_FIELD_DEPENDENCIES: Record<string, string[]> = {
   "linked-quotations": ["quotation.count"],
   "accepted-quotations": ["quotation.acceptedCount"],
   "accepted-value": ["quotation.acceptedValue"],
-  "accepted-not-billed": ["quotation.acceptedCount", "billing.invoiceCreated"],
+  "accepted-not-billed": ["quotation.unbilledCount"],
   "accepted-payment-pending": ["quotation.acceptedCount", "payment.status"],
   "total-billed": ["billing.total"],
   "total-received": ["payment.received"],
@@ -345,7 +432,7 @@ const BUSINESS_RESULT_FIELD_DEPENDENCIES: Record<string, string[]> = {
   "ar-not-required": ["annualReturn.status"],
   "invoices-incomplete": ["invoice.coveragePercent"],
   "target-still-remaining": ["target.overall.remaining"],
-  "ar-ready": ["client.category", "invoice.coveragePercent", "upload.recordCount", "billing.total", "quotation.acceptedCount"],
+  "ar-ready": ["client.category", "invoice.coveragePercent", "upload.recordCount", "billing.annualReturnCreated", "quotation.acceptedCount"],
   "sale-months": ["invoice.saleMonthsReceived"],
   "purchase-months": ["invoice.purchaseMonthsReceived"],
   "missing-months": ["invoice.saleMonthsReceived", "invoice.purchaseMonthsReceived"],
@@ -459,8 +546,21 @@ function contextualBusinessResultIds(config: ReportStudioConfig, options: Report
   };
 }
 
-function addBusinessResult(target: ReportStudioResultValue[], id: string, label: string, description: string, type: ReportStudioResultValue["type"], value: number) {
-  target.push({ id, label, description, type, value: Number.isFinite(value) ? value : 0, group: BUSINESS_RESULT_GROUP_BY_ID.get(id) || "Other" });
+function addBusinessResult(target: ReportStudioResultValue[], id: string, label: string, description: string, type: ReportStudioResultValue["type"], value: number | null) {
+  target.push({ id, label, description, type, value: Number.isFinite(value) ? value : null, group: BUSINESS_RESULT_GROUP_BY_ID.get(id) || "Other" });
+}
+
+function verifiedTargetProgress(rows: StudioBaseRow[], prefix: string) {
+  let target = 0;
+  let covered = 0;
+  for (const row of rows) {
+    const obligation = row.values[`${prefix}.target`];
+    const pending = row.values[`${prefix}.remaining`];
+    if (typeof obligation !== "number" || typeof pending !== "number") continue;
+    target += obligation;
+    covered += obligation - pending;
+  }
+  return target > 0 ? covered / target * 100 : null;
 }
 
 function buildBusinessResults(rows: StudioBaseRow[], source: ReportStudioConfig["source"]): ReportStudioResultValue[] {
@@ -472,21 +572,25 @@ function buildBusinessResults(rows: StudioBaseRow[], source: ReportStudioConfig[
   const addCount = (id: string, label: string, description: string, predicate: (row: StudioBaseRow) => boolean) => addBusinessResult(results, id, label, description, "number", count(predicate));
   const addSum = (id: string, label: string, description: string, field: string, type: "number" | "quantity" | "currency" = "number") => addBusinessResult(results, id, label, description, type, sum(field));
 
-  addBusinessResult(results, "matched-clients", "Matching Clients", "Distinct clients matching the current Report Studio filters", "number", rows.length);
+  addBusinessResult(results, "matched-clients", "Matching Clients", "Distinct linked clients matching the report filters", "number", new Set(rows.map(row => row.clientId).filter(Boolean)).size);
+  if (isReportDetailSource(source)) addBusinessResult(results, "matching-records", "Matching Records", "All matching detail rows before pagination", "number", rows.length);
 
   if (source === "clients" || ["financial-years", "pibo-targets"].includes(source)) {
     const target = sum("target.overall.target");
     const achieved = sum("target.overall.achieved");
+    const verified = rows.filter(row => typeof row.values["target.overall.covered"] === "number" && typeof row.values["target.overall.target"] === "number");
+    const verifiedTarget = verified.reduce((total, row) => total + number(row, "target.overall.target"), 0);
+    const completion = verifiedTarget > 0 ? verified.reduce((total, row) => total + number(row, "target.overall.covered"), 0) / verifiedTarget * 100 : null;
     if (source === "clients") {
       addBusinessResult(results, "overall-target", "Overall Target", "CAT I–IV Recycling and EOL target for matching clients", "quantity", target);
       addBusinessResult(results, "overall-achieved", "Overall Achieved", "Target quantity achieved by matching clients", "quantity", achieved);
       addBusinessResult(results, "overall-remaining", "Overall Remaining", "Target quantity still remaining for matching clients", "quantity", sum("target.overall.remaining"));
-      addBusinessResult(results, "overall-completion", "Target Completion", "Overall achieved quantity divided by overall target for matching clients", "percentage", percent(achieved, target));
+      addBusinessResult(results, "overall-completion", "Target Completion", "Covered quantity divided by known target for verified rows", "percentage", completion);
     } else {
       addBusinessResult(results, "target-total", "Total Target", "CAT I–IV target across matching clients", "quantity", target);
       addBusinessResult(results, "target-achieved", "Total Achieved", "Achieved target across matching clients", "quantity", achieved);
       addBusinessResult(results, "target-remaining", "Target Remaining", "Target less achieved across matching clients", "quantity", sum("target.overall.remaining"));
-      addBusinessResult(results, "target-completion", "Target Completion", "Total achieved divided by total target", "percentage", percent(achieved, target));
+      addBusinessResult(results, "target-completion", "Target Completion", "Covered quantity divided by known target for verified rows", "percentage", completion);
     }
   }
 
@@ -504,13 +608,13 @@ function buildBusinessResults(rows: StudioBaseRow[], source: ReportStudioConfig[
     addSum("linked-quotations", "Linked Quotations", "All quotations linked to matching clients in the selected FY", "quotation.count");
     addSum("accepted-quotations", "Accepted Quotations", "Linked quotations currently accepted", "quotation.acceptedCount");
     addSum("accepted-value", "Accepted Value", "Value of accepted current quotation revisions", "quotation.acceptedValue", "currency");
-    addCount("accepted-not-billed", "Accepted Without Billing", "Clients with an accepted quotation but no billing invoice created", (row) => number(row, "quotation.acceptedCount") > 0 && row.values["billing.invoiceCreated"] !== true);
+    addSum("accepted-not-billed", "Accepted Without Billing", "Accepted quotations without a source-linked bill", "quotation.unbilledCount");
     addCount("accepted-payment-pending", "Accepted With Payment Pending", "Accepted-quotation clients whose payment status is unpaid or partial", (row) => number(row, "quotation.acceptedCount") > 0 && ["unpaid", "partial"].includes(String(row.values["payment.status"] || "")));
   }
 
   if (source === "clients" || ["billing", "payments"].includes(source)) {
     addSum("total-billed", "Total Billed", "Billing total across matching clients", "billing.total", "currency");
-    addSum("total-received", "Total Received", "Payments received across matching clients", "payment.received", "currency");
+    addSum("total-received", "Allocated Payments", "Payments allocated to bills, including applied advances", "payment.received", "currency");
     addSum("total-outstanding", "Total Outstanding", "Billing total less received payments", "billing.outstanding", "currency");
     addCount("fully-paid", "Fully Paid Clients", "Matching clients with paid status", (row) => row.values["payment.status"] === "paid");
     addCount("partially-paid", "Partially Paid Clients", "Matching clients with partial payment status", (row) => row.values["payment.status"] === "partial");
@@ -527,22 +631,20 @@ function buildBusinessResults(rows: StudioBaseRow[], source: ReportStudioConfig[
     const progressValues = rows
       .map((row) => row.values["annualReturn.completionPercent"])
       .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-    const averageProgress = progressValues.length > 0
-      ? progressValues.reduce((total, value) => total + value, 0) / progressValues.length
-      : 0;
+    const averageProgress = progressValues.length > 0 ? progressValues.reduce((total, value) => total + value, 0) / progressValues.length : null;
     addBusinessResult(results, "ar-completed", "AR Filed", "Applicable clients whose Annual Return is Filed or Verified", "number", completed);
     addBusinessResult(results, "ar-verified", "AR Verified", "Applicable clients whose Annual Return verification is complete", "number", verified);
     addBusinessResult(results, "ar-pending", "AR Pending", "Applicable clients whose Annual Return is not yet Filed", "number", Math.max(0, applicable - completed));
-    addBusinessResult(results, "ar-completion", "AR Filing Rate", "Filed or Verified applicable clients divided by applicable clients", "percentage", percent(completed, applicable));
+    addBusinessResult(results, "ar-completion", "AR Filing Rate", "Filed or Verified applicable clients divided by applicable clients", "percentage", applicable > 0 ? percent(completed, applicable) : null);
     addBusinessResult(results, "ar-progress", "Average AR Workflow Progress", "Average progress across applicable clients using invoice, upload, billing, quotation, filing, and verification checkpoints", "percentage", averageProgress);
     addBusinessResult(results, "ar-not-required", "AR Not Required", "Clients marked Not Required This FY and excluded from progress rates", "number", notRequired);
-    addCount("invoices-incomplete", "Invoices Incomplete", "Annual Return clients with invoice coverage below 100%", (row) => number(row, "invoice.coveragePercent") < 100);
+    addCount("invoices-incomplete", "Invoices Incomplete", "Annual Return clients with recorded invoice coverage below 100%", (row) => typeof row.values["invoice.coveragePercent"] === "number" && row.values["invoice.coveragePercent"] < 100);
     addCount("target-still-remaining", "Clients With Target Remaining", "Annual Return clients whose overall target remains above zero", (row) => number(row, "target.overall.remaining") > 0);
     addCount("ar-ready", "AR Ready Clients", "Clients meeting the website prerequisites: complete invoice coverage, CPCB upload, billing, and an accepted quotation where required", (row) => annualReturnPrerequisitesComplete({
       clientCategory: String(row.values["client.category"] || ""),
       invoiceCoveragePercent: number(row, "invoice.coveragePercent"),
       hasUpload: number(row, "upload.recordCount") > 0,
-      hasBilling: typeof row.values["billing.total"] === "number",
+      hasBilling: row.values["billing.annualReturnCreated"] === true,
       hasAcceptedQuotation: number(row, "quotation.acceptedCount") > 0,
     }));
   }
@@ -550,8 +652,8 @@ function buildBusinessResults(rows: StudioBaseRow[], source: ReportStudioConfig[
   if (source === "clients" || source === "invoice-tracking") {
     const coveredMonths = sum("invoice.saleMonthsReceived") + sum("invoice.purchaseMonthsReceived");
     const expectedMonths = rows.length * 24;
-    addSum("sale-months", "Sale Months Received", "Covered sale-invoice months for matching clients", "invoice.saleMonthsReceived");
-    addSum("purchase-months", "Purchase Months Received", "Covered purchase-invoice months for matching clients", "invoice.purchaseMonthsReceived");
+    addSum("sale-months", "Sale Months Covered", "Covered sale-invoice months for matching clients", "invoice.saleMonthsReceived");
+    addSum("purchase-months", "Purchase Months Covered", "Covered purchase-invoice months for matching clients", "invoice.purchaseMonthsReceived");
     addBusinessResult(results, "missing-months", "Missing Invoice Months", "Missing sale and purchase months out of 24 expected slots per client", "number", Math.max(0, expectedMonths - coveredMonths));
     addBusinessResult(results, "invoice-coverage", "Invoice Coverage", "Covered sale and purchase months divided by expected months", "percentage", percent(coveredMonths, expectedMonths));
     addCount("invoice-complete", "Invoice-Complete Clients", "Clients with all expected sale and purchase months", (row) => number(row, "invoice.coveragePercent") >= 100);
@@ -559,10 +661,9 @@ function buildBusinessResults(rows: StudioBaseRow[], source: ReportStudioConfig[
 
   if (source === "clients" || source === "cpcb-uploads") {
     const uploaded = sum("upload.quantity");
-    const achieved = sum("target.overall.achieved");
     addSum("upload-records", "CPCB Upload Records", "CPCB upload entries for matching clients", "upload.recordCount");
     addBusinessResult(results, "uploaded-quantity", "Uploaded Quantity", "Total quantity recorded in CPCB uploads", "quantity", uploaded);
-    addBusinessResult(results, "achieved-not-uploaded", "Achieved Not Yet Uploaded", "Positive difference between achieved target and CPCB uploaded quantity", "quantity", Math.max(0, achieved - uploaded));
+    addBusinessResult(results, "achieved-not-uploaded", "Achieved Not Yet Uploaded", "Requires a verifiable link between recorded credits and upload records", "quantity", null);
   }
 
   if (source === "clients" || source === "credit-transactions") {
@@ -602,8 +703,10 @@ function buildColumnResults(rows: StudioBaseRow[], definitions: ReportStudioFiel
     add("missing", "No Record", "Matching client rows without a recorded value", "number", values.length - present.length);
     if (numeric.length > 0) {
       const sum = numeric.reduce((total, value) => total + value, 0);
-      if (definition.type !== "percentage") add("sum", "Total", `Total ${definition.label.toLowerCase()} across all matching clients`, definition.type, sum);
-      add("average", "Average", `Average ${definition.label.toLowerCase()} across recorded matching clients`, definition.type, sum / numeric.length);
+      if (definition.role === "metric" && definition.type !== "percentage") add("sum", "Total", `Total ${definition.label.toLowerCase()} across matching records`, definition.type, aggregateMetric(rows, definition));
+      if (definition.id === "target.overall.progress") add("average", "Verified coverage", "Covered quantity divided by the verified target", definition.type, verifiedTargetProgress(rows, "target.overall"));
+      else if (definition.id === "coverage.percent") add("average", "Weighted coverage", "Covered quantity divided by total target obligation", definition.type, aggregateMetric(rows, definition));
+      else if (definition.role === "metric") add("average", "Average", `Average ${definition.label.toLowerCase()} across recorded matching records`, definition.type, sum / numeric.length);
       add("minimum", "Minimum", `Lowest recorded ${definition.label.toLowerCase()}`, definition.type, Math.min(...numeric));
       add("maximum", "Maximum", `Highest recorded ${definition.label.toLowerCase()}`, definition.type, Math.max(...numeric));
       add("non-zero", "Non-zero Clients", `Matching clients whose ${definition.label.toLowerCase()} is not zero`, "number", numeric.filter((value) => value !== 0).length);
@@ -694,11 +797,12 @@ function buildFieldAnalysis(
     }, missingBucket];
   } else if (config.analysis.transform === "value") {
     const counts = new Map<string, { label: string; value: ReportStudioFilterValue; count: number }>();
+    const keyOf = (value: unknown) => `${typeof value}:${String(value).toLowerCase()}`;
     recordedRows.forEach((row) => {
       const raw = row.values[definition.id];
-      const values = Array.isArray(raw) ? Array.from(new Set(raw)) : [raw as string | number | boolean];
+      const values = Array.isArray(raw) ? [...new Map(raw.map(value => [keyOf(value), value])).values()] : [raw as string | number | boolean];
       values.forEach((value) => {
-        const key = `${typeof value}:${String(value)}`;
+        const key = keyOf(value);
         const label = typeof value === "boolean" ? (value ? "Yes" : "No") : String(value);
         const current = counts.get(key);
         counts.set(key, { label, value: value as ReportStudioFilterValue, count: (current?.count || 0) + 1 });
@@ -714,11 +818,13 @@ function buildFieldAnalysis(
       tone: "value",
     }));
     if (ranked.length > visible.length) {
+      const remainingFilter: ReportStudioFilterClause = { id: "other", kind: "condition", field: definition.id, operator: "not_in",
+        value: visible.map((entry) => entry.value).filter((value): value is string | number => typeof value === "string" || typeof value === "number") };
       buckets.push({
         id: "other",
-        label: `Other (${ranked.length - visible.length} values)`,
-        value: ranked.slice(visible.length).reduce((total, entry) => total + entry.count, 0),
-        filters: [...scopeFilters, { field: definition.id, operator: "not_empty" }, { field: definition.id, operator: "not_in", value: visible.map((entry) => entry.value).filter((value): value is string | number => typeof value === "string" || typeof value === "number") }],
+        label: definition.type.endsWith("-list") ? "Records without a top value" : `Other (${ranked.length - visible.length} values)`,
+        value: recordedRows.filter(row => matchesCondition(row.values, remainingFilter, definition.type)).length,
+        filters: [...scopeFilters, remainingFilter],
         tone: "value",
       });
     }
@@ -792,15 +898,18 @@ function groupRows(
   fieldMap: Map<string, ReportStudioFieldDefinition>,
 ): ReportStudioResultRow[] {
   if (config.groupBy.length === 0) {
-    return rows.map((row) => ({ id: row.id, values: row.values, clientIds: [row.clientId] }));
+    return rows.map((row) => ({ id: row.id, values: row.values, clientIds: row.clientId ? [row.clientId] : [],
+      ...(row.href ? { href: row.href } : {}), ...(row.billingDrilldown ? { billingDrilldown: row.billingDrilldown } : {}) }));
   }
   const groups = new Map<string, StudioBaseRow[]>();
   rows.forEach((row) => {
-    const key = config.groupBy.map((fieldId) => {
+    const key = JSON.stringify(config.groupBy.map((fieldId) => {
       const value = row.values[fieldId];
-      return Array.isArray(value) ? value.join(", ") : String(value ?? "No value");
-    }).join("\u001f");
-    groups.set(key, [...(groups.get(key) || []), row]);
+      if (fieldId === "client.companyName" && row.clientId) return ["client", row.clientId];
+      return isEmpty(value ?? null) ? null : Array.isArray(value) ? ["list", listKey(value)] : typeof value === "string" ? value.toLowerCase() : value;
+    }));
+    const group = groups.get(key) || [];
+    group.push(row); groups.set(key, group);
   });
   return Array.from(groups, ([key, members], index) => {
     const values: Record<string, ReportStudioCellValue> = {};
@@ -809,7 +918,14 @@ function groupRows(
       const definition = fieldMap.get(fieldId);
       if (definition) values[fieldId] = aggregateMetric(members, definition);
     });
-    return { id: `group-${index}-${key}`, values, clientIds: members.map((member) => member.clientId) };
+    const drilldownFilters = config.groupBy.map((field, position): ReportStudioFilterClause => {
+      const value = values[field];
+      if (field === "client.companyName" && members[0]?.clientId) {
+        return { id: `group-${index}-${position}`, kind: "condition", field: "client.clientId", operator: "eq", value: members[0].clientId };
+      }
+      return { id: `group-${index}-${position}`, kind: "condition", field, operator: isEmpty(value) ? "empty" : Array.isArray(value) ? "same_set" : "eq", value };
+    });
+    return { id: `group-${index}-${key}`, values, clientIds: [...new Set(members.map(member => member.clientId).filter(Boolean))], drilldownFilters };
   });
 }
 
@@ -830,7 +946,7 @@ function sortRows(rows: ReportStudioResultRow[], config: ReportStudioConfig) {
       const comparison = compareValues(left.values[item.field] ?? null, right.values[item.field] ?? null);
       if (comparison !== 0) return item.direction === "asc" ? comparison : -comparison;
     }
-    return 0;
+    return left.id.localeCompare(right.id);
   });
 }
 
@@ -856,7 +972,7 @@ function requiredSections(config: ReportStudioConfig, fields: Set<string>) {
   if (has("financialYear.") || has("target.") || has("pwp.")) sections.add("financial-years");
   if (has("target.") || has("pwp.") || has("transaction.") || config.source === "credit-transactions") sections.add("transactions");
   if (has("quotation.") || config.source === "quotations") sections.add("quotations");
-  if (has("billing.") || has("payment.status") || config.source === "billing") sections.add("billing");
+  if (has("billing.") || has("payment.") || config.source === "billing" || config.source === "payments") sections.add("billing");
   if (has("payment.") || has("billing.outstanding") || config.source === "payments") sections.add("payments");
   if (has("invoice.") || config.source === "invoice-tracking") sections.add("invoices");
   if (has("annualReturn.") || config.source === "annual-returns") sections.add("annual-returns");
@@ -868,6 +984,11 @@ function requiredSections(config: ReportStudioConfig, fields: Set<string>) {
     sections.add("quotations");
   }
   if (["financial-years", "pibo-targets", "pwp-credits"].includes(config.source)) sections.add("financial-years");
+  if (fields.has("calculated.targetComplete")) { sections.add("financial-years"); sections.add("transactions"); }
+  if (fields.has("calculated.saleComplete") || fields.has("calculated.purchaseComplete") || fields.has("calculated.invoicesComplete")) sections.add("invoices");
+  if (fields.has("calculated.overdue") || fields.has("calculated.fullyPaid")) { sections.add("billing"); sections.add("payments"); }
+  if (fields.has("calculated.unbilled") || fields.has("quotation.unbilledCount")) { sections.add("billing"); sections.add("quotations"); }
+  if (fields.has("calculated.filingReady")) ["annual-returns", "invoices", "uploads", "billing", "quotations"].forEach(section => sections.add(section as ReportDataSection));
   return sections;
 }
 
@@ -928,10 +1049,58 @@ async function loadRelatedStats(clientIds: string[], financialYear: string, fiel
   } satisfies RelatedStats]));
 }
 
+async function loadClientReportRows(config: ReportStudioConfig, referenced: Set<string>, fieldMap: Map<string, ReportStudioFieldDefinition>) {
+  const sections = requiredSections(config, referenced);
+  const customFieldKeys = new Set(Array.from(referenced).map(reportStudioCustomFieldKey).filter((key): key is string => Boolean(key)));
+  const baseQuery = createReportQuery(config.financialYear, "clients");
+  const categoryFilter = config.filters.logic === "and" && config.filters.children.find(child => child.kind === "condition" && child.field === "client.category" && (child.operator === "eq" || child.operator === "in"));
+  const categoryNames = categoryFilter && categoryFilter.kind === "condition" ? valueList(categoryFilter.value).map(value => String(value).toLowerCase()) : [];
+  const clientCategories = (fieldMap.get("client.category")?.options || []).filter(category => categoryNames.includes(category.toLowerCase()));
+  const report = await buildReport({ ...baseQuery, clientCategories, quotationStatuses: [], sentOnly: false, hasTarget: "all", includeZero: true,
+    rowMode: "client", sortBy: "companyName", sortDirection: "asc", page: 1, pageSize: 100,
+  }, { exportAll: true, sections, customFieldKeys, clientSearch: config.search, clientSearchFields: ["gstNumber", "registrationNumber"] });
+  const clientIds = report.rows.map(row => row.clientId);
+  const manualIds = [...referenced].filter(id => id.startsWith("manual.")).map(id => id.slice(7));
+  const [relatedStats, manualValues] = await Promise.all([
+    loadRelatedStats(clientIds, config.financialYear, referenced, config.source),
+    manualReportValues(manualIds, clientIds, config.financialYear),
+  ]);
+  const sourceFieldIds = [...referenced].filter(fieldId => fieldMap.has(fieldId));
+  const rows = report.rows.filter(row => sourceMatches(row, config, relatedStats.get(row.clientId) || EMPTY_RELATED_STATS)).map(row => {
+    const related = relatedStats.get(row.clientId) || EMPTY_RELATED_STATS;
+    const values = Object.fromEntries(sourceFieldIds.map(fieldId => [fieldId, fieldId.startsWith("manual.")
+      ? manualValues.get(row.clientId)?.get(fieldId) ?? null : resolveValue(row, fieldId, related, fieldMap.get(fieldId))]));
+    return { id: row.clientId, clientId: row.clientId, values };
+  });
+  const uncertain = report.rows.filter(row => row.targetCoverage?.status === "Needs verification").length;
+  return { rows, messages: [...report.quality.messages, ...(uncertain ? [`${uncertain} client target records require verification. Unknown coverage is excluded from verified completion.`] : [])] };
+}
+
+async function loadTargetBreakdown(config: ReportStudioConfig) {
+  const report = await buildReport(createReportQuery(config.financialYear, "clients"), {
+    exportAll: true, sections: new Set(["financial-years", "transactions"]), clientSearch: config.search,
+  });
+  const rows = report.rows.flatMap(client => {
+    if (!client.financialYearRecorded) return [];
+    return (client.targetCoverage?.buckets ?? []).map(bucket => {
+      const status = bucket.target == null || bucket.covered == null ? "Unknown" : bucket.target === 0 ? "Not Applicable" :
+        bucket.pending === 0 ? "Yes" : bucket.covered > 0 ? "Partial" : "No";
+      return { id: `${client.clientId}:${config.financialYear}:${bucket.categoryId}:${bucket.type}`, clientId: client.clientId,
+        href: `/dashboard/clients/${encodeURIComponent(client.clientId)}`,
+        values: { "client.clientId": client.clientId, "client.companyName": client.companyName, "client.category": client.clientCategory,
+          "client.state": client.state, "financialYear.year": config.financialYear, "record.category": `CAT-${["I", "II", "III", "IV"][Number(bucket.categoryId) - 1]}`,
+          "record.direction": bucket.type === "RECYCLING" ? "Recycling" : "EOL", "record.status": status,
+          "coverage.target": bucket.target, "coverage.achieved": bucket.recorded, "coverage.covered": bucket.covered,
+          "coverage.pending": bucket.pending, "coverage.excess": bucket.excess, "coverage.percent": bucket.percentage } };
+    });
+  });
+  return { rows, messages: report.quality.messages };
+}
+
 export async function executeReportStudio(rawConfig: unknown, options: { exportAll?: boolean } = {}): Promise<ReportStudioResponse> {
-  const customFields = await loadReportStudioCustomFields();
-  const fieldMap = reportStudioFieldMap(customFields);
+  const customFields = await loadReportStudioCustomFields(hasManualReportFields(rawConfig));
   const config = validateReportStudioConfig(rawConfig, customFields);
+  const fieldMap = new Map(fieldsForSource(config.source, [...customFields, ...reportCalculatedDefinitions(config.calculatedColumns)]).map(field => [field.id, field]));
   const businessResultOptions = buildBusinessResults([], config.source);
   const availableBusinessResultIds = new Set(businessResultOptions.map((result) => result.id));
   const { automaticResultIds, relatedResultIds } = contextualBusinessResultIds(config, businessResultOptions);
@@ -940,6 +1109,17 @@ export async function executeReportStudio(rawConfig: unknown, options: { exportA
     ? automaticResultIds
     : validManualResultIds.length > 0 ? validManualResultIds : automaticResultIds;
   const referenced = referencedFields(config);
+  const overviewTargets = ["target.overall", ...[1, 2, 3, 4].map(id => `target.cat${id}.total`)].filter(prefix => config.metrics.includes(`${prefix}.target`));
+  overviewTargets.forEach(prefix => referenced.add(`${prefix}.remaining`));
+  if (referenced.has("target.overall.progress")) {
+    referenced.add("target.overall.target");
+    referenced.add("target.overall.remaining");
+  }
+  const addRuleDependencies = (group: ReportStudioFilterGroup) => group.children.forEach(child => {
+    if (child.kind === "group") addRuleDependencies(child);
+    else referenced.add(child.field);
+  });
+  config.calculatedColumns?.forEach(column => addRuleDependencies(column.condition));
   const analysisDefinition = fieldMap.get(config.analysis.field)!;
   if (analysisDefinition.applicableCategories?.length) referenced.add("client.category");
   const focusDefinitions: NonNullable<ReportStudioResponse["summary"]["focusOptions"]> = config.source === "annual-returns" ? [
@@ -958,38 +1138,37 @@ export async function executeReportStudio(rawConfig: unknown, options: { exportA
   selectedBusinessResultIds.forEach((resultId) => {
     (BUSINESS_RESULT_FIELD_DEPENDENCIES[resultId] || []).forEach((fieldId) => referenced.add(fieldId));
   });
-  const sections = requiredSections(config, referenced);
-  const customFieldKeys = new Set(Array.from(referenced)
-    .map(reportStudioCustomFieldKey)
-    .filter((key): key is string => Boolean(key)));
-  const baseQuery = createReportQuery(config.financialYear, "clients");
-  const report = await buildReport({
-    ...baseQuery,
-    clientCategories: [],
-    quotationStatuses: [],
-    sentOnly: false,
-    hasTarget: "all",
-    includeZero: true,
-    rowMode: "client",
-    sortBy: "companyName",
-    sortDirection: "asc",
-    page: 1,
-    pageSize: 100,
-  }, { exportAll: true, sections, customFieldKeys, clientSearch: config.search, clientSearchFields: ["gstNumber", "registrationNumber"] });
-
-  const sourceFieldIds = new Set(Array.from(referenced).filter((fieldId) => fieldMap.has(fieldId)));
-  const relatedStats = await loadRelatedStats(report.rows.map((row) => row.clientId), config.financialYear, referenced, config.source);
-  const baseRows: StudioBaseRow[] = report.rows
-    .filter((row) => sourceMatches(row, config, relatedStats.get(row.clientId) || EMPTY_RELATED_STATS))
-    .map((row) => {
-      const related = relatedStats.get(row.clientId) || EMPTY_RELATED_STATS;
-      const values = Object.fromEntries(Array.from(sourceFieldIds, (fieldId) => [fieldId, resolveValue(row, fieldId, related, fieldMap.get(fieldId))]));
-      return { id: row.clientId, clientId: row.clientId, values };
-    })
-    .filter((row) => matchesFilterGroup(row.values, config.filters));
+  const scope = config.billingScope?.filters;
+  const source = config.source;
+  const years = [...new Set([config.financialYear, ...(config.comparisonYears ?? [])])];
+  const combinedFinance = ["finance-activity", "payment-register", "advance-register"].includes(source);
+  const parts = isBillingAnalysisSource(source)
+    ? [await loadBillingAnalysis(source, config, values => !scope || matchesFilterGroup(values, scope, billingScopeFieldMap))]
+    : await Promise.all((combinedFinance ? [config.financialYear] : years).map(async financialYear => {
+      const yearConfig = { ...config, financialYear };
+      const part = source === "target-breakdown" ? await loadTargetBreakdown(yearConfig) : isReportDetailSource(source)
+        ? await loadReportDetail(source, yearConfig) : await loadClientReportRows(yearConfig, referenced, fieldMap);
+      return years.length > 1 && !combinedFinance ? { ...part, rows: part.rows.map(row => ({ ...row, id: `${financialYear}:${row.id}` })) } : part;
+    }));
+  const rows: StudioBaseRow[] = parts.flatMap(part => part.rows);
+  if (years.length > 1 && rows.length > 75_000) throw new Error("This comparison exceeds the detail limit. Select fewer financial years.");
+  const messages = [...new Set(parts.flatMap(part => part.messages))];
+  const baseRows = rows.filter(row => {
+    if (isReportDetailSource(source)) row.values["record.count"] = 1;
+    for (const column of config.calculatedColumns || []) {
+      const result = evaluateRule(row.values, column.condition, fieldMap);
+      row.values[column.id] = result == null ? "Unknown" : result ? "Yes" : "No";
+    }
+    return matchesFilterGroup(row.values, config.filters, fieldMap);
+  });
 
   const summaryMetrics = config.metrics.map((fieldId) => fieldMap.get(fieldId)).filter((definition): definition is ReportStudioFieldDefinition => Boolean(definition));
   const groupedRows = sortRows(groupRows(baseRows, config, fieldMap), config);
+  const subtotals = config.groupBy.slice(1).map((_, index) => {
+    const dimensions = config.groupBy.slice(0, index + 1);
+    const groups = sortRows(groupRows(baseRows, { ...config, groupBy: dimensions }, fieldMap), config);
+    return { dimensions, totalRows: groups.length, rows: options.exportAll ? groups : groups.slice(0, 100) };
+  });
   const responseColumnIds = config.groupBy.length > 0 ? [...config.groupBy, ...config.metrics] : config.columns;
   const columns = responseColumnIds.map((fieldId) => fieldMap.get(fieldId)).filter((definition): definition is ReportStudioFieldDefinition => Boolean(definition));
   const totalRows = groupedRows.length;
@@ -1009,7 +1188,8 @@ export async function executeReportStudio(rawConfig: unknown, options: { exportA
     columns,
     rows: pageRows,
     summary: {
-      matchedClients: baseRows.length,
+      matchedClients: new Set(baseRows.map(row => row.clientId).filter(Boolean)).size,
+      ...(overviewTargets.length ? { targetCoverage: Object.fromEntries(overviewTargets.map(prefix => [prefix, verifiedTargetProgress(baseRows, prefix)])) } : {}),
       focusOptions: focusDefinitions.map((focus) => ({ ...focus, count: baseRows.filter((row) => {
         const value = row.values[focus.field];
         if (focus.operator === "eq") return value === focus.value;
@@ -1021,6 +1201,7 @@ export async function executeReportStudio(rawConfig: unknown, options: { exportA
         type: definition.type,
         value: aggregateMetric(baseRows, definition),
       })),
+      ...(subtotals.length ? { subtotals } : {}),
       businessResults,
       businessResultOptions,
       automaticBusinessResultIds: automaticResultIds,
@@ -1034,6 +1215,6 @@ export async function executeReportStudio(rawConfig: unknown, options: { exportA
       totalRows,
       totalPages: Math.max(1, Math.ceil(totalRows / config.pageSize)),
     },
-    quality: { messages: report.quality.messages },
+    quality: { messages },
   };
 }

@@ -10,7 +10,10 @@ import Payment from "@/models/Payment";
 import Invoice from "@/models/Invoice";
 import AnnualReturn from "@/models/AnnualReturn";
 import UploadRecord from "@/models/UploadRecord";
-import { buildInvoiceCoverageSummary, type InvoiceCoverageInput } from "@/lib/invoiceCoverage";
+import { allocateBillingPayments, money, paise } from "@/lib/billing-report";
+import { calculateTargetCoverage, targetTrackingProvenance } from "@/lib/financial-year-coverage";
+import type { FinancialYearRecord } from "@/lib/financial-year-form";
+import { buildInvoiceCoverageSummary, invoiceMonthStatuses, type InvoiceCoverageInput } from "@/lib/invoiceCoverage";
 import {
   categoryLabel,
   reportQuerySchema,
@@ -29,6 +32,7 @@ type FlatRecord = Record<string, unknown>;
 
 const CATEGORY_IDS = ["1", "2", "3", "4"] as const;
 const CREDIT_TYPES: ReportCreditType[] = ["RECYCLING", "EOL"];
+const PIBO = new Set(["Producer", "Importer", "Brand Owner"]);
 
 export type ReportDataSection = "financial-years" | "transactions" | "quotations" | "billing" | "payments" | "invoices" | "annual-returns" | "uploads";
 
@@ -191,10 +195,10 @@ function quotationRow(quotation: FlatRecord, revision: FlatRecord | undefined, q
   };
 }
 
-function paymentStatus(billingTotal: number, receivedTotal: number): ReportPaymentStatus {
+function paymentStatus(billingTotal: number, receivedTotal: number, outstanding: number): ReportPaymentStatus {
   if (billingTotal <= 0) return "no-billing";
   if (receivedTotal <= 0) return "unpaid";
-  if (receivedTotal + 0.005 >= billingTotal) return "paid";
+  if (outstanding <= 0.005) return "paid";
   return "partial";
 }
 
@@ -240,11 +244,14 @@ export async function buildReport(rawQuery: ReportQuery, options: {
   if (query.clientCategories.length > 0) clientMatch.category = { $in: query.clientCategories };
   if (query.states.length > 0) clientMatch.state = { $in: query.states };
 
-  const clients = await Client.find(clientMatch).sort({ companyName: 1 }).lean() as FlatRecord[];
   const clientSearch = options.clientSearch ?? query.search;
   const matchesClientValue = createSearchMatcher(clientSearch);
-  const searchMatches = clientSearch ? await Client.aggregate([{ $match: clientMatch }, ...await clientSearchStages(clientSearch, options.clientSearchFields || []), { $project: { clientId: 1 } }]) : [];
+  const [candidateClients, searchMatches] = await Promise.all([
+    Client.find(clientMatch).select(`clientId companyName legalName category state gstNumber registrationNumber createdAt ${options.customFieldKeys?.size ? "customFields" : "customFields.legalName"}`).sort({ companyName: 1 }).lean() as Promise<FlatRecord[]>,
+    clientSearch ? Client.aggregate([{ $match: clientMatch }, ...await clientSearchStages(clientSearch, options.clientSearchFields || []), { $project: { clientId: 1 } }]) : Promise.resolve([]),
+  ]);
   const matchingClientIds = new Set(searchMatches.map(client => String(client.clientId)));
+  const clients = options.clientSearch ? candidateClients.filter(client => matchingClientIds.has(textValue(client.clientId)) || matchesClientValue(getLegalName(client))) : candidateClients;
   const clientIds = clients.map((client) => textValue(client.clientId)).filter(Boolean);
 
   const [
@@ -261,14 +268,24 @@ export async function buildReport(rawQuery: ReportQuery, options: {
     include("financial-years") ? FinancialYear.find({ clientId: { $in: clientIds }, financialYear: query.financialYear }).lean() as Promise<FlatRecord[]> : Promise.resolve([] as FlatRecord[]),
     include("transactions") ? CreditTransaction.find({ financialYear: query.financialYear, $or: [{ toClientId: { $in: clientIds } }, { fromClientId: { $in: clientIds } }] }).lean() as Promise<FlatRecord[]> : Promise.resolve([] as FlatRecord[]),
     include("quotations") ? Quotation.find({ financialYear: query.financialYear, clientId: { $in: clientIds } }).lean() as Promise<FlatRecord[]> : Promise.resolve([] as FlatRecord[]),
-    include("billing") ? Billing.find({ clientId: { $in: clientIds }, financialYear: query.financialYear }).lean() as Promise<FlatRecord[]> : Promise.resolve([] as FlatRecord[]),
-    include("payments") ? Payment.find({ clientId: { $in: clientIds }, financialYear: query.financialYear }).lean() as Promise<FlatRecord[]> : Promise.resolve([] as FlatRecord[]),
+    include("billing") ? Billing.find({ financialYear: query.financialYear }).lean() as Promise<FlatRecord[]> : Promise.resolve([] as FlatRecord[]),
+    include("payments") ? Payment.find({ $or: [{ financialYear: query.financialYear }, { paymentType: "advance" }] }).lean() as Promise<FlatRecord[]> : Promise.resolve([] as FlatRecord[]),
     include("invoices") ? Invoice.find({ clientId: { $in: clientIds }, financialYear: query.financialYear }).lean() as Promise<FlatRecord[]> : Promise.resolve([] as FlatRecord[]),
     include("annual-returns") ? AnnualReturn.find({ clientId: { $in: clientIds }, financialYear: query.financialYear }).lean() as Promise<FlatRecord[]> : Promise.resolve([] as FlatRecord[]),
     include("uploads") ? UploadRecord.find({ clientId: { $in: clientIds }, financialYear: query.financialYear }).lean() as Promise<FlatRecord[]> : Promise.resolve([] as FlatRecord[]),
     include("quotations") ? Quotation.countDocuments({ financialYear: query.financialYear, $or: [{ clientId: "" }, { clientId: { $exists: false } }, { clientId: null }] }) : Promise.resolve(0),
   ]);
 
+  const allocation = allocateBillingPayments(billings, payments);
+  const billedQuotationIds = new Set(billings.flatMap(bill => Array.isArray(bill.sourceQuotationIds) ? bill.sourceQuotationIds.map(String) : []));
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  if (!query.clientCategories.length && !query.states.length) {
+    const known = new Set(clientIds);
+    for (const bill of billings) {
+      const clientId = textValue(bill.clientId);
+      if (!known.has(clientId)) { clients.push({ clientId, companyName: `${clientId} (client unavailable)` }); known.add(clientId); }
+    }
+  }
   const quotationIds = quotations.map((quotation) => textValue(quotation._id));
   const revisions = quotationIds.length > 0 ? await QuotationRevision.find({ quotationId: { $in: quotationIds } }).lean() as FlatRecord[] : [];
   const revisionMap = new Map(revisions.map((revision) => [
@@ -289,7 +306,7 @@ export async function buildReport(rawQuery: ReportQuery, options: {
   };
   const quotationMap = groupByClient(quotations);
   const billingMap = groupByClient(billings);
-  const paymentsMap = groupByClient(payments);
+  const paymentsMap = groupByClient(payments.filter(payment => payment.financialYear === query.financialYear));
   const invoicesMap = groupByClient(invoices);
   const uploadsMap = groupByClient(uploads);
   const transactionToMap = groupByClient(transactions, "toClientId");
@@ -351,12 +368,23 @@ export async function buildReport(rawQuery: ReportQuery, options: {
     const quotedTotal = sumBreakdown("quoted");
     const achievedTotal = sumBreakdown("achieved");
     const remainingTotal = targetTotal - achievedTotal;
+    const targetCoverage = include("financial-years") && include("transactions") && PIBO.has(textValue(client.category)) ? calculateTargetCoverage({
+      ...(fyRecord as FinancialYearRecord | undefined), clientId, financialYear: query.financialYear,
+      achievedByType: breakdown.map(entry => ({ categoryId: entry.categoryId, type: entry.type, value: entry.achieved })),
+      targetTracking: { ...targetTrackingProvenance(fyRecord || {}), usageIssues: inboundTransactions.some(tx =>
+        !CREDIT_TYPES.includes(textValue(tx.creditType).toUpperCase() as ReportCreditType) || CATEGORY_IDS.some(id => {
+          const raw = tx[`cat${id}Qty`] ?? tx[`cat${id}`];
+          return raw != null && (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0);
+        })) ? ["Incoming credits contain an unsupported type or quantity."] : [] },
+    }) : undefined;
     const clientBillings = billingMap.get(clientId) || [];
     const annualBilling = clientBillings.find((entry) => textValue(entry.billType) !== "general");
-    const billingTotal = clientBillings.reduce((sum, entry) => sum + numberValue(entry.totalAmount), 0);
-    const receivedTotal = (paymentsMap.get(clientId) || []).reduce((sum, payment) => sum + numberValue(payment.amountPaid), 0);
-    const pendingAmount = billingTotal - receivedTotal;
-    const currentPaymentStatus = paymentStatus(billingTotal, receivedTotal);
+    const billingTotal = money(clientBillings.reduce((sum, entry) => sum + paise(entry.totalAmount), 0));
+    const receivedTotal = money(clientBillings.reduce((sum, entry) => sum + (allocation.paid.get(textValue(entry._id)) || 0), 0));
+    const pendingAmount = money(clientBillings.reduce((sum, entry) => sum + Math.max(0, paise(entry.totalAmount) - (allocation.paid.get(textValue(entry._id)) || 0)), 0));
+    const outstandingBills = clientBillings.filter(bill => paise(bill.totalAmount) > (allocation.paid.get(textValue(bill._id)) || 0));
+    const overdueCount = outstandingBills.filter(bill => { const due = isoDate(bill.dueDate); return due && due.slice(0, 10) < today; }).length;
+    const currentPaymentStatus = paymentStatus(billingTotal, receivedTotal, pendingAmount);
     const clientUploads = uploadsMap.get(clientId) || [];
     const uploadQuantity = clientUploads.reduce((sum, upload) => sum + CATEGORY_IDS.reduce((catSum, id) => catSum + numberValue(upload[`cat${id}`]), 0), 0);
     const uploadInvoiceCount = clientUploads.reduce((sum, upload) => sum + numberValue(upload.invoiceCount), 0);
@@ -370,8 +398,9 @@ export async function buildReport(rawQuery: ReportQuery, options: {
     }, 0);
 
     const annualReturnStatus = textValue(annualReturnMap.get(clientId)?.status) || "Not recorded";
-    const clientInvoices = invoicesMap.get(clientId) || [];
-    const invoiceCoverage = buildInvoiceCoverageSummary(clientInvoices as InvoiceCoverageInput[], query.financialYear);
+    const clientInvoices = (invoicesMap.get(clientId) || []) as InvoiceCoverageInput[];
+    const monthStatuses = invoiceMonthStatuses(clientInvoices, query.financialYear);
+    const invoiceCoverage = buildInvoiceCoverageSummary(clientInvoices, query.financialYear, monthStatuses);
     const invoiceMonthsReceived = invoiceCoverage.sale.doneCount + invoiceCoverage.purchase.doneCount;
     const acceptedQuotations = acceptedQuotationRows;
     const clientCustomFields = client.customFields && typeof client.customFields === "object" && !Array.isArray(client.customFields)
@@ -395,6 +424,9 @@ export async function buildReport(rawQuery: ReportQuery, options: {
       ...(selectedCustomFields ? { customFields: selectedCustomFields } : {}),
       financialYear: query.financialYear,
       financialYearRecorded: Boolean(fyRecord),
+      targetCoverage,
+      unbilledAcceptedCount: acceptedQuotations.filter(quotation => !billedQuotationIds.has(quotation.id)).length,
+      overdueBills: overdueCount || (outstandingBills.some(bill => !isoDate(bill.dueDate)) ? null : 0),
       quotationCount: reportQuotations.length,
       sentQuotationCount: reportQuotations.filter((quotation) => Boolean(quotation.sentAt)).length,
       acceptedQuotationCount: acceptedQuotations.length,
@@ -423,10 +455,15 @@ export async function buildReport(rawQuery: ReportQuery, options: {
       paymentCount: (paymentsMap.get(clientId) || []).length,
       pendingAmount,
       paymentStatus: currentPaymentStatus,
-      billingCreated: Boolean(annualBilling),
-      billingInvoiceCreated: Boolean(annualBilling?.invoiceCreated),
+      billingCreated: clientBillings.length > 0,
+      annualBillingCreated: Boolean(annualBilling),
+      annualBillingInvoiceCreated: Boolean(annualBilling?.invoiceCreated),
+      billingCount: clientBillings.length,
+      advanceBalance: money(allocation.advances.get(clientId) || 0),
+      billingInvoiceCreated: clientBillings.length > 0 && clientBillings.every(b => Boolean(b.invoiceCreated)),
       annualReturnStatus,
       invoiceCount: clientInvoices.length,
+      invoiceMonthsObserved: { sale: monthStatuses.sale.size, purchase: monthStatuses.purchase.size },
       invoiceSaleMonthsReceived: invoiceCoverage.sale.doneCount,
       invoicePurchaseMonthsReceived: invoiceCoverage.purchase.doneCount,
       invoiceCoveragePercent: (invoiceMonthsReceived / 24) * 100,
@@ -545,6 +582,7 @@ export async function buildReport(rawQuery: ReportQuery, options: {
   const statusValues = sortedRows.flatMap((row) => row.quotations.map((quotation) => quotation.status));
 
   const qualityMessages = [
+    ...(allocation.issues.length ? [`${allocation.issues.length} payment allocation(s) require review and do not reduce outstanding.`] : []),
     ...(unlinkedQuotations > 0 ? [`${unlinkedQuotations} quotation${unlinkedQuotations === 1 ? " is" : "s are"} not linked to a saved client and cannot be joined to targets.`] : []),
     ...(unmappedQuotationItems > 0 ? [`${unmappedQuotationItems} quotation item${unmappedQuotationItems === 1 ? " has" : "s have"} an unmapped category.`] : []),
   ];

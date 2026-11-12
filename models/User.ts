@@ -32,6 +32,11 @@ export interface IUser extends Document {
   lastLoginIp?: string | null;
   lastLoginUserAgent?: string | null;
   financialYearSettings?: IUserFinancialYearSettings;
+  credentialsManaged?: boolean;
+  twoFactorEnabled?: boolean;
+  securityVersion?: number;
+  recoveryCodeHashes?: string[];
+  googleRequestLocation?: string;
   createdAt: Date;
   comparePassword(candidate: string): Promise<boolean>;
 }
@@ -65,6 +70,11 @@ const UserSchema = new Schema<IUser>(
     },
     googleRequestedAt: { type: Date, default: null },
     googleApprovedAt: { type: Date, default: null },
+    credentialsManaged: { type: Boolean, default: false },
+    twoFactorEnabled: { type: Boolean, default: false },
+    securityVersion: { type: Number, default: 0 },
+    recoveryCodeHashes: { type: [String], default: [], select: false },
+    googleRequestLocation: { type: String, default: "" },
     lastLoginAt: { type: Date, default: null },
     lastLoginProvider: { type: String, enum: ["credentials", "google"], default: null },
     lastLoginIp: { type: String, default: "" },

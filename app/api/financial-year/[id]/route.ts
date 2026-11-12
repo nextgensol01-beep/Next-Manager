@@ -4,49 +4,9 @@ import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongoose";
 import FinancialYear from "@/models/FinancialYear";
 import DeletedRecord from "@/models/DeletedRecord";
-import type { ITargetEntry } from "@/models/FinancialYear";
-import { validateReviewedTargetImport } from "@/lib/server/financial-year-entry-validation";
+import { normaliseEntries, deriveFlat, validateReviewedTargetImport } from "@/lib/server/financial-year-entry-validation";
 import { recordActivityEvent } from "@/lib/server/activity-events";
 
-const VALID_TYPES = new Set(["RECYCLING", "EOL"]);
-const CAT_KEYS = ["1", "2", "3", "4"] as const;
-
-function normaliseEntries(raw: unknown[]): ITargetEntry[] {
-  const entries = new Map<string, ITargetEntry>();
-
-  for (const item of raw) {
-    const entry = item as Partial<ITargetEntry>;
-    const categoryId = String(entry.categoryId ?? "");
-    const rawType = String(entry.type ?? "").toUpperCase();
-    const type = VALID_TYPES.has(rawType) ? rawType as ITargetEntry["type"] : null;
-    const value = Number(entry.value);
-
-    if (!(CAT_KEYS as readonly string[]).includes(categoryId) || !type || !Number.isFinite(value) || value <= 0) {
-      continue;
-    }
-
-    const key = `${categoryId}|${type}`;
-    const existing = entries.get(key);
-    entries.set(key, {
-      categoryId,
-      type,
-      value: (existing?.value ?? 0) + value,
-    });
-  }
-
-  return Array.from(entries.values());
-}
-
-function deriveFlat(entries: ITargetEntry[], prefix: string): Record<string, number> {
-  const flat: Record<string, number> = {
-    [`${prefix}1`]: 0, [`${prefix}2`]: 0, [`${prefix}3`]: 0, [`${prefix}4`]: 0,
-  };
-  for (const e of entries) {
-    const k = `${prefix}${e.categoryId}`;
-    flat[k] = (flat[k] ?? 0) + e.value;
-  }
-  return flat;
-}
 
 export async function PUT(
   req: NextRequest,

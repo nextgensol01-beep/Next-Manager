@@ -47,6 +47,6 @@ function Fixture() {
             onMove={(id, direction) => patch(current => moveDraftRule(current, id, direction))} onPreview={() => {}} valuesForField={emailConditionValues} operatorsForField={emailConditionOperators} />
         </WorkflowStepContentStage>
       </section></div>
-    </Modal><ClientPreview open={previewOpen} onClose={() => setPreviewOpen(false)} trackerId="fixture" workflow={workflow} fingerprint={fingerprint} analysis={analysis} onAnalysis={setAnalysis} /></>;
+    </Modal><ClientPreview open={previewOpen} onClose={() => setPreviewOpen(false)} trackerId="fixture" workflow={workflow} fields={fields} fingerprint={fingerprint} analysis={analysis} onAnalysis={setAnalysis} /></>;
 }
 createRoot(document.getElementById('root')!).render(<React.StrictMode><Fixture /></React.StrictMode>);

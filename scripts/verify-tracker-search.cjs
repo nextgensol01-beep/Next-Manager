@@ -89,8 +89,7 @@ async function main() {
   let page;
   try {
     assert(executablePath, 'Local Chromium is required for browser regression checks');
-    const userDataDir = fs.mkdtempSync(path.join(output, 'profile-'));
-    browser = await puppeteer.launch({ executablePath, userDataDir, headless: true, args: ['--no-sandbox', '--disable-gpu', '--no-first-run', '--no-default-browser-check'] });
+    browser = await puppeteer.launch({ executablePath,  headless: true, args: ['--no-sandbox', '--disable-gpu', '--no-first-run', '--no-default-browser-check'] });
     page = await browser.newPage();
     await page.setViewport({ width: 1400, height: 1000 });
     const errors = [];

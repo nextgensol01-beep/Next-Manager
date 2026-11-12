@@ -24,8 +24,6 @@ const enrich = (record) => {
     if(coverageFixture.legacy) {result.achievedCat2=50; result.totalAchieved=50;}
     return result;
   }`);
-// One reusable profile instead of accumulating a profile for each test invocation.
-replace('userDataDir: fs.mkdtempSync(path.join(output, "profile-"))', 'userDataDir: path.join(output, "browser-profile")');
 // The real dashboard provides page padding; the old bare fixture omitted it.
 replace('<div id="root"></div>', '<div id="root" style="padding:16px"></div>');
 replace('    let locationClient = "PIBO";', `

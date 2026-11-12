@@ -1,7 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const Module = require('node:module');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '..');
 const { pipeline } = require('./search-fixture-pipeline.cjs');
@@ -93,26 +92,8 @@ const stubs = {
   '@/models/EmailLog': {},
   '@/lib/server/activity-events': { recordActivityEvent: async () => null },
 };
-const loaded = new Map();
-function load(relative) {
-  const filename = path.join(root, relative);
-  if (loaded.has(filename)) return loaded.get(filename).exports;
-  const module = new Module(filename);
-  module.filename = filename;
-  module.paths = Module._nodeModulePaths(path.dirname(filename));
-  loaded.set(filename, module);
-  const defaultRequire = module.require.bind(module);
-  module.require = request => {
-    if (request in stubs) return stubs[request];
-    if (request.startsWith('@/')) return load(request.slice(2) + '.ts');
-    return defaultRequire(request);
-  };
-  module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
-    fileName: filename,
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
-  }).outputText, filename);
-  return module.exports;
-}
+// Use the same resolver as the other route suites, including relative TS imports.
+const load = require('./search-test-loader.cjs')(stubs);
 const first = { key: 'note', label: 'Note', type: 'text' };
 const second = { key: 'ready', label: 'Ready', type: 'toggle' };
 function reset() {

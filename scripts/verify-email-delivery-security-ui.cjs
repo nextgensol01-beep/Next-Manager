@@ -251,7 +251,6 @@ async function main() {
     browser = await puppeteer.launch({
       executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe",
       headless: true,
-      userDataDir: fs.mkdtempSync(path.join(output, "profile-")),
       args: ["--no-sandbox", "--disable-gpu"],
     });
     const page = await browser.newPage(),

@@ -3,10 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "verify:billing-report": "node scripts/verify-billing-report.cjs",
+    "verify:billing-report-ui": "node scripts/verify-billing-report-ui.cjs",
+    "reconcile:billing-report": "node scripts/reconcile-billing-report.cjs",
+    "verify:financial-year-preference": "node scripts/verify-financial-year-preference.cjs",
+    "verify:account-security": "node scripts/verify-account-security.cjs",
+    "verify:account-security-ui": "node scripts/verify-account-security-ui.cjs",
+    "verify:security-notification-template": "node scripts/verify-security-notification-template.cjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint app components lib models utils types --max-warnings=0",
     "verify:report-metrics": "node scripts/verify-report-metrics.cjs",
     "verify:report-security": "node scripts/verify-report-security.cjs",
     "verify:report-interactions": "node scripts/verify-report-interactions.cjs",
@@ -42,6 +49,8 @@
     "verify:workflow-messages": "node scripts/verify-workflow-messages.cjs",
     "verify:workflow-save": "node scripts/verify-workflow-save.cjs",
     "verify:scenario-analysis": "node scripts/verify-scenario-analysis.cjs",
+    "verify:scenario-clarity": "node scripts/verify-scenario-clarity.cjs",
+    "verify:scenario-premium": "node scripts/verify-scenario-premium.cjs",
     "verify:workflow-editor": "node scripts/verify-workflow-editor.cjs",
     "verify:workflow-template": "node scripts/verify-workflow-template.cjs",
     "verify:workflow-delivery": "node scripts/verify-workflow-delivery.cjs",
@@ -60,7 +69,14 @@
     "verify:email-verification-template": "node scripts/verify-email-verification-template.cjs",
     "verify:rule-combinations": "node scripts/verify-rule-combinations.cjs",
     "verify:workflow-style-navigation": "node scripts/verify-workflow-style-navigation.cjs",
-    "resync:client-ids": "node scripts/resync-client-id-counters.js"
+    "resync:client-ids": "node scripts/resync-client-id-counters.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/verify-project.cjs",
+    "test:browser": "node scripts/verify-project.cjs --browser",
+    "verify:mongoose-connection": "node scripts/verify-mongoose-connection.cjs",
+    "verify:quotation-pdf": "node scripts/verify-quotation-pdf.cjs",
+    "templates:build": "node scripts/inline-templates.cjs",
+    "templates:check": "node scripts/inline-templates.cjs --check"
   },
   "dependencies": {
     "@sparticuz/chromium": "^149.0.0",
@@ -75,14 +91,13 @@
     "exceljs": "^4.4.0",
     "framer-motion": "^12.38.0",
     "googleapis": "^171.4.0",
-    "jspdf": "^4.2.0",
-    "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.469.0",
-    "mongoose": "^8.9.0",
-    "next": "^15.5.12",
-    "next-auth": "^4.24.13",
-    "nodemailer8": "npm:nodemailer@^8.0.6",
-    "puppeteer-core": "^25.1.0",
+    "mongodb": "6.20.0",
+    "mongoose": "^8.24.7",
+    "next": "^15.5.28",
+    "next-auth": "^4.24.15",
+    "nodemailer8": "npm:nodemailer@10.1.4",
+    "puppeteer-core": "^25.16.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hot-toast": "^2.4.1",
@@ -91,22 +106,25 @@
     "tailwind-merge": "^3.3.0",
     "tesseract.js": "^7.0.0",
     "uuid": "file:vendor/uuid-safe",
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.7",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
-    "@types/nodemailer": "^6.4.17",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.0.0",
-    "eslint-config-next": "^15.5.12",
-    "postcss": "^8.5.0",
+    "eslint-config-next": "^15.5.28",
+    "postcss": "^8.5.32",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.0"
   },
   "overrides": {
-    "uuid": "$uuid"
+    "uuid": "$uuid",
+    "next": {
+      "postcss": "$postcss"
+    }
   }
 }

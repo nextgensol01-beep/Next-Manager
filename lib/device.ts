@@ -36,8 +36,8 @@ export function parseDevice(userAgent?: string | null): ParsedDevice {
   else if (ua.includes("chrome/") || ua.includes("crios/")) browser = "Chrome";
   else if (ua.includes("safari/")) browser = "Safari";
 
-  const type: DeviceType = isTablet ? "tablet" : isMobile ? "mobile" : "desktop";
-  const typeLabel = type === "desktop" ? "Desktop" : type === "tablet" ? "Tablet" : type === "mobile" ? "Mobile" : "Device";
+  const type: DeviceType = isTablet ? "tablet" : isMobile ? "mobile" : os !== "Unknown OS" || browser !== "Unknown browser" ? "desktop" : "unknown";
+  const typeLabel = type === "desktop" ? "Desktop" : type === "tablet" ? "Tablet" : type === "mobile" ? "Mobile" : "Unknown device";
 
   return {
     os,

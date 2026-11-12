@@ -6,13 +6,28 @@ import { executeReportStudio } from "@/lib/server/report-studio-service";
 import { finaliseReadableReportSheet } from "@/lib/server/excel-report-style";
 import { reportStudioExcelFormat, reportStudioExcelValue } from "@/lib/server/report-studio-excel";
 import { reportStudioExcelColor } from "@/lib/report-studio";
+import { executeBillingReport } from "@/lib/server/billing-report-service";
+import { billingReportWorkbook } from "@/lib/server/billing-report-excel";
+import { ZodError } from "zod";
+import { isAdminSession } from "@/lib/authUsers";
+import { isRestrictedReportSource } from "@/lib/report-datasets";
 
 export async function POST(request: NextRequest) {
   const guard = await requireSession();
   if (guard.response) return guard.response;
   try {
     await connectDB();
-    const report = await executeReportStudio(await request.json(), { exportAll: true });
+    const body = await request.json();
+    if (isRestrictedReportSource(body?.source) && !await isAdminSession(guard.session)) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+    if (body?.mode === "billing-report") {
+      const financial = await executeBillingReport(body.report, true);
+      return new NextResponse(await billingReportWorkbook(financial), { headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="billing-${financial.options.view}-${financial.options.financialYear}.xlsx"`,
+        "Cache-Control": "no-store",
+      } });
+    }
+    const report = await executeReportStudio(body, { exportAll: true });
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "Nextgen Solutions Report Studio";
     workbook.created = new Date();
@@ -30,11 +45,12 @@ export async function POST(request: NextRequest) {
     [
       ["Report", report.config.name],
       ["Source", report.config.source],
-      ["Financial Year", report.config.financialYear],
+      ["Financial Year", [...new Set([report.config.financialYear, ...(report.config.billingScope?.years ?? []), ...(report.config.comparisonYears ?? [])])].join(", ")],
       ["Generated at", report.generatedAt || new Date().toISOString()],
       ["Export scope", "All matching rows"],
       ["Client search", report.config.search || "None"],
       ["Filters", JSON.stringify(report.config.filters)],
+      ...(report.config.billingScope?.filters ? [["Bill and charge scope", JSON.stringify(report.config.billingScope.filters)]] : []),
       ["Matched Clients", report.summary.matchedClients],
       ["Columns", report.columns.map((column) => column.label).join(", ")],
       ["Group By", report.config.groupBy.join(", ") || "None"],
@@ -45,6 +61,16 @@ export async function POST(request: NextRequest) {
       if (format) row.getCell(2).numFmt = format;
     });
     if (report.quality.messages.length > 0) summary.addRow({ setting: "Data Quality", value: report.quality.messages.join(" ") });
+    report.summary.subtotals?.forEach((subtotal, index) => {
+      const fields = report.columns.filter(column => subtotal.dimensions.includes(column.id) || report.config.metrics.includes(column.id));
+      const sheet = workbook.addWorksheet(`Subtotals Level ${index + 1}`);
+      sheet.columns = fields.map(field => ({ header: field.label, key: field.id, width: 24 }));
+      subtotal.rows.forEach(row => sheet.addRow(Object.fromEntries(fields.map(field => [field.id, reportStudioExcelValue(row.values[field.id] ?? null, field.type)]))));
+      fields.forEach(field => {
+        const format = reportStudioExcelFormat(field.type);
+        if (format) sheet.getColumn(field.id).numFmt = format;
+      });
+    });
 
     if (report.config.view === "analysis") {
       const analysis = report.summary.analysis;
@@ -122,6 +148,6 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    return errorResponse(error, "Unable to export Report Studio", error instanceof Error && /Field|Operator|Invalid|expected/i.test(error.message) ? 400 : 500);
+    return errorResponse(error, "Unable to export Report Studio", error instanceof ZodError || error instanceof Error && /Field|Operator|Invalid|expected/i.test(error.message) ? 400 : 500);
   }
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { readJsonResponse } from "@/lib/http-response";
+import Modal from "@/components/ui/Modal";
 
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
@@ -55,8 +56,17 @@ import {
 import { FINANCIAL_YEARS, formatCurrency } from "@/lib/utils";
 import type { ReportType } from "@/lib/reports";
 import { fetchReportStudio, getCachedReportStudio } from "@/lib/reportStudioClientCache";
+import { useSession } from "next-auth/react";
+import { REPORT_BUILDER_CATEGORIES, REPORT_DETAIL_DATASETS, isBillingAnalysisSource, isReportDetailSource, isRestrictedReportSource } from "@/lib/report-datasets";
+import { DETAIL_MONTHS, reportDatasetRoot, reportLayouts, REPORT_COMPARISON_SOURCES, REPORT_DATASET_CARD_COPY, type ReportLayout } from "@/lib/report-layouts";
+import { billingReportDrilldown } from "@/lib/report-billing-view";
+import { type ReportManualField, hasManualReportFields } from "@/lib/report-manual";
+import { WorkflowStepNavigationDock, useWorkflowStepNavigation } from "@/components/client-trackers/WorkflowStepNavigation";
+import ReportBuilderStepper, { REPORT_STEPS, ReportStepDescription } from "./ReportBuilderStepper";
+import ReportManualEditor from "./ReportManualEditor";
 import { REPORT_TYPES } from "./ReportsSupport";
 import ReportSelect from "./ReportSelect";
+const BillingReport = dynamic(() => import("./BillingReport"), { ssr: false });
 import ReportOverview, { type ReportFocus } from "./ReportOverview";
 import { reportConfigKey, withoutFilter } from "@/lib/report-studio-view";
 import ReportQualityPanel from "./ReportQualityPanel";
@@ -67,9 +77,13 @@ import {
   ACCEPTED_TARGET_DETAIL_COLUMNS,
   REPORT_STUDIO_OPERATOR_LABELS,
   REPORT_STUDIO_SOURCES,
+  REPORT_GROUP_LIMIT,
   createAcceptedTargetStudioConfig,
+  billingScopeFields,
   fieldsForSource,
-  reportStudioFieldMap,
+  reportManualDefinition,
+  reportCalculatedDefinitions,
+  validateReportStudioConfig,
   reportStudioExcelColor,
   type ReportStudioCellValue,
   type ReportStudioAnalysisBucket,
@@ -105,6 +119,7 @@ type ReportStudioProps = {
 };
 
 const SAVED_REPORTS_KEY = "reports.studio.saved.v1";
+const REPORT_STAGE_HEADINGS = ["Choose your data", "Organize your report", "Choose fields and filters", "Review your report", "Save or download"];
 
 const ReportStudioChart = dynamic(() => import("./ReportStudioChart"), {
   ssr: false,
@@ -170,7 +185,7 @@ function formatCell(value: ReportStudioCellValue, definition: ReportStudioFieldD
   }
   if (definition.type === "date") {
     const date = new Date(String(value));
-    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-IN");
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-IN", { timeZone: "UTC" });
   }
   return value;
 }
@@ -182,13 +197,12 @@ function formatResultValue(result: ReportStudioResultValue) {
   if (["number", "quantity"].includes(result.type)) return quantity(Number(result.value));
   if (result.type === "date") {
     const date = new Date(String(result.value));
-    return Number.isNaN(date.getTime()) ? String(result.value) : date.toLocaleDateString("en-IN");
+    return Number.isNaN(date.getTime()) ? String(result.value) : date.toLocaleDateString("en-IN", { timeZone: "UTC" });
   }
   return String(result.value);
 }
 
 function defaultConfigForSource(source: ReportStudioSource, financialYear: string): ReportStudioConfig {
-  if (source === "clients") return createAcceptedTargetStudioConfig(financialYear, false);
   const base = {
     ...createAcceptedTargetStudioConfig(financialYear, false),
     source,
@@ -196,7 +210,22 @@ function defaultConfigForSource(source: ReportStudioSource, financialYear: strin
     groupBy: [],
     view: "table" as const,
   };
+  if (isReportDetailSource(source)) {
+    const dataset = REPORT_DETAIL_DATASETS[source];
+    if (isBillingAnalysisSource(source)) {
+      return { ...base, version: 2, name: dataset.label, columns: dataset.columns,
+        metrics: source === "billing-charges" ? ["charge.gross"] : ["charge.selectedGross", "bill.gross", "bill.paid", "bill.outstanding"],
+        analysis: { ...base.analysis, field: dataset.columns[0], transform: "presence" },
+        sort: [{ field: source === "billing-companies" ? "client.companyName" : "bill.date", direction: source === "billing-companies" ? "asc" : "desc" }] };
+    }
+    return { ...base, version: 2, name: dataset.label, columns: dataset.columns, metrics: [],
+      ...(source === "payment-register" ? { paymentPeriod: "receipt" as const } : {}),
+      analysis: { ...base.analysis, field: dataset.columns[0], transform: "presence" },
+      sort: [{ field: dataset.columns.includes("record.date") ? "record.date" : "client.companyName", direction: dataset.columns.includes("record.date") ? "desc" : "asc" }] };
+  }
   const definitions: Partial<Record<ReportStudioSource, Pick<ReportStudioConfig, "name" | "columns" | "metrics">>> = {
+    "client-directory": { name: "Client Directory", columns: ["client.companyName", "client.clientId", "client.category", "client.state", "client.registrationNumber"], metrics: ["client.count"] },
+    clients: { name: "Client and FY Overview", columns: ["client.companyName", "client.category", "financialYear.year", "annualReturn.status"], metrics: ["client.count"] },
     "financial-years": { name: "Financial Year Overview", columns: ["client.companyName", "client.category", "financialYear.year", "annualReturn.status", "target.overall.target", "target.overall.achieved", "target.overall.remaining"], metrics: ["client.count", "target.overall.target", "target.overall.achieved", "target.overall.remaining"] },
     "pibo-targets": { name: "PIBO Target Analysis", columns: ACCEPTED_TARGET_COMPACT_COLUMNS, metrics: ["client.count", "target.overall.target", "target.overall.achieved", "target.overall.remaining"] },
     "pwp-credits": { name: "PWP Credit Position", columns: ["client.companyName", "client.state", "financialYear.year", "pwp.generated", "pwp.sold", "pwp.remaining"], metrics: ["client.count", "pwp.generated", "pwp.sold", "pwp.remaining"] },
@@ -212,7 +241,7 @@ function defaultConfigForSource(source: ReportStudioSource, financialYear: strin
     activities: { name: "Client Activity", columns: ["client.companyName", "client.category", "activity.count", "task.openCount", "annualReturn.status"], metrics: ["client.count", "activity.count", "task.openCount"] },
     contacts: { name: "People & Client Relationships", columns: ["client.companyName", "client.category", "client.state", "contact.count", "contact.primaryNames", "task.openCount"], metrics: ["client.count", "contact.count"] },
   };
-  return { ...base, ...(definitions[source] || definitions["financial-years"]) };
+  return { ...base, ...(definitions[source] || definitions["financial-years"]), sort: [{ field: "client.companyName", direction: "asc" }] };
 }
 
 function PanelButton({ active, icon: Icon, label, count, onClick }: { active: boolean; icon: typeof Columns3; label: string; count?: number; onClick: () => void }) {
@@ -235,6 +264,11 @@ function removeFilterNode(group: ReportStudioFilterGroup, id: string): ReportStu
       .filter((child) => child.id !== id)
       .map((child) => child.kind === "group" ? removeFilterNode(child, id) : child),
   };
+}
+
+function transformFilterGroup(group: ReportStudioFilterGroup, groupId: string, transform: (entry: ReportStudioFilterGroup) => ReportStudioFilterGroup): ReportStudioFilterGroup {
+  if (group.id === groupId) return transform(group);
+  return { ...group, children: group.children.map((child) => child.kind === "group" ? transformFilterGroup(child, groupId, transform) : child) };
 }
 
 function keepAvailableFilters(group: ReportStudioFilterGroup, availableFieldIds: ReadonlySet<string>): ReportStudioFilterGroup {
@@ -280,7 +314,7 @@ export default function ReportStudio({
   quickDownloading,
 }: ReportStudioProps) {
   const initialConfigRef = useRef<ReportStudioConfig | null>(null);
-  if (!initialConfigRef.current) initialConfigRef.current = createAcceptedTargetStudioConfig(fy, false);
+  if (!initialConfigRef.current) initialConfigRef.current = { ...defaultConfigForSource("client-directory", fy), version: 2 };
   const [draft, setDraft] = useState<ReportStudioConfig>(initialConfigRef.current);
   const [applied, setApplied] = useState<ReportStudioConfig>(initialConfigRef.current);
   const [reportData, setReport] = useState<ReportStudioResponse | null>(null);
@@ -295,6 +329,7 @@ export default function ReportStudio({
   const [savedReports, setSavedReports] = useState<SavedStudioReport[]>([]);
   const [saveName, setSaveName] = useState("");
   const [activeSavedReportId, setActiveSavedReportId] = useState<string | null>(null);
+  const [billingDetails, setBillingDetails] = useState(true);
   const [savedReportsLoading, setSavedReportsLoading] = useState(false);
   const [savedReportsLoaded, setSavedReportsLoaded] = useState(false);
   const [savingSavedReport, setSavingSavedReport] = useState(false);
@@ -311,7 +346,38 @@ export default function ReportStudio({
   const reportRequestRef = useRef(0);
   const savedReportsRequestRef = useRef(false);
   const reduceMotion = useReducedMotion();
-  const fieldMap = useMemo(() => reportStudioFieldMap(customFields), [customFields]);
+  const reduced = Boolean(reduceMotion);
+  const { setupPage: step, stepDirection, commit, navigateStep, navigateToStep } = useWorkflowStepNavigation("reports", 0, REPORT_STEPS, reduced);
+  const [reached, setReached] = useState(0);
+  const [categoryId, setCategoryId] = useState<string>("clients");
+  const [library, setLibrary] = useState<"saved" | "templates" | null>(null);
+  const [billingScopeOpen, setBillingScopeOpen] = useState(false);
+  const [stepError, setStepError] = useState<{ step: number; draft: ReportStudioConfig; message: string } | null>(null);
+  const [manualCatalog, setManualCatalog] = useState<{ fields: ReportManualField[]; canEdit: boolean } | null>(null);
+  const [manualError, setManualError] = useState("");
+  const [manualRevision, setManualRevision] = useState(0);
+  const session = useSession().data;
+  const cacheScope = session?.user?.email ? `${session.user.email}:${manualRevision}` : undefined;
+  const showSaved = library === "saved";
+  const loadManualCatalog = step >= 1 || showSaved || categoryId === "operations";
+  const previewActive = step >= 3;
+  const additionalFields = useMemo(() => [...customFields, ...(manualCatalog?.fields || []).map(reportManualDefinition)], [customFields, manualCatalog]);
+  const availableFields = useMemo(() => fieldsForSource(draft.source, [...additionalFields, ...reportCalculatedDefinitions(draft.calculatedColumns)]), [additionalFields, draft.source, draft.calculatedColumns]);
+  const appliedFields = useMemo(() => fieldsForSource(applied.source, [...additionalFields, ...reportCalculatedDefinitions(applied.calculatedColumns)]), [additionalFields, applied.source, applied.calculatedColumns]);
+  const fieldMap = useMemo(() => new Map([...appliedFields, ...availableFields].map((field) => [field.id, field])), [appliedFields, availableFields]);
+
+  useEffect(() => {
+    if (!ready || !loadManualCatalog) return;
+    let cancelled = false;
+    fetch("/api/reports/studio/manual", { cache: "no-store" })
+      .then(async (response) => {
+        const body = await readJsonResponse(response);
+        if (!response.ok) throw new Error(body.error || "Unable to load manual fields.");
+        if (!cancelled) setManualCatalog(body);
+      })
+      .catch((problem) => { if (!cancelled) setManualError(problem.message); });
+    return () => { cancelled = true; };
+  }, [ready, loadManualCatalog]);
 
   const fetchReport = useCallback(async (config: ReportStudioConfig, refresh = false) => {
     const requestId = reportRequestRef.current + 1;
@@ -320,7 +386,7 @@ export default function ReportStudio({
     setError("");
 
     if (!refresh) {
-      const cached = getCachedReportStudio(config);
+      const cached = cacheScope ? getCachedReportStudio(config, cacheScope) : null;
       if (cached) {
         setReport(cached);
         setLastUpdatedAt(cached.generatedAt ? new Date(cached.generatedAt) : null);
@@ -330,7 +396,7 @@ export default function ReportStudio({
     }
 
     try {
-      const body = await fetchReportStudio(config, { refresh });
+      const body = await fetchReportStudio(config, { refresh, scope: cacheScope });
       if (reportRequestRef.current === requestId) {
         setReport(body);
         setLastUpdatedAt(new Date(body.generatedAt || Date.now()));
@@ -342,14 +408,15 @@ export default function ReportStudio({
     } finally {
       if (reportRequestRef.current === requestId) setLoading(false);
     }
-  }, []);
+  }, [cacheScope]);
 
   useEffect(() => {
-    if (!ready || applied.financialYear !== fy) return;
+    if (!ready || !previewActive || applied.financialYear !== fy) return;
+    if (applied.source === "billing" && billingDetails) { reportRequestRef.current++; setLoading(false); return; }
     const refresh = forceRefreshRef.current;
     forceRefreshRef.current = false;
     void fetchReport(applied, refresh);
-  }, [applied, fetchReport, fy, ready, refreshRequest]);
+  }, [applied, billingDetails, fetchReport, fy, ready, refreshRequest, previewActive]);
   useEffect(() => {
     setDraft((current) => current.financialYear === fy ? current : { ...current, financialYear: fy, page: 1 });
     setApplied((current) => current.financialYear === fy ? current : { ...current, financialYear: fy, page: 1 });
@@ -358,7 +425,7 @@ export default function ReportStudio({
     setFrozenColumnIds((current) => current.filter((fieldId) => applied.columns.includes(fieldId)));
   }, [applied.columns, applied.source]);
   useEffect(() => {
-    if (panel !== "saved" || savedReportsLoaded || savedReportsRequestRef.current) return;
+    if (panel !== "saved" && !showSaved && step !== 4 || savedReportsLoaded || savedReportsRequestRef.current) return;
     savedReportsRequestRef.current = true;
     setSavedReportsLoading(true);
     const loadSavedReports = async () => {
@@ -398,7 +465,7 @@ export default function ReportStudio({
       }
     };
     void loadSavedReports();
-  }, [panel, savedReportsLoaded]);
+  }, [panel, savedReportsLoaded, showSaved, step]);
 
   useEffect(() => { setClientQuery(applied.search || ""); }, [applied.search]);
   useEffect(() => {
@@ -411,7 +478,6 @@ export default function ReportStudio({
     return () => window.clearTimeout(timer);
   }, [clientQuery, applied.search]);
 
-  const availableFields = useMemo(() => fieldsForSource(draft.source, customFields), [customFields, draft.source]);
   const fieldGroups = useMemo(() => {
     const search = fieldSearch.trim().toLowerCase();
     const filtered = search
@@ -468,13 +534,52 @@ export default function ReportStudio({
   };
 
   const changeSource = (source: ReportStudioSource) => {
-    const next = defaultConfigForSource(source, draft.financialYear);
+    billingLevelDrafts.current = {};
+    setBillingScopeOpen(false);
+    const next = { ...defaultConfigForSource(source, draft.financialYear), version: 2 as const };
+    setBillingDetails(false);
+    setActiveSavedReportId(null);
+    setSaveName("");
+    setDrilldownStack([]);
     setDraft(next);
     setSetupExpanded(true);
   };
 
+  const billingLevelDrafts = useRef<Partial<Record<ReportStudioSource, ReportStudioConfig>>>({});
+  const defaultGroupingMetrics = (config: ReportStudioConfig) => {
+    const fields = fieldsForSource(config.source);
+    const metrics = new Set(fields.filter(field => field.role === "metric").map(field => field.id));
+    const selected = config.metrics.filter(id => metrics.has(id));
+    if (selected.length) return selected;
+    if (config.source === "invoice-months") return ["invoice.received", "invoice.covered", "invoice.missing", "invoice.partial", "invoice.nil", "invoice.unknown"];
+    const visible = config.columns.filter(id => id !== "record.count" && metrics.has(id)).slice(0, 6);
+    return visible.length ? visible : [...metrics].filter(id => id === "record.count" || id === "client.count").slice(0, 1);
+  };
+  const withGrouping = (config: ReportStudioConfig, groupBy: string[]): ReportStudioConfig => ({
+    ...config, groupBy, page: 1, view: "table",
+    metrics: groupBy.length ? defaultGroupingMetrics(config) : config.metrics,
+    sort: groupBy.length ? groupBy.map(field => ({ field, direction: "asc" })) : config.sort,
+  });
+  const chooseLayout = (layout: ReportLayout) => {
+    const source = layout.source;
+    if (source !== draft.source) billingLevelDrafts.current[draft.source] = draft;
+    const next = source === draft.source ? draft : billingLevelDrafts.current[source] ?? defaultConfigForSource(source, draft.financialYear);
+    const compatible = new Set(fieldsForSource(source).map(field => field.id));
+    const filters = source === draft.source || billingLevelDrafts.current[source] ? next.filters : keepAvailableFilters(draft.filters, compatible);
+    const fromInvoiceGrid = source === "invoice-coverage" && DETAIL_MONTHS.every((_, index) => next.columns.includes(`invoice.month.${index + 1}`));
+    const columns = layout.columns ?? (fromInvoiceGrid ? REPORT_DETAIL_DATASETS["invoice-coverage"].columns : next.columns);
+    setDraft(withGrouping({
+      ...next, name: activeSavedReportId ? draft.name : next.name, financialYear: draft.financialYear, filters, columns,
+      billingScope: isBillingAnalysisSource(source) ? draft.billingScope : undefined,
+      comparisonYears: REPORT_COMPARISON_SOURCES.has(source) ? draft.comparisonYears : undefined,
+    }, layout.groupBy));
+  };
+
   const applyTemplate = (template: ReportTemplate) => {
-    const next = defaultConfigForSource(template.source, fy);
+    setLibrary(null);
+    setBillingDetails(false);
+    const next = { ...(template.source === "clients" ? createAcceptedTargetStudioConfig(fy, false) : defaultConfigForSource(template.source, fy)), version: 2 as const };
+    setCategoryId(template.source === "clients" ? "advanced" : REPORT_BUILDER_CATEGORIES.find((category) => category.sources.some((source) => source === template.source))?.id || "advanced");
     setFrozenColumnIds(defaultFrozenColumns(next.columns));
     setDraft(next);
     setApplied(next);
@@ -484,6 +589,8 @@ export default function ReportStudio({
     setBusinessResultsOpen(false);
     setPanel(null);
     setSetupExpanded(false);
+    setReached((current) => Math.max(current, 1));
+    navigateToStep(1);
   };
 
   const showAllRecords = () => {
@@ -556,13 +663,8 @@ export default function ReportStudio({
       kind: "condition",
       field: definition.id,
       operator: definition.operators[0],
-      value: definition.options?.[0] || "",
+      value: definition.options?.length ? parseFilterInput(definition.options[0], definition, definition.operators[0]) : "",
     };
-  };
-
-  const transformFilterGroup = (group: ReportStudioFilterGroup, groupId: string, transform: (group: ReportStudioFilterGroup) => ReportStudioFilterGroup): ReportStudioFilterGroup => {
-    if (group.id === groupId) return transform(group);
-    return { ...group, children: group.children.map((child) => child.kind === "group" ? transformFilterGroup(child, groupId, transform) : child) };
   };
 
   const addFilter = (groupId = "root") => {
@@ -589,7 +691,7 @@ export default function ReportStudio({
   const changeFilterField = (condition: ReportStudioFilterClause, fieldId: string) => {
     const definition = fieldMap.get(fieldId);
     if (!definition) return;
-    updateFilter(condition.id, { field: fieldId, operator: definition.operators[0], value: definition.options?.[0] || "", secondValue: undefined });
+    updateFilter(condition.id, { field: fieldId, operator: definition.operators[0], value: definition.options?.length ? parseFilterInput(definition.options[0], definition, definition.operators[0]) : "", secondValue: undefined });
   };
 
   const removeFilter = (id: string) => setDraft((current) => ({ ...current, filters: removeFilterNode(current.filters, id), page: 1 }));
@@ -604,17 +706,17 @@ export default function ReportStudio({
 
   const toggleGroup = (fieldId: string) => {
     const selected = draft.groupBy.includes(fieldId);
-    if (!selected && draft.groupBy.length >= 2) {
-      toast.error("A report can use two grouping levels. Remove one before adding another.");
+    if (!selected && draft.groupBy.length >= REPORT_GROUP_LIMIT) {
+      toast.error("Remove a grouping level before adding another.");
       return;
     }
     setDraft((current) => {
       const currentlySelected = current.groupBy.includes(fieldId);
-      if (!currentlySelected && current.groupBy.length >= 2) return current;
+      if (!currentlySelected && current.groupBy.length >= REPORT_GROUP_LIMIT) return current;
       const groupBy = currentlySelected
         ? current.groupBy.filter((entry) => entry !== fieldId)
         : [...current.groupBy, fieldId];
-      return { ...current, groupBy, sort: groupBy.length > 0 ? [{ field: groupBy[0], direction: "asc" }] : current.sort, page: 1 };
+      return withGrouping(current, groupBy);
     });
   };
 
@@ -696,7 +798,14 @@ export default function ReportStudio({
   };
 
   const loadSaved = (saved: SavedStudioReport) => {
-    const savedFields = fieldsForSource(saved.config.source, customFields);
+    if (hasManualReportFields(saved.config) && !manualCatalog) {
+      toast.error(manualError || "Manual fields are still loading. Try again shortly.");
+      return;
+    }
+    setLibrary(null);
+    setBillingDetails(false);
+    billingLevelDrafts.current = {};
+    const savedFields = fieldsForSource(saved.config.source, [...additionalFields, ...reportCalculatedDefinitions(saved.config.calculatedColumns)]);
     const savedFieldIds = new Set(savedFields.map((definition) => definition.id));
     const savedDimensionFields = savedFields.filter((definition) => definition.role === "dimension");
     const savedMetricFields = savedFields.filter((definition) => definition.role === "metric");
@@ -722,7 +831,7 @@ export default function ReportStudio({
       filters: keepAvailableFilters(saved.config.filters, savedFieldIds),
       groupBy: saved.config.groupBy.filter((fieldId, index, groupBy) => (
         savedDimensionFields.some((field) => field.id === fieldId) && groupBy.indexOf(fieldId) === index
-      )).slice(0, 2),
+      )).slice(0, REPORT_GROUP_LIMIT),
       metrics: sortBySelectorOrder(saved.config.metrics.filter((fieldId) => savedMetricFields.some((field) => field.id === fieldId)), savedMetricFields),
       sort: saved.config.sort.filter((entry) => savedFieldIds.has(entry.field)).slice(0, 3),
       analysis: savedAnalysis,
@@ -737,6 +846,10 @@ export default function ReportStudio({
     onFyChange(saved.config.financialYear);
     setPanel(null);
     setSetupExpanded(false);
+    setDrilldownStack([]);
+    setCategoryId(REPORT_BUILDER_CATEGORIES.find((category) => category.sources.some((source) => source === saved.config.source))?.id || "advanced");
+    setReached((current) => Math.max(current, 1));
+    navigateToStep(1);
   };
 
   const downloadExcel = async () => {
@@ -934,10 +1047,22 @@ export default function ReportStudio({
 
   const drillIntoRow = (row: ReportStudioResponse["rows"][number]) => {
     if (applied.groupBy.length === 0) {
+      const billingDetail = billingReportDrilldown(applied, row);
+      if (billingDetail) {
+        setDrilldownStack((current) => [...current, applied]);
+        setFrozenColumnIds(defaultFrozenColumns(billingDetail.columns));
+        setDraft(billingDetail);
+        setApplied(billingDetail);
+        return;
+      }
+      if (row.href?.startsWith("/dashboard/")) {
+        window.open(row.href, "_blank", "noopener,noreferrer");
+        return;
+      }
       setRelationshipClientId(row.clientIds[0] || null);
       return;
     }
-    const groupConditions: ReportStudioFilterClause[] = applied.groupBy.map((fieldId, index) => ({
+    const groupConditions = row.drilldownFilters ?? applied.groupBy.map((fieldId, index): ReportStudioFilterClause => ({
       id: `drill-${Date.now()}-${index}`,
       kind: "condition",
       field: fieldId,
@@ -1021,31 +1146,210 @@ export default function ReportStudio({
   };
 
   const sourceDefinition = REPORT_STUDIO_SOURCES.find((source) => source.id === draft.source);
+  const category = REPORT_BUILDER_CATEGORIES.find((entry) => entry.id === categoryId) ?? REPORT_BUILDER_CATEGORIES[0];
+  const billingAnalysis = isBillingAnalysisSource(draft.source);
+  const categorySources = [...new Set(category.sources.map(reportDatasetRoot))]
+    .filter(source => !["billing", "bill-register", "payments", "quotations", "invoice-tracking"].includes(source))
+    .filter((source) => !isRestrictedReportSource(source) || manualCatalog?.canEdit);
+  const layouts = reportLayouts(draft.source, availableFields);
+  const layoutKey = layouts.find(layout => layout.source === draft.source && layout.columns?.every(id => draft.columns.includes(id)))?.id ??
+    layouts.find(layout => layout.source === draft.source && layout.groupBy.join() === draft.groupBy.join())?.id ?? "";
+  const legacyBilling = applied.source === "billing" && billingDetails;
+  const prepareStep = (destination: number) => {
+    if (destination === 3 && step < 3) {
+      try { validateReportStudioConfig(draft, additionalFields); }
+      catch (problem) {
+        setStepError({ step, draft, message: problem instanceof Error ? problem.message : "Check your report setup." });
+        return false;
+      }
+      runReport();
+    }
+    if (destination === 4 && (step < 3 || dirty || !legacyBilling && (loading || !report))) {
+      setStepError({ step, draft, message: "Review the current preview before saving or exporting." });
+      return false;
+    }
+    setStepError(null);
+    setReached((current) => Math.max(current, destination));
+    return true;
+  };
+  const saveReportForm = <SaveReportForm name={saveName} activeReport={savedReports.find(report => report.id === activeSavedReportId)} loading={savedReportsLoading} saving={savingSavedReport} onName={setSaveName} onCreate={() => void createSavedReport()} onUpdate={() => void updateSavedReport()} onSaveCopy={() => void createSavedReport(true)} />;
+  const savedReportList = <SavedReportList reports={savedReports} activeId={activeSavedReportId} loading={savedReportsLoading} deletingId={deletingSavedReportId} onLoad={loadSaved} onDelete={(id) => void deleteSavedReport(id)} />;
+  const filterEditor = <FilterPanel group={draft.filters} fields={availableFields} onLogic={updateFilterLogic} onAdd={addFilter} onAddGroup={addFilterGroup} onField={changeFilterField} onUpdate={updateFilter} onRemove={removeFilter} />;
+  const columnPanelProps = { fields: availableFields, groups: fieldGroups, selected: draft.columns, colors: draft.excelColumnColors || {}, search: fieldSearch, onSearch: setFieldSearch, onToggle: toggleColumn, onToggleGroup: toggleColumnGroup, onReorder: reorderDraftColumn, onColor: setExcelColumnColor, onGroupColor: setExcelGroupColor };
+  const reportScope = `FY ${[...new Set([applied.financialYear, ...(applied.billingScope?.years ?? []), ...(applied.comparisonYears ?? [])])].join(", ")}`;
+  const layoutSummary = draft.groupBy.length
+    ? `One row per ${draft.groupBy.map(id => fieldMap.get(id)?.label ?? id).join(" → ")}`
+    : sourceDefinition?.grain ?? "One row per source record";
+  const billingFilters = draft.billingScope?.filters?.children ?? [];
+  const setQuickFilter = (field: string, value: ReportStudioFilterValue, operator: ReportStudioOperator = "eq", suffix = "") => {
+    const id = `quick-${field}${suffix}`;
+    setDraft((current) => {
+      const cleaned = withoutFilter(current.filters, id);
+      if (value === "") return { ...current, filters: cleaned, page: 1 };
+      const root: ReportStudioFilterGroup = cleaned.logic === "and" ? cleaned : { id: crypto.randomUUID(), kind: "group", logic: "and", children: [cleaned] };
+      return { ...current, filters: { ...root, children: [...root.children, { id, kind: "condition", field, operator, value }] }, page: 1 };
+    });
+  };
+  const quickFilters = [
+    ["client.category", "Client category"], ["client.state", "State"], ["client.registrationRecorded", "Registration record"],
+    ["annualReturn.status", "Annual Return status"], ["record.status", "Record status"], ["invoice.status", "Invoice status"], ["record.direction", "Direction"], ["calculated.purchaseComplete", "Purchase invoice coverage"],
+  ] as const;
+  const quickDate = availableFields.find((field) => field.id === (isReportDetailSource(draft.source) ? "record.date" : "client.registrationDate"));
   const viewOptions = [
     { id: "table" as const, label: "Table", Icon: Table2, available: true, help: "View detailed rows" },
     { id: "analysis" as const, label: "Analyze", Icon: PieChart, available: true, help: "Analyze totals and field completeness" },
-    { id: "pivot" as const, label: "Pivot", Icon: Sigma, available: applied.groupBy.length >= 2 && applied.metrics.length > 0, help: "Add two groupings and a metric to use Pivot" },
+    { id: "pivot" as const, label: "Pivot", Icon: Sigma, available: applied.groupBy.length === 2 && applied.metrics.length > 0, help: "Choose two grouping levels and a metric to use Pivot" },
     { id: "chart" as const, label: "Chart", Icon: BarChart3, available: applied.groupBy.length > 0 && applied.metrics.length > 0, help: "Add a grouping and a metric to use Chart" },
     { id: "relationships" as const, label: "Relationships", Icon: Network, available: applied.groupBy.length === 0, help: "Open an ungrouped report to use Relationships" },
   ];
 
   return (
     <div className="reports-page report-workspace">
-      <header className="report-workspace-header reports-hero report-restored-hero">
-        <div className="report-title-block"><span className="report-eyebrow"><Sparkles size={14} />Report Studio</span><h1>Turn your data into a clear answer</h1><p className="report-caption">Choose an outcome, refine it only when needed, and export exactly what you see.</p></div>
-        <div className="report-header-actions reports-action-cluster">
-          <motion.button type="button" onClick={() => setPanel("saved")} whileTap={reduceMotion ? undefined : { scale: 0.97 }} transition={reportControlSpring} className="report-secondary-button"><FolderOpen size={16} />Saved Reports</motion.button>
-          <ExportMenu fy={applied.financialYear} reportAvailable={Boolean(report) && !loading} totalRows={report?.pagination.totalRows} downloadingCurrent={downloading} downloading={quickDownloading} onDownloadCurrent={() => void downloadExcel()} onDownload={onDownloadQuickReport} onOpenCustomExport={onOpenCustomExport} />
+      <div className="report-builder-workspace">
+      <header className="report-builder-header">
+        <div className="report-builder-topline">
+          <div className="report-title-block"><span className="report-builder-kicker">Report Studio</span><h1>Create a report</h1></div>
+          <div className="report-builder-header-actions">
+            <button type="button" className="report-text-button" aria-haspopup="dialog" onClick={() => setLibrary("templates")}><Layers3 size={15} />Start from a template</button>
+            <button type="button" className="report-secondary-button" aria-haspopup="dialog" onClick={() => setLibrary("saved")}><FolderOpen size={15} />Saved reports</button>
+          </div>
         </div>
+        <ReportBuilderStepper step={step} reached={reached} reduced={reduced} onStep={(destination) => { if (prepareStep(destination)) navigateToStep(destination); }} />
       </header>
-      <div className="report-navigation">
-        <nav aria-label="Report templates" className="report-template-tabs">{REPORT_TEMPLATES.map((template) => {
-          const Icon = template.icon; const active = applied.source === template.source && !activeSavedReportId;
-          return <button key={template.source} type="button" aria-pressed={active} onClick={() => applyTemplate(template)} className={active ? "is-active" : ""}><Icon size={16} /><span className="report-template-full">{template.label}</span><span className="report-template-short">{template.source === "clients" ? "Targets" : template.source === "billing" ? "Payments" : template.source === "annual-returns" ? "Returns" : "Credits"}</span></button>;
-        })}</nav>
-        <div className="report-year-control"><span>FY</span><ReportSelect variant="bare" value={applied.financialYear} onChange={onFyChange} ariaLabel="Report financial year" options={FINANCIAL_YEARS.map((year) => ({ value: year, label: year }))} /></div>
+      <div className="report-builder-nav">
+        <div><h2>{REPORT_STAGE_HEADINGS[step]}</h2><ReportStepDescription step={step} reduced={reduced} /></div>
+        <WorkflowStepNavigationDock page={step} pages={REPORT_STEPS} commit={commit} reduceMotion={reduced}
+          onNavigate={(direction, keyboard) => { if (!commit && prepareStep(step + (direction === "next" ? 1 : -1))) navigateStep(direction, keyboard); }} />
       </div>
+      <motion.section key={step} aria-label={REPORT_STEPS[step].title} className={step === 3 ? "report-builder-preview" : "report-builder-stage"}
+        initial={reduced ? false : { opacity: 0, x: stepDirection * 10 }} animate={{ opacity: 1, x: 0 }} transition={reportFadeTransition}>
+      {stepError?.step === step && stepError.draft === draft && <p className="report-builder-validation" role="alert"><AlertTriangle size={15} />{stepError.message}</p>}
+      {step === 0 && <>
+        <div className="report-builder-categories" role="group" aria-label="Report category">{REPORT_BUILDER_CATEGORIES.map((entry) => <button key={entry.id} type="button" title={entry.description} aria-pressed={category.id === entry.id} onClick={() => {
+          if (category.id !== entry.id) {
+            setCategoryId(entry.id);
+            changeSource(entry.sources[0]);
+          }
+        }}>{entry.id === "advanced" ? "Advanced" : entry.title}</button>)}</div>
+        <fieldset>
+          <legend className="report-builder-label">Dataset</legend>
+          <div className="report-dataset-cards">
+            {categorySources.map(source => {
+              const definition = REPORT_STUDIO_SOURCES.find(entry => entry.id === source);
+              const [label, description] = REPORT_DATASET_CARD_COPY[source] ?? [definition?.label ?? source, definition?.description ?? ""];
+              const selected = reportDatasetRoot(draft.source) === source;
+              return <button key={source} type="button" aria-pressed={selected} onClick={() => { if (!selected) changeSource(source); }}>
+                <span><strong>{label}</strong><small>{description}</small></span><span className="report-dataset-indicator" aria-hidden="true">{selected && <Check size={12} strokeWidth={2.6} />}</span>
+              </button>;
+            })}
+          </div>
+        </fieldset>
+      </>}
+      {step === 1 && <>
+        <div className="report-builder-layout">
+        <div className="report-builder-dataset">
+          <label>Reporting layout<ReportSelect ariaLabel="Reporting layout" value={layoutKey} placeholder="Custom grouping"
+            options={layouts.map(layout => ({ value: layout.id, label: layout.label }))}
+            onChange={id => { const layout = layouts.find(entry => entry.id === id); if (layout) chooseLayout(layout); }} /></label>
+        </div>
+        {draft.source === "payment-register" && <div className="report-builder-dataset">
+          <label>Payment period<ReportSelect ariaLabel="Payment period" value={draft.paymentPeriod ?? "recorded"}
+            options={[{ value: "receipt", label: "Payment date" }, { value: "recorded", label: "Stored financial year" }]}
+            onChange={value => setDraft(current => ({ ...current, paymentPeriod: value === "receipt" ? "receipt" : "recorded", page: 1 }))} /></label>
+        </div>}
+        {billingAnalysis && draft.groupBy.some(id => ["bill.month", "bill.invoiceMonth", "bill.dueMonth"].includes(id)) && <div className="report-builder-dataset">
+          <label>Month basis<ReportSelect ariaLabel="Month basis"
+            value={draft.groupBy.find(id => ["bill.month", "bill.invoiceMonth", "bill.dueMonth"].includes(id)) ?? "bill.month"}
+            options={[{ value: "bill.month", label: "Bill date" }, { value: "bill.invoiceMonth", label: "Invoice date" }, { value: "bill.dueMonth", label: "Due date" }]}
+            onChange={field => setDraft(current => withGrouping(current, [...new Set(current.groupBy.map(id => ["bill.month", "bill.invoiceMonth", "bill.dueMonth"].includes(id) ? field : id))]))} /></label>
+        </div>}
+        </div>
+        <div className="report-layout-summary"><Table2 size={17} aria-hidden="true" /><div><strong>{layoutSummary}</strong><p className="report-caption">FY {draft.financialYear}{billingFilters.length ? ` · ${billingFilters.length} billing ${billingFilters.length === 1 ? "condition" : "conditions"}` : ""}</p></div></div>
+        <details className="report-builder-disclosure">
+          <summary>Grouping levels</summary>
+          <div className="report-builder-filter-grid mt-3">
+            {Array.from({ length: Math.min(draft.groupBy.length + 1, REPORT_GROUP_LIMIT) }, (_, index) => <label key={index}>Level {index + 1}
+              <ReportSelect ariaLabel={`Grouping level ${index + 1}`} value={draft.groupBy[index] ?? ""}
+                options={[{ value: "", label: "None" }, ...dimensionFields.filter(field => !draft.groupBy.includes(field.id) || draft.groupBy[index] === field.id)
+                  .map(field => ({ value: field.id, label: field.label, group: field.group }))]} searchable
+                onChange={field => setDraft(current => withGrouping(current, field ? [...current.groupBy.slice(0, index), field, ...current.groupBy.slice(index + 1)] : current.groupBy.slice(0, index)))} />
+            </label>)}
+          </div>
+        </details>
+        {billingAnalysis && <details className="report-builder-disclosure" open={billingScopeOpen} onToggle={(event) => setBillingScopeOpen(event.currentTarget.open)}>
+          <summary>Bill and charge scope</summary>
+          <div className="report-builder-scope">
+            <BillingScopeEditor financialYear={draft.financialYear} scope={draft.billingScope}
+              onYear={(financialYear) => setDraft(current => ({ ...current, financialYear, page: 1 }))}
+              onScope={(billingScope) => setDraft(current => ({ ...current, billingScope, page: 1 }))} />
+          </div>
+        </details>}
+      </>}
+      {step === 2 && <>
+        <ColumnPanel {...columnPanelProps} embedded />
+        {draft.groupBy.length > 0 && <details className="report-builder-disclosure"><summary>Summary measures</summary>
+          <ChoicePanel kind="metric" fields={metricFields} selected={draft.metrics} onToggle={toggleMetric} empty="Select measures to total for each group" />
+        </details>}
+        <CalculatedColumnEditor key={draft.source} config={draft} fields={availableFields} additionalFields={additionalFields} onChange={setDraft} />
+        {!isReportDetailSource(draft.source) && (manualCatalog ? <ReportManualEditor fields={manualCatalog.fields} canEdit={manualCatalog.canEdit}
+          financialYear={draft.financialYear} onCreate={(field) => setManualCatalog((current) => current && ({ ...current, fields: [...current.fields, field] }))}
+          onSave={() => setManualRevision((current) => current + 1)} /> : <p className="report-caption" role={manualError ? "alert" : "status"}>{manualError || "Loading manual data fields…"}</p>)}
+        {billingAnalysis ? <>
+        <div className="report-builder-scope-link"><p className="report-caption">{billingFilters.length ? `${billingFilters.length} bill and charge ${billingFilters.length === 1 ? "condition" : "conditions"} applied` : "All bills and charges in scope"} · FY {draft.financialYear}</p><button type="button" className="report-text-button" onClick={() => { setBillingScopeOpen(true); navigateToStep(1); }}>Edit billing scope<ArrowRight size={14} /></button></div>
+        <details className="report-builder-disclosure"><summary>Filter the resulting rows</summary>
+          <p className="report-caption mb-3">These conditions apply after the reporting level is calculated.</p>
+          {filterEditor}
+        </details>
+      </> : <>
+        <fieldset><legend className="report-builder-label">Filters</legend><div className="report-builder-filter-grid">
+          {draft.source !== "client-directory" && <label>Financial year<ReportSelect value={draft.financialYear} ariaLabel="Report financial year"
+            onChange={(financialYear) => setDraft((current) => ({ ...current, financialYear, page: 1 }))}
+            options={FINANCIAL_YEARS.map((value) => ({ value, label: value }))} /></label>}
+          {quickFilters.map(([id, label]) => {
+            if (draft.source === "invoice-months" && id === "record.status") return null;
+            const definition = availableFields.find((field) => field.id === id);
+            if (!definition) return null;
+            const value = filterConditions.find((condition) => condition.id === `quick-${id}`)?.value;
+            return <label key={id}>{label}{definition.options?.length ? <ReportSelect ariaLabel={label} value={String(value ?? "")} onChange={(next) => setQuickFilter(id, next)}
+              options={[{ value: "", label: "Any" }, ...definition.options.map((option) => ({ value: option, label: option }))]} />
+              : <input aria-label={label} className="input-field h-10" placeholder="Any" value={String(value ?? "")} onChange={(event) => setQuickFilter(id, event.target.value, id === "record.status" ? "contains" : "eq")} />}</label>;
+          })}
+          {quickDate && (["from", "to"] as const).map((bound) => <label key={bound}>{quickDate.shortLabel} {bound}
+            <input type="date" className="input-field h-10" value={String(filterConditions.find((condition) => condition.id === `quick-${quickDate.id}-${bound}`)?.value ?? "")}
+              onChange={(event) => setQuickFilter(quickDate.id, event.target.value, bound === "from" ? "gte" : "lte", `-${bound}`)} /></label>)}
+          {availableFields.some((field) => field.id === "billing.outstanding") && <label className="report-builder-checkbox"><input type="checkbox" checked={filterConditions.some((filter) => filter.id === "quick-billing.outstanding")} onChange={(event) => setQuickFilter("billing.outstanding", event.target.checked ? 0 : "", "gt")} /> Outstanding balance only</label>}
+          {availableFields.some((field) => field.id === "calculated.unbilled") && <label className="report-builder-checkbox"><input type="checkbox" checked={filterConditions.some((filter) => filter.id === "quick-calculated.unbilled")} onChange={(event) => setQuickFilter("calculated.unbilled", event.target.checked ? "Yes" : "")} /> Accepted quotations awaiting billing</label>}
+        </div></fieldset>
+        {REPORT_COMPARISON_SOURCES.has(draft.source) && <details className="report-builder-disclosure">
+          <summary>Compare financial years{draft.comparisonYears?.length ? ` · ${draft.comparisonYears.length + 1} years` : ""}</summary>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {draft.comparisonYears?.filter(year => year !== draft.financialYear).map(year => <button key={year} type="button" className="report-secondary-button"
+              onClick={() => setDraft(current => ({ ...current, comparisonYears: current.comparisonYears?.filter(value => value !== year), page: 1 }))}>{year}<X size={13} /></button>)}
+            <ReportSelect ariaLabel="Add comparison year" value="" placeholder="Add comparison year" disabled={(draft.comparisonYears?.length ?? 0) >= 5}
+              onChange={year => setDraft(current => ({ ...current, comparisonYears: [...(current.comparisonYears ?? []), year], page: 1 }))}
+              options={FINANCIAL_YEARS.filter(year => year !== draft.financialYear && !draft.comparisonYears?.includes(year)).map(value => ({ value, label: value }))} />
+          </div>
+        </details>}
+        <details className="report-builder-disclosure"><summary>Advanced conditions</summary><p className="report-caption mb-3">These rules decide which records are included. Date fields support a between condition.</p>{filterEditor}</details>
+      </>}
+      </>}
+      {step === 4 && <>
+        <div className="report-builder-finish">
+          <section className="report-builder-export">
+            <div><h3>Download report</h3><p className="report-caption">{applied.name} · {reportScope}</p></div>
+            <ExportMenu fy={applied.financialYear} reportAvailable={Boolean(report) && !loading && !dirty} totalRows={report?.pagination.totalRows} downloadingCurrent={downloading} downloading={quickDownloading} onDownloadCurrent={() => void downloadExcel()} onDownload={onDownloadQuickReport} onOpenCustomExport={onOpenCustomExport} />
+          </section>
+          {legacyBilling ? <p className="report-caption">Use the export controls in the Billing views to download their results.</p> : <section className="report-builder-save">
+            <h3>Save configuration</h3><p className="report-caption">Keep this layout, columns and filters for next time.</p>{saveReportForm}
+          </section>}
+        </div>
+      </>}
+      {(step === 3 || step === 4 && legacyBilling) && <>
+      {step === 3 && <p className="report-preview-summary">{REPORT_STUDIO_SOURCES.find(source => source.id === applied.source)?.label} <span>·</span> {reportScope}{isBillingAnalysisSource(applied.source) && applied.billingScope?.filters?.children.length ? ` · ${applied.billingScope.filters.children.slice(0, 2).map(filterLabel).join(" · ")}` : ""}</p>}
+      {applied.source === "billing" && <div className="flex flex-wrap gap-2"><button className="report-secondary-button" aria-pressed={billingDetails} onClick={() => setBillingDetails(true)}>Billing views</button><button className="report-secondary-button" aria-pressed={!billingDetails} onClick={() => setBillingDetails(false)}>Custom Studio report</button></div>}
+      {applied.source === "billing" && billingDetails ? <BillingReport financialYear={applied.financialYear} ready={ready} /> : <>
       <div className="report-context-bar"><div className="report-filter-chips"><span className="report-context-label"><Filter size={14} />{appliedConditions.length ? (applied.filters.logic === "or" ? "Match any" : "Filtered by") : "All matching clients"}</span>{appliedConditions.map((condition) => <span key={condition.id} className="report-filter-chip"><button title={filterLabel(condition)} onClick={() => { setSetupExpanded(true); setPanel("filters"); }}>{filterLabel(condition)}</button><button aria-label={`Remove filter: ${filterLabel(condition)}`} onClick={() => removeAppliedFilter(condition.id)}><X size={12} /></button></span>)}</div>
+        {isBillingAnalysisSource(applied.source) && <button type="button" className="report-text-button" onClick={() => navigateToStep(2)}><Filter size={15} />Billing scope</button>}
         <button type="button" onClick={() => setSetupExpanded((open) => !open)} className="report-text-button"><SlidersHorizontal size={15} />Customize{dirty && <span className="report-pending-dot" aria-label="Pending changes" />}</button>
       </div>
       <AnimatePresence initial={false}>{setupExpanded && <motion.section className="reports-glass-panel overflow-hidden rounded-[24px] p-3.5 sm:p-4" aria-labelledby="report-setup-title" initial={reduceMotion ? false : { opacity: 0, height: 0, y: -12 }} animate={{ opacity: 1, height: "auto", y: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0, y: -8 }} transition={reduceMotion ? { duration: 0.01 } : reportSoftSpring}>
@@ -1077,11 +1381,11 @@ export default function ReportStudio({
       </motion.section>}</AnimatePresence>
 
       <AnimatePresence>{panel && <StudioInspector key="studio-inspector" panel={panel} dirty={dirty} onClose={() => setPanel(null)} onUndo={() => setDraft(applied)} onRun={runReport}>
-        {panel === "columns" && <ColumnPanel groups={fieldGroups} selected={draft.columns} colors={draft.excelColumnColors || {}} search={fieldSearch} onSearch={setFieldSearch} onToggle={toggleColumn} onToggleGroup={toggleColumnGroup} onReorder={reorderDraftColumn} onColor={setExcelColumnColor} onGroupColor={setExcelGroupColor} />}
+        {panel === "columns" && <ColumnPanel {...columnPanelProps} />}
         {panel === "filters" && <div className="mx-auto -mt-1 w-full max-w-[840px]"><FilterPanel group={draft.filters} fields={availableFields} onLogic={updateFilterLogic} onAdd={addFilter} onAddGroup={addFilterGroup} onField={changeFilterField} onUpdate={updateFilter} onRemove={removeFilter} /></div>}
         {panel === "group" && <InspectorSplitLayout choice={<ChoicePanel kind="group" fields={dimensionFields} selected={draft.groupBy} onToggle={toggleGroup} empty="No grouping — one result row per source record" />} preview={<GroupingImpactPreview source={draft.source} fields={availableFields} selected={draft.groupBy} metrics={draft.metrics} appliedSelected={applied.groupBy} configurationDirty={dirty} report={report} />} />}
         {panel === "metrics" && <InspectorSplitLayout choice={<ChoicePanel kind="metric" fields={metricFields} selected={draft.metrics} onToggle={toggleMetric} empty="Select metrics for KPI cards and grouped results" />} preview={<MetricImpactPreview fields={availableFields} selected={draft.metrics} groupBy={draft.groupBy} appliedSelected={applied.metrics} configurationDirty={dirty} report={report} />} />}
-        {panel === "saved" && <><div className="mb-4 rounded-xl border border-base bg-surface p-3"><p className="text-xs text-muted">Report configurations and custom export presets are saved to your account.</p><button className="report-text-button mt-1" onClick={() => { setPanel(null); onOpenCustomExport(); }}>Open custom export presets<ArrowRight size={14} /></button></div><SavedPanel reports={savedReports} name={saveName} activeId={activeSavedReportId} loading={savedReportsLoading} saving={savingSavedReport} deletingId={deletingSavedReportId} onName={setSaveName} onCreate={() => void createSavedReport()} onUpdate={() => void updateSavedReport()} onSaveCopy={() => void createSavedReport(true)} onLoad={loadSaved} onDelete={(id) => void deleteSavedReport(id)} /></>}
+        {panel === "saved" && <><div className="mb-4 rounded-xl border border-base bg-surface p-3"><p className="text-xs text-muted">Report configurations and custom export presets are saved to your account.</p><button className="report-text-button mt-1" onClick={() => { setPanel(null); onOpenCustomExport(); }}>Open custom export presets<ArrowRight size={14} /></button></div>{saveReportForm}{savedReportList}</>}
       </StudioInspector>}</AnimatePresence>
 
       {error && <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-200"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><div><strong>Report could not run.</strong> {error}</div></div>}
@@ -1089,6 +1393,7 @@ export default function ReportStudio({
       {report && report.pagination.totalRows > 0 && applied.view !== "analysis" && <ReportOverview report={report} onFocus={focusReport} />}
       {report?.quality.messages.length ? <div className="report-quality-notice"><AlertTriangle size={16} /><div><strong>Some records need attention</strong><p>{report.quality.messages.join(" ")}</p></div><button onClick={() => setQualityOpen(true)}>Review records<ArrowRight size={14} /></button></div> : null}
       <ReportQualityPanel open={qualityOpen} financialYear={applied.financialYear} onClose={() => setQualityOpen(false)} />
+      {report?.summary.subtotals?.some(level => level.rows.length > 0) && <ReportSubtotals report={report} onOpen={drillIntoRow} />}
       <section id="report-results" className="reports-results-card relative overflow-hidden rounded-[24px]" aria-busy={loading}>
         {loading && report && <div role="status" className="absolute inset-x-0 top-0 z-20 flex h-1 overflow-hidden bg-brand-100/70 dark:bg-brand-950/50"><span className="h-full w-1/3 animate-pulse rounded-full bg-brand-500" /><span className="sr-only">Updating report data while keeping the current results available</span></div>}
         <div className="report-results-toolbar">
@@ -1110,9 +1415,24 @@ export default function ReportStudio({
           dirty={dirty}
           onSelectionChange={setBusinessResultIds}
         /></motion.div>}</AnimatePresence>
-        {loading && !report ? <InitialReportSkeleton ready={ready} /> : error && !report ? <div className="p-10 text-center"><p className="text-sm text-muted">Your report could not be loaded. Your setup has been kept.</p><button onClick={() => void fetchReport(applied, true)} className="report-secondary-button mx-auto mt-4"><RefreshCw size={15} />Try again</button></div> : report && report.rows.length > 0 ? <StudioResult report={report} availableFields={fieldsForSource(report.config.source, customFields)} onUpdateAnalysis={updateAnalysis} onDrilldownAnalysis={drillIntoAnalysisBucket} frozenColumnIds={frozenColumnIds} onFrozenColumnsChange={setFrozenColumnIds} onRowClick={drillIntoRow} onReorderColumn={reorderTableColumn} onMoveColumn={moveTableColumn} onInsertColumn={insertTableColumn} onShowColumn={showTableColumn} onShowAllColumns={showAllTableColumns} onHideColumn={hideTableColumn} onSortColumn={sortTableColumn} onAddSort={addTableSort} onClearColumnSort={clearTableColumnSort} onClearAllSort={clearAllTableSort} onOpenColumnFilter={openTableColumnFilter} onClearColumnFilter={clearTableColumnFilter} onFilterCell={filterFromTableCell} /> : <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center"><span className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface text-faint"><Layers3 className="h-5 w-5" /></span><h3 className="font-semibold text-default">No clients match this report</h3><p className="mt-1 max-w-md text-sm leading-6 text-muted">Try a different search, clear a filter, or choose another financial year.</p><div className="mt-4 flex flex-wrap justify-center gap-2">{appliedConditions.length > 0 && <button type="button" onClick={showAllRecords} className="btn-primary h-9 px-4 text-xs"><Sparkles className="h-3.5 w-3.5" />Show all records</button>}<button type="button" onClick={() => setPanel("filters")} className="glass-btn h-9 text-xs"><Filter className="h-3.5 w-3.5" />Review filters</button></div></div>}
+        {loading && !report ? <InitialReportSkeleton ready={ready} /> : error && !report ? <div className="p-10 text-center"><p className="text-sm text-muted">Your report could not be loaded. Your setup has been kept.</p><button onClick={() => void fetchReport(applied, true)} className="report-secondary-button mx-auto mt-4"><RefreshCw size={15} />Try again</button></div> : report && report.rows.length > 0 ? <StudioResult report={report} availableFields={appliedFields} onUpdateAnalysis={updateAnalysis} onDrilldownAnalysis={drillIntoAnalysisBucket} frozenColumnIds={frozenColumnIds} onFrozenColumnsChange={setFrozenColumnIds} onRowClick={drillIntoRow} onReorderColumn={reorderTableColumn} onMoveColumn={moveTableColumn} onInsertColumn={insertTableColumn} onShowColumn={showTableColumn} onShowAllColumns={showAllTableColumns} onHideColumn={hideTableColumn} onSortColumn={sortTableColumn} onAddSort={addTableSort} onClearColumnSort={clearTableColumnSort} onClearAllSort={clearAllTableSort} onOpenColumnFilter={openTableColumnFilter} onClearColumnFilter={clearTableColumnFilter} onFilterCell={filterFromTableCell} /> : <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center"><span className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface text-faint"><Layers3 className="h-5 w-5" /></span><h3 className="font-semibold text-default">No records match this report</h3><p className="mt-1 max-w-md text-sm leading-6 text-muted">Try a different search, clear a filter, or choose another financial year.</p><div className="mt-4 flex flex-wrap justify-center gap-2">{appliedConditions.length > 0 && <button type="button" onClick={showAllRecords} className="btn-primary h-9 px-4 text-xs"><Sparkles className="h-3.5 w-3.5" />Show all records</button>}<button type="button" onClick={() => setPanel("filters")} className="glass-btn h-9 text-xs"><Filter className="h-3.5 w-3.5" />Review filters</button></div></div>}
         {report && report.pagination.totalRows > 0 && (applied.view === "table" || applied.view === "relationships") && <div className="flex flex-col gap-3 border-t border-base px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs text-muted">Showing {Math.min((report.pagination.page - 1) * applied.pageSize + 1, report.pagination.totalRows)}–{Math.min(report.pagination.page * applied.pageSize, report.pagination.totalRows)} of {report.pagination.totalRows} rows</span><div className="flex items-center gap-2"><ReportSelect variant="bare" className="w-[116px] rounded-lg border border-base bg-surface" value={String(applied.pageSize)} onChange={(value) => setPageSize(Number(value))} ariaLabel="Rows per page" options={[10, 25, 50, 100].map((size) => ({ value: String(size), label: `${size} rows` }))} /><span className="px-1 text-[11px] text-faint">Page {report.pagination.page} of {report.pagination.totalPages}</span><button type="button" aria-label="Previous page" onClick={() => setPage(Math.max(1, applied.page - 1))} disabled={applied.page <= 1} className="rounded-lg border border-base p-1.5 text-muted disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button><button type="button" aria-label="Next page" onClick={() => setPage(Math.min(report.pagination.totalPages, applied.page + 1))} disabled={applied.page >= report.pagination.totalPages} className="rounded-lg border border-base p-1.5 text-muted disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button></div></div>}
       </section>
+      </>}
+      </>}
+      </motion.section>
+      </div>
+      <Modal open={library === "templates"} onClose={() => setLibrary(null)} title="Report templates" fluidMotion className="report-builder-library">
+        <div className="report-library-list">
+          {REPORT_TEMPLATES.map(template => <button key={template.source} type="button" className="report-library-entry" onClick={() => applyTemplate(template)}>
+            <span className={`report-library-icon ${template.tone}`}><template.icon size={17} /></span><span><strong>{template.label}</strong><small>{template.description}</small></span><ChevronRight size={15} aria-hidden="true" />
+          </button>)}
+        </div>
+      </Modal>
+      <Modal open={library === "saved"} onClose={() => setLibrary(null)} title="Saved reports" fluidMotion className="report-builder-library">
+        {savedReportList}
+        <button type="button" className="report-text-button mt-3" onClick={() => { setLibrary(null); onOpenCustomExport(); }}>Open custom export presets<ArrowRight size={14} /></button>
+      </Modal>
       <AnimatePresence>{relationshipClientId && <RelationshipDrawer key={relationshipClientId} clientId={relationshipClientId} financialYear={applied.financialYear} onClose={() => setRelationshipClientId(null)} />}</AnimatePresence>
     </div>
   );
@@ -1155,7 +1475,7 @@ function ExportMenu({ fy, totalRows, reportAvailable, downloadingCurrent, downlo
   return (
     <div ref={menuRef} className="relative">
       <motion.button type="button" onClick={() => setOpen((current) => !current)} aria-expanded={open} whileTap={reduceMotion ? undefined : { scale: 0.97 }} transition={reportControlSpring} className="report-primary-button">
-        <Download className="h-4 w-4" />Export<motion.span animate={{ rotate: open ? 180 : 0 }} transition={reduceMotion ? { duration: 0.01 } : reportControlSpring}><ChevronDown className="h-3.5 w-3.5" /></motion.span>
+        <Download className="h-4 w-4" />Export Excel<motion.span animate={{ rotate: open ? 180 : 0 }} transition={reduceMotion ? { duration: 0.01 } : reportControlSpring}><ChevronDown className="h-3.5 w-3.5" /></motion.span>
       </motion.button>
       <AnimatePresence>{open && (
         <motion.div className="reports-quick-export-menu reports-secondary-card fixed inset-x-4 top-24 rounded-2xl p-3 shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-[420px] sm:max-w-[calc(100vw-2rem)]" initial={reduceMotion ? false : { opacity: 0, scale: 0.975, y: -8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.985, y: -5 }} transition={reduceMotion ? { duration: 0.01 } : reportControlSpring} style={{ transformOrigin: "top right" }}>
@@ -1442,7 +1762,8 @@ function InspectorSplitLayout({ choice, preview }: { choice: ReactNode; preview:
   </div>;
 }
 
-function ColumnPanel({ groups, selected, colors, search, onSearch, onToggle, onToggleGroup, onReorder, onColor, onGroupColor }: {
+function ColumnPanel({ fields, groups, selected, colors, search, onSearch, onToggle, onToggleGroup, onReorder, onColor, onGroupColor, embedded = false }: {
+  fields: ReportStudioFieldDefinition[];
   groups: Array<[string, ReportStudioFieldDefinition[]]>;
   selected: string[];
   colors: Record<string, string>;
@@ -1453,13 +1774,14 @@ function ColumnPanel({ groups, selected, colors, search, onSearch, onToggle, onT
   onReorder: (sourceField: string, targetField: string) => void;
   onColor: (fieldId: string, color: string) => void;
   onGroupColor: (fieldIds: string[], color: string) => void;
+  embedded?: boolean;
 }) {
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(embedded);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(groups[0]?.[0] ? [groups[0][0]] : []));
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const definitionsById = new Map(groups.flatMap(([, fields]) => fields).map((definition) => [definition.id, definition]));
+  const definitionsById = new Map(fields.map((definition) => [definition.id, definition]));
   const selectedDefinitions = selected.map((id) => definitionsById.get(id)).filter((entry): entry is ReportStudioFieldDefinition => Boolean(entry));
   const toggleExpanded = (group: string) => setExpandedGroups((current) => {
     const next = new Set(current);
@@ -1467,8 +1789,8 @@ function ColumnPanel({ groups, selected, colors, search, onSearch, onToggle, onT
     return next;
   });
 
-  return <div className={`grid min-h-0 items-stretch gap-4 ${libraryOpen ? "xl:grid-cols-[minmax(350px,0.9fr)_minmax(420px,1.1fr)]" : ""}`}>
-    <section className={`report-inspector-panel min-w-0 w-full flex-col overflow-hidden rounded-[22px] ${libraryOpen ? "hidden xl:flex" : "flex"}`}>
+  return <div className={`grid min-h-0 items-stretch gap-4 ${embedded ? "report-field-picker" : ""} ${libraryOpen ? embedded ? "lg:grid-cols-2" : "xl:grid-cols-[minmax(350px,0.9fr)_minmax(420px,1.1fr)]" : ""}`}>
+    <section className={`report-inspector-panel min-w-0 w-full flex-col overflow-hidden rounded-[22px] ${libraryOpen ? embedded ? "hidden lg:flex" : "hidden xl:flex" : "flex"}`}>
       <div className="flex items-center justify-between gap-4 border-b border-base px-4 py-3.5"><div className="min-w-0"><div className="flex items-center gap-2"><h3 className="whitespace-nowrap text-xs font-semibold text-default">Selected columns</h3><span className="rounded-full bg-brand-50 px-2 py-0.5 text-[9px] font-bold text-brand-600 dark:bg-brand-950/35">{selected.length}</span></div><p className="mt-0.5 text-[9px] leading-4 text-muted">Drag rows to set table and Excel order.</p></div>{!libraryOpen && <button type="button" onClick={() => setLibraryOpen(true)} className="report-inspector-library-button inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[10px] font-semibold text-brand-600"><Plus className="h-3.5 w-3.5" />Field library</button>}</div>
       <div className="report-inspector-selected-list min-h-0 max-h-[calc(100dvh-260px)] flex-1 space-y-1 overflow-y-auto p-2.5">{selectedDefinitions.map((definition, index) => {
         const color = reportStudioExcelColor(definition, colors);
@@ -1484,7 +1806,7 @@ function ColumnPanel({ groups, selected, colors, search, onSearch, onToggle, onT
     </section>
 
     {libraryOpen && <section className="report-inspector-panel flex min-w-0 flex-col overflow-hidden rounded-[22px]">
-      <div className="flex items-start justify-between gap-4 px-4 pb-2.5 pt-3.5"><div className="min-w-0"><h3 className="text-xs font-semibold text-default">Field library</h3><p className="mt-0.5 max-w-[250px] text-[9px] leading-4 text-muted">Browse related website sections and add only what matters.</p></div><div className="flex shrink-0 items-center gap-2"><span className="rounded-full bg-surface px-2.5 py-1 text-[9px] font-semibold text-muted">{selected.length} selected</span><button type="button" onClick={() => setLibraryOpen(false)} aria-label="Close field library" className="report-inspector-library-button inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[10px] font-semibold text-default"><ChevronLeft className="h-3.5 w-3.5 xl:hidden" /><X className="hidden h-3.5 w-3.5 xl:block" /><span className="xl:hidden">Selected columns</span><span className="hidden xl:inline">Close</span></button></div></div>
+      <div className="flex items-center justify-between gap-2 px-4 pb-2.5 pt-3.5"><div className="min-w-0"><h3 className="text-xs font-semibold text-default">Field library</h3>{!embedded && <p className="mt-0.5 max-w-[250px] text-[9px] leading-4 text-muted">Browse related website sections and add only what matters.</p>}</div><div className="flex shrink-0 items-center gap-2"><span className="report-library-selection-count rounded-full bg-surface px-2.5 py-1 text-[9px] font-semibold text-muted">{selected.length} selected</span><button type="button" onClick={() => setLibraryOpen(false)} aria-label="Close field library" className="report-inspector-library-button inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[10px] font-semibold text-default"><ChevronLeft className={embedded ? "h-3.5 w-3.5 lg:hidden" : "h-3.5 w-3.5 xl:hidden"} /><X className={embedded ? "hidden h-3.5 w-3.5 lg:block" : "hidden h-3.5 w-3.5 xl:block"} /><span className={embedded ? "lg:hidden" : "xl:hidden"}>Selected columns</span><span className={embedded ? "hidden lg:inline" : "hidden xl:inline"}>Close</span></button></div></div>
       <div className="mx-3.5 mb-3"><InspectorSearch value={search} onChange={onSearch} placeholder="Search fields, sections or descriptions" /></div>
       <div className="report-inspector-library min-h-0 max-h-[calc(100dvh-310px)] flex-1 space-y-1 overflow-y-auto border-t border-base p-2">{groups.length === 0 ? <div className="rounded-xl border border-dashed border-base p-6 text-center text-xs text-muted">No fields match your search.</div> : groups.map(([group, fields]) => {
         const fieldIds = fields.map((field) => field.id);
@@ -1501,7 +1823,7 @@ function ColumnPanel({ groups, selected, colors, search, onSearch, onToggle, onT
             const active = selected.includes(definition.id);
             const selectedOrder = active ? selected.indexOf(definition.id) + 1 : null;
             return <div key={definition.id} className={`rounded-lg transition-colors ${active ? "bg-brand-50/80 dark:bg-brand-950/25" : "hover:bg-surface"}`}>
-              <div className="flex items-center gap-2 px-2 py-1.5"><button type="button" onClick={() => onToggle(definition.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left"><span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${active ? "border-brand-600 bg-brand-600 text-white" : "border-base bg-card"}`}>{active && <Check className="h-3 w-3" />}</span><span className="min-w-0 flex-1 truncate text-[10px] font-medium text-default">{definition.label}</span>{selectedOrder && <span className="text-[9px] font-bold tabular-nums text-brand-600">#{selectedOrder}</span>}</button><button type="button" onClick={() => setDetailId((current) => current === definition.id ? null : definition.id)} aria-label={`About ${definition.label}`} className={`rounded-md p-1 ${detailId === definition.id ? "bg-surface text-brand-600" : "text-faint hover:bg-surface hover:text-default"}`}><Info className="h-3.5 w-3.5" /></button></div>
+              <div className="flex items-center gap-2 px-2 py-1.5"><button type="button" role="checkbox" aria-checked={active} aria-label={definition.label} onClick={() => onToggle(definition.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left"><span aria-hidden="true" className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${active ? "border-brand-600 bg-brand-600 text-white" : "border-base bg-card"}`}>{active && <Check className="h-3 w-3" />}</span><span className="min-w-0 flex-1 truncate text-[10px] font-medium text-default">{definition.label}</span>{selectedOrder && <span aria-hidden="true" className="text-[9px] font-bold tabular-nums text-brand-600">#{selectedOrder}</span>}</button><button type="button" onClick={() => setDetailId((current) => current === definition.id ? null : definition.id)} aria-label={`About ${definition.label}`} aria-expanded={detailId === definition.id} className={`rounded-md p-1 ${detailId === definition.id ? "bg-surface text-brand-600" : "text-faint hover:bg-surface hover:text-default"}`}><Info className="h-3.5 w-3.5" /></button></div>
               {detailId === definition.id && <p className="border-t border-base/70 px-8 py-2 text-[9px] leading-4 text-muted">{definition.description}</p>}
             </div>;
           })}</div>}
@@ -1605,10 +1927,62 @@ function MetricImpactPreview({ fields, selected, groupBy, appliedSelected, confi
 }
 
 function parseFilterInput(value: string, definition: ReportStudioFieldDefinition, operator: ReportStudioOperator): ReportStudioFilterValue {
-  if (operator === "in" || operator === "not_in") return value.split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (operator === "in" || operator === "not_in" || operator === "same_set") return value.split(",").map((entry) => entry.trim()).filter(Boolean);
   if (["number", "quantity", "currency", "percentage"].includes(definition.type)) return value === "" ? null : Number(value);
   if (definition.type === "boolean") return value === "true";
   return value;
+}
+
+function CalculatedColumnEditor({ config, fields, additionalFields, onChange }: { config: ReportStudioConfig; fields: ReportStudioFieldDefinition[]; additionalFields: ReportStudioFieldDefinition[]; onChange: (next: ReportStudioConfig) => void }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [label, setLabel] = useState("");
+  const [condition, setCondition] = useState<ReportStudioFilterGroup>({ id: "rule-root", kind: "group", logic: "and", children: [] });
+  const [error, setError] = useState("");
+  const sourceFields = fields.filter((field) => !field.id.startsWith("rule."));
+  const columns = config.calculatedColumns || [];
+  const begin = (column?: typeof columns[number]) => {
+    setEditingId(column?.id || `rule.${crypto.randomUUID()}`);
+    setLabel(column?.label || "");
+    setCondition(column?.condition || { id: crypto.randomUUID(), kind: "group", logic: "and", children: [] });
+    setError("");
+  };
+  const defaultClause = (definition: ReportStudioFieldDefinition): ReportStudioFilterClause => ({
+    id: crypto.randomUUID(), kind: "condition", field: definition.id, operator: definition.operators[0],
+    value: definition.options?.length ? parseFilterInput(definition.options[0], definition, definition.operators[0]) : null,
+  });
+  const updateGroup = (id: string, update: (group: ReportStudioFilterGroup) => ReportStudioFilterGroup) => setCondition((current) => transformFilterGroup(current, id, update));
+  const add = (id = condition.id, nested = false) => {
+    if (!sourceFields[0]) return;
+    const child = defaultClause(sourceFields[0]);
+    updateGroup(id, (group) => ({ ...group, children: [...group.children, nested ? { id: crypto.randomUUID(), kind: "group", logic: "or", children: [child] } : child] }));
+  };
+  const save = () => {
+    if (!editingId) return;
+    const column = { id: editingId, label: label.trim(), condition };
+    const exists = columns.some((entry) => entry.id === editingId);
+    const next: ReportStudioConfig = { ...config, version: 2, calculatedColumns: exists ? columns.map((entry) => entry.id === editingId ? column : entry) : [...columns, column],
+      columns: config.columns.includes(editingId) ? config.columns : [...config.columns, editingId], page: 1 };
+    try { onChange(validateReportStudioConfig(next, additionalFields)); setEditingId(null); }
+    catch (problem) { setError(problem instanceof Error ? problem.message : "Check the calculated column."); }
+  };
+  return <details className="report-builder-disclosure">
+    <summary>Custom calculated columns</summary>
+    <p className="report-caption">A calculated column displays Yes, No or Unknown for each record. It does not remove rows.</p>
+    {columns.length > 0 && <ul className="my-3 flex flex-wrap gap-2">{columns.map((column) => <li key={column.id}><button type="button" className="report-secondary-button" onClick={() => begin(column)}>{column.label}</button></li>)}</ul>}
+    {!editingId ? <button type="button" className="report-secondary-button mt-3" onClick={() => begin()} disabled={columns.length >= 12}><Plus size={15} /> Add calculated column</button> : <div className="mt-3 space-y-3">
+      <label className="block text-sm">Column name<input className="input-field mt-1 block h-10" value={label} maxLength={80} onChange={(event) => setLabel(event.target.value)} /></label>
+      <FilterPanel group={condition} fields={sourceFields} onLogic={(id, logic) => updateGroup(id, (group) => ({ ...group, logic }))}
+        onAdd={add} onAddGroup={(id) => add(id, true)}
+        onField={(clause, id) => {
+          const field = sourceFields.find((entry) => entry.id === id);
+          if (field) setCondition((current) => updateConditionInGroup(current, clause.id, { ...defaultClause(field), id: clause.id, secondValue: undefined }));
+        }}
+        onUpdate={(id, patch) => setCondition((current) => updateConditionInGroup(current, id, patch))}
+        onRemove={(id) => setCondition((current) => removeFilterNode(current, id))} />
+      {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
+      <div className="flex flex-wrap gap-2"><button type="button" className="btn-primary" onClick={save} disabled={!label.trim() || condition.children.length === 0}>Apply calculated column</button><button type="button" className="report-secondary-button" onClick={() => setEditingId(null)}>Cancel</button></div>
+    </div>}
+  </details>;
 }
 
 function FilterPanel({ group, fields, onLogic, onAdd, onAddGroup, onField, onUpdate, onRemove }: {
@@ -1622,6 +1996,71 @@ function FilterPanel({ group, fields, onLogic, onAdd, onAddGroup, onField, onUpd
   onRemove: (id: string) => void;
 }) {
   return <FilterGroupEditor group={group} fields={fields} depth={0} onLogic={onLogic} onAdd={onAdd} onAddGroup={onAddGroup} onField={onField} onUpdate={onUpdate} onRemove={onRemove} />;
+}
+
+function BillingScopeEditor({ financialYear, scope, onYear, onScope }: {
+  financialYear: string; scope: ReportStudioConfig["billingScope"];
+  onYear: (financialYear: string) => void;
+  onScope: (scope: NonNullable<ReportStudioConfig["billingScope"]>) => void;
+}) {
+  const group: ReportStudioFilterGroup = scope?.filters ?? { id: "billing-scope", kind: "group", logic: "and", children: [] };
+  const years = (scope?.years ?? []).filter(year => year !== financialYear);
+  const change = (filters: ReportStudioFilterGroup) => onScope({ ...scope, filters });
+  const quick = (id: string) => group.children.find((child): child is ReportStudioFilterClause => child.kind === "condition" && child.id === `billing-quick-${id}`);
+  const setQuick = (field: string, value: ReportStudioFilterValue, operator: ReportStudioOperator = "eq") => {
+    const id = `billing-quick-${field}`;
+    const cleaned = withoutFilter(group, id);
+    if (value === "") return change(cleaned);
+    const children = cleaned.logic === "or" && cleaned.children.length ? [cleaned] : cleaned.children;
+    change({ ...cleaned, id: cleaned.logic === "or" ? crypto.randomUUID() : cleaned.id, logic: "and", children: [...children, { id, kind: "condition", field, operator, value }] });
+  };
+  const quickFields = ["bill.type", "charge.kind", "charge.classification", "bill.paymentStatus"];
+  const makeCondition = (definition: ReportStudioFieldDefinition): ReportStudioFilterClause => {
+    const operator = definition.operators[0];
+    return { id: crypto.randomUUID(), kind: "condition", field: definition.id, operator,
+      value: definition.options?.length ? parseFilterInput(definition.options[0], definition, operator) : "" };
+  };
+  const updateGroup = (id: string, update: (entry: ReportStudioFilterGroup) => ReportStudioFilterGroup) => change(transformFilterGroup(group, id, update));
+  const add = (id = group.id, nested = false) => {
+    const clause = makeCondition(billingScopeFields.find(field => field.id === "bill.type")!);
+    const child: ReportStudioFilterClause | ReportStudioFilterGroup = nested
+      ? { id: crypto.randomUUID(), kind: "group", logic: "or", children: [clause] } : clause;
+    updateGroup(id, entry => ({ ...entry, children: [...entry.children, child] }));
+  };
+  return <>
+    <div className="report-builder-filter-grid">
+      <label>Financial year<ReportSelect value={financialYear} ariaLabel="Report financial year" onChange={onYear}
+        options={FINANCIAL_YEARS.map(value => ({ value, label: value }))} /></label>
+      {quickFields.map(id => {
+        const definition = billingScopeFields.find(field => field.id === id)!;
+        return <label key={id}>{definition.label}<ReportSelect ariaLabel={definition.label} value={String(quick(id)?.value ?? "")}
+          onChange={value => setQuick(id, value)} options={[{ value: "", label: "Any" }, ...(definition.options ?? []).map(value => ({ value, label: value }))]} /></label>;
+      })}
+      <label className="report-builder-checkbox"><input type="checkbox" checked={!!quick("bill.outstanding")}
+        onChange={event => setQuick("bill.outstanding", event.target.checked ? 0 : "", "gt")} /> Outstanding bills only</label>
+    </div>
+    <details className="report-builder-disclosure" open={years.length ? true : undefined}><summary>Compare financial years{years.length ? ` · ${years.length + 1} years` : ""}</summary>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {years.map(year => <button key={year} type="button" className="report-secondary-button" aria-label={`Remove FY ${year}`}
+          onClick={() => onScope({ ...scope, years: years.filter(value => value !== year) })}>{year}<X size={13} /></button>)}
+        <ReportSelect ariaLabel="Add comparison year" value="" placeholder="Add comparison year" disabled={years.length >= 10}
+          onChange={year => onScope({ ...scope, years: [...years, year] })}
+          options={FINANCIAL_YEARS.filter(year => year !== financialYear && !years.includes(year)).map(value => ({ value, label: value }))} />
+      </div>
+    </details>
+    <details className="report-builder-disclosure"><summary>Advanced bill and charge conditions</summary>
+      <p className="report-caption mb-3">Combine bill, charge and EPR conditions. Conditions in the same group are checked against the same charge and its parent bill.</p>
+      <FilterPanel group={group} fields={billingScopeFields}
+        onLogic={(id, logic) => updateGroup(id, entry => ({ ...entry, logic }))}
+        onAdd={add} onAddGroup={id => add(id, true)}
+        onField={(clause, fieldId) => {
+          const definition = billingScopeFields.find(field => field.id === fieldId);
+          if (definition) change(updateConditionInGroup(group, clause.id, { ...makeCondition(definition), id: clause.id, secondValue: undefined }));
+        }}
+        onUpdate={(id, patch) => change(updateConditionInGroup(group, id, patch))}
+        onRemove={id => change(removeFilterNode(group, id))} />
+    </details>
+  </>;
 }
 
 function FilterGroupEditor({ group, fields, depth, onLogic, onAdd, onAddGroup, onField, onUpdate, onRemove }: {
@@ -1655,17 +2094,52 @@ function FilterConditionEditor({ condition, prefix, fields, onField, onUpdate, o
     <ReportSelect value={condition.operator} onChange={(value) => onUpdate(condition.id, { operator: value as ReportStudioOperator })} ariaLabel="Filter operator" options={definition.operators.map((operator) => ({ value: operator, label: REPORT_STUDIO_OPERATOR_LABELS[operator] }))} buttonClassName="min-h-9 text-xs" />
     {noValue
       ? <span className="px-2 text-xs text-faint">No value needed</span>
-      : definition.options && condition.operator !== "in" && condition.operator !== "not_in"
-        ? <ReportSelect value={String(condition.value ?? "")} onChange={(value) => onUpdate(condition.id, { value: parseFilterInput(value, definition, condition.operator) })} ariaLabel="Filter value" searchable={definition.options.length > 8} options={definition.options.map((option) => ({ value: option, label: option }))} buttonClassName="min-h-9 text-xs" />
+      : definition.options && !["in", "not_in", "same_set"].includes(condition.operator)
+        ? <ReportSelect value={String(condition.value ?? "")} onChange={(value) => onUpdate(condition.id, { value: parseFilterInput(value, definition, condition.operator) })} ariaLabel="Filter value" searchable={definition.options.length > 8} options={definition.options.map((option) => ({ value: option, label: definition.type === "boolean" ? option === "true" ? "Yes" : "No" : option }))} buttonClassName="min-h-9 text-xs" />
         : <input type={inputType} value={Array.isArray(condition.value) ? condition.value.join(", ") : String(condition.value ?? "")} onChange={(event) => onUpdate(condition.id, { value: parseFilterInput(event.target.value, definition, condition.operator) })} placeholder={condition.operator === "in" || condition.operator === "not_in" ? "Comma-separated values" : "Value"} className="input-field h-9 rounded-lg text-xs" />}
     <button type="button" onClick={() => onRemove(condition.id)} aria-label="Remove condition" className="rounded-lg p-2 text-faint hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/20"><Trash2 className="h-4 w-4" /></button>
     {condition.operator === "between" && <input type={inputType} value={String(condition.secondValue ?? "")} onChange={(event) => onUpdate(condition.id, { secondValue: parseFilterInput(event.target.value, definition, condition.operator) })} placeholder="And" className="input-field h-9 rounded-lg text-xs lg:col-start-4" />}
   </div>;
 }
 
-function SavedPanel({ reports, name, activeId, loading, saving, deletingId, onName, onCreate, onUpdate, onSaveCopy, onLoad, onDelete }: { reports: SavedStudioReport[]; name: string; activeId: string | null; loading: boolean; saving: boolean; deletingId: string | null; onName: (value: string) => void; onCreate: () => void; onUpdate: () => void; onSaveCopy: () => void; onLoad: (report: SavedStudioReport) => void; onDelete: (id: string) => void }) {
-  const activeReport = reports.find((report) => report.id === activeId);
-  return <div>{activeReport && <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-200 bg-brand-50/70 px-3 py-2 dark:border-brand-900/60 dark:bg-brand-950/20"><span className="min-w-0 text-xs text-muted">Editing <strong className="text-default">{activeReport.name}</strong></span><span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-brand-600">Loaded saved report</span></div>}<div className="flex flex-col gap-2 sm:flex-row"><input value={name} maxLength={120} disabled={saving} onChange={(event) => onName(event.target.value)} placeholder="Name this report configuration" className="input-field h-10 min-w-0 flex-1 rounded-xl text-sm" />{activeReport ? <><button type="button" disabled={saving || loading} onClick={onUpdate} className="btn-primary h-10 shrink-0 disabled:cursor-not-allowed disabled:opacity-60"><Save className="h-4 w-4" />{saving ? "Saving…" : "Update Saved"}</button><button type="button" disabled={saving || loading} onClick={onSaveCopy} className="glass-btn h-10 shrink-0 disabled:cursor-not-allowed disabled:opacity-60">Save as Copy</button></> : <button type="button" disabled={saving || loading} onClick={onCreate} className="btn-primary h-10 shrink-0 disabled:cursor-not-allowed disabled:opacity-60"><Save className="h-4 w-4" />{saving ? "Saving…" : "Save Current"}</button>}</div>{loading ? <div className="mt-3 rounded-xl border border-dashed border-base p-5 text-center text-xs text-muted"><div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" /><p className="mt-2">Loading saved reports from your account…</p></div> : reports.length === 0 ? <div className="mt-3 rounded-xl border border-dashed border-base p-5 text-center text-xs text-muted"><Bookmark className="mx-auto mb-2 h-5 w-5 text-faint" />No saved Report Studio configurations yet.</div> : <div className="mt-3 grid gap-2 sm:grid-cols-2">{reports.map((report) => <div key={report.id} className={`flex items-center justify-between gap-3 rounded-xl border bg-card p-3 ${report.id === activeId ? "border-brand-300 ring-1 ring-brand-100 dark:border-brand-800 dark:ring-brand-950" : "border-base"}`}><button type="button" onClick={() => onLoad(report)} className="min-w-0 flex-1 text-left"><span className="flex items-center gap-2"><strong className="block truncate text-xs text-default">{report.name}</strong>{report.id === activeId && <span className="shrink-0 rounded-full bg-brand-50 px-1.5 py-0.5 text-[8px] font-semibold uppercase text-brand-600 dark:bg-brand-950/40">Editing</span>}</span><span className="mt-0.5 block text-[10px] text-faint">{report.config.financialYear} · {report.config.columns.length} columns · {report.config.filters.children.length} filters</span></button><button type="button" disabled={deletingId === report.id} title="Delete saved report" onClick={() => onDelete(report.id)} className="rounded-lg p-1.5 text-faint hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /></button></div>)}</div>}</div>;
+function SaveReportForm({ name, activeReport, loading, saving, onName, onCreate, onUpdate, onSaveCopy }: {
+  name: string;
+  activeReport?: SavedStudioReport;
+  loading: boolean;
+  saving: boolean;
+  onName: (value: string) => void;
+  onCreate: () => void;
+  onUpdate: () => void;
+  onSaveCopy: () => void;
+}) {
+  return <div className="report-save-form">
+    {activeReport && <p className="report-caption">Editing <strong className="text-default">{activeReport.name}</strong></p>}
+    <label><span className="sr-only">Report name</span><input value={name} maxLength={120} disabled={saving} onChange={(event) => onName(event.target.value)} placeholder="Name this report configuration" className="input-field h-10 w-full rounded-xl text-sm" /></label>
+    <div className="flex flex-wrap gap-2">
+      <button type="button" disabled={saving || loading} onClick={activeReport ? onUpdate : onCreate} className="report-secondary-button"><Save size={15} />{saving ? "Saving…" : activeReport ? "Update saved report" : "Save report"}</button>
+      {activeReport && <button type="button" disabled={saving || loading} onClick={onSaveCopy} className="report-text-button px-2">Save as a copy</button>}
+    </div>
+  </div>;
+}
+
+function SavedReportList({ reports, activeId, loading, deletingId, onLoad, onDelete }: {
+  reports: SavedStudioReport[];
+  activeId: string | null;
+  loading: boolean;
+  deletingId: string | null;
+  onLoad: (report: SavedStudioReport) => void;
+  onDelete: (id: string) => void;
+}) {
+  if (loading) return <p className="report-library-status" role="status"><Loader2 size={16} className="motion-safe:animate-spin" />Loading saved reports…</p>;
+  if (!reports.length) return <p className="report-library-status"><Bookmark size={16} />Your saved reports will appear here.</p>;
+  return <ul className="report-library-list" aria-label="Saved report configurations">{reports.map(report => <li key={report.id}>
+    <button type="button" className="report-library-entry" onClick={() => onLoad(report)}>
+      <span className="report-library-icon"><Bookmark size={16} /></span>
+      <span><strong>{report.name}</strong><small>{report.config.financialYear} · {report.config.columns.length} columns{report.id === activeId ? " · Editing" : ""}</small></span>
+      <ChevronRight size={15} aria-hidden="true" />
+    </button>
+    <button type="button" className="report-library-delete" disabled={deletingId === report.id} aria-label={`Delete ${report.name}`} onClick={() => onDelete(report.id)}><Trash2 size={15} /></button>
+  </li>)}</ul>;
 }
 
 function BusinessResultsPanel({ results, options, selectedIds, automaticIds, relatedIds, canEdit, dirty, onSelectionChange }: {
@@ -2408,6 +2882,28 @@ function ContextButton({ label, active, disabled, disabledReason, hint, onClick 
   return <button type="button" role="menuitem" disabled={disabled} title={disabled ? disabledReason : undefined} onClick={onClick} className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40 ${active ? "font-semibold text-brand-600" : "text-default"}`}><span>{label}</span>{active ? <Check className="h-3.5 w-3.5" /> : hint ? <span className="text-base leading-none text-faint">{hint}</span> : null}</button>;
 }
 
+function ReportSubtotals({ report, onOpen }: { report: ReportStudioResponse; onOpen: (row: ReportStudioResponse["rows"][number]) => void }) {
+  const levels = report.summary.subtotals ?? [];
+  const labels = new Map(report.columns.map(column => [column.id, column]));
+  return <details className="report-builder-disclosure px-4 py-2">
+    <summary>Group subtotals</summary>
+    {levels.map(level => <div key={level.dimensions.join()} className="mb-3 overflow-x-auto">
+      <table className="reports-pivot-table min-w-full text-xs">
+        <caption className="report-caption text-left py-2">{level.dimensions.map(id => labels.get(id)?.label ?? id).join(" → ")}
+          {level.rows.length < level.totalRows ? ` · Showing ${level.rows.length} of ${level.totalRows}. Export Excel for all subtotals.` : ""}</caption>
+        <thead><tr>{[...level.dimensions, ...report.config.metrics].map(id => <th key={id} className="p-2 text-left">{labels.get(id)?.label ?? id}</th>)}</tr></thead>
+        <tbody>{level.rows.map(row => <tr key={row.id}>
+          {[...level.dimensions, ...report.config.metrics].map((id, index) => {
+            const definition = labels.get(id);
+            const value = definition ? formatCell(row.values[id] ?? null, definition) : "—";
+            return <td key={id} className="p-2">{index === 0 ? <button type="button" className="report-text-button" onClick={() => onOpen(row)}>{value}</button> : value}</td>;
+          })}
+        </tr>)}</tbody>
+      </table>
+    </div>)}
+  </details>;
+}
+
 function PivotView({ report, onRowClick }: { report: ReportStudioResponse; onRowClick: (row: ReportStudioResponse["rows"][number]) => void }) {
   const [rowField, columnField] = report.config.groupBy;
   const metricFields = report.config.metrics;
@@ -2421,9 +2917,13 @@ function PivotView({ report, onRowClick }: { report: ReportStudioResponse; onRow
   const columnDefinition = definitionsById.get(columnField);
   const metricDefinition = definitionsById.get(metricField);
   if (!rowDefinition || !columnDefinition || !metricDefinition) return null;
-  const rowKeys = Array.from(new Set(report.rows.map((row) => String(row.values[rowField] ?? "No value"))));
-  const columnKeys = Array.from(new Set(report.rows.map((row) => String(row.values[columnField] ?? "No value"))));
-  const rowMap = new Map(report.rows.map((row) => [`${String(row.values[rowField] ?? "No value")}\u0000${String(row.values[columnField] ?? "No value")}`, row]));
+  const axisLabel = (row: ReportStudioResponse["rows"][number], field: string) => {
+    const label = String(row.values[field] ?? "No value");
+    return field === "client.companyName" && row.clientIds.length === 1 ? `${label} (${row.clientIds[0]})` : label;
+  };
+  const rowKeys = Array.from(new Set(report.rows.map(row => axisLabel(row, rowField))));
+  const columnKeys = Array.from(new Set(report.rows.map(row => axisLabel(row, columnField))));
+  const rowMap = new Map(report.rows.map(row => [`${axisLabel(row, rowField)}\u0000${axisLabel(row, columnField)}`, row]));
   return <div className="overflow-auto p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="text-xs text-muted"><strong className="text-default">{rowDefinition.label}</strong> × <strong className="text-default">{columnDefinition.label}</strong></div>{metricFields.length > 1 && <ReportSelect variant="bare" className="w-[190px] rounded-xl border border-base bg-card" value={metricField} onChange={setMetricField} ariaLabel="Pivot metric" options={metricFields.map((fieldId) => ({ value: fieldId, label: definitionsById.get(fieldId)?.shortLabel || fieldId }))} />}</div><div className="reports-pivot-shell overflow-hidden rounded-2xl"><table className="reports-pivot-table min-w-full text-xs"><thead><tr><th className="px-3 py-2.5 text-left text-default">{rowDefinition.shortLabel}</th>{columnKeys.map((key) => <th key={key} className="px-3 py-2.5 text-right text-default">{key}</th>)}</tr></thead><tbody>{rowKeys.map((rowKey) => <tr key={rowKey}><td className="px-3 py-2.5 font-semibold text-default">{rowKey}</td>{columnKeys.map((columnKey) => { const row = rowMap.get(`${rowKey}\u0000${columnKey}`); return <td key={columnKey} tabIndex={row ? 0 : undefined} onKeyDown={(event) => { if (row && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onRowClick(row); } }} onClick={() => row && onRowClick(row)} className="cursor-pointer px-3 py-2.5 text-right font-medium text-brand-600 transition-colors hover:bg-brand-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500 dark:text-[#4aa8ff] dark:hover:bg-brand-950/20">{row ? formatCell(row.values[metricField] ?? null, metricDefinition) : "–"}</td>; })}</tr>)}</tbody></table></div></div>;
 }
 
@@ -2442,6 +2942,7 @@ type RelationshipData = {
   financialYearRecord: Record<string, unknown> | null;
   quotations: Array<Record<string, unknown>>;
   billing: Record<string, unknown> | null;
+  financial?: import("@/lib/billing-report").BillingCompanyRow | null;
   payments: Array<Record<string, unknown>>;
   annualReturn: Record<string, unknown> | null;
   invoiceCoverage: { sale: { doneCount: number }; purchase: { doneCount: number } };
@@ -2467,8 +2968,8 @@ function RelationshipDrawer({ clientId, financialYear, onClose }: { clientId: st
     return () => { cancelled = true; };
   }, [clientId, financialYear]);
   const clientName = String(data?.client?.companyName || clientId);
-  const billingTotal = Number(data?.billing?.totalAmount) || 0;
-  const paid = data?.payments.reduce((sum, payment) => sum + (Number(payment.amountPaid) || 0), 0) || 0;
+  const billingTotal = data?.financial?.billed || 0;
+  const paid = data?.financial?.paid || 0;
   return <motion.div
     className="fixed inset-0 z-50 flex justify-end bg-black/25 backdrop-blur-[2px]"
     initial={reduceMotion ? false : { opacity: 0 }}
@@ -2485,7 +2986,7 @@ function RelationshipDrawer({ clientId, financialYear, onClose }: { clientId: st
       transition={reduceMotion ? { duration: 0.01 } : reportPanelSpring}
     >
       <div className="sticky top-0 z-10 flex items-start justify-between border-b border-base bg-card/95 p-5 backdrop-blur-xl"><div><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-600">Relationship Explorer · {financialYear}</p><h2 className="mt-1 text-xl font-semibold text-default">{clientName}</h2><a href={`/dashboard/clients/${encodeURIComponent(clientId)}`} className="mt-1 inline-block text-xs font-semibold text-brand-600 hover:underline">Open client profile</a></div><button type="button" onClick={onClose} className="rounded-xl p-2 text-muted hover:bg-surface"><X className="h-5 w-5" /></button></div>
-      {error ? <div className="m-5 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</div> : !data ? <div className="flex min-h-80 items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-brand-600" /></div> : <motion.div className="space-y-4 p-5" initial={reduceMotion ? false : "hidden"} animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.025, delayChildren: 0.06 } } }}><RelationshipNode title="People" detail={`${data.contacts.length} related contact${data.contacts.length === 1 ? "" : "s"}`} tone="violet" /><RelationshipNode title={`Financial Year ${financialYear}`} detail={data.financialYearRecord ? "Financial Year record available" : "No Financial Year record"} tone="blue" /><div className="ml-5 grid gap-3 border-l border-base pl-4 sm:grid-cols-2"><RelationshipNode title="Targets / Credits" detail={data.financialYearRecord ? "Open the target columns in this report for CAT/type values" : "No target or generated-credit record"} tone="blue" /><RelationshipNode title="Annual Return" detail={String(data.annualReturn?.status || "Not recorded")} tone="indigo" /><RelationshipNode title="Invoice Tracking" detail={`${data.invoiceCoverage.sale.doneCount}/12 sale · ${data.invoiceCoverage.purchase.doneCount}/12 purchase months`} tone="teal" /><RelationshipNode title="CPCB Upload" detail={`${data.uploads.count} records · ${quantity(data.uploads.quantity)} quantity`} tone="teal" /></div><RelationshipNode title="Linked Quotations" detail={`${data.quotations.length} linked · ${data.quotations.filter((quotation) => quotation.status === "Accepted").length} accepted`} tone="emerald" /><div className="ml-5 grid gap-3 border-l border-base pl-4 sm:grid-cols-2"><RelationshipNode title="Billing" detail={data.billing ? `${formatCurrency(billingTotal)} billed` : "No billing record"} tone="amber" /><RelationshipNode title="Payments" detail={`${data.payments.length} records · ${formatCurrency(paid)} received · ${formatCurrency(billingTotal - paid)} outstanding`} tone="amber" /></div><div className="grid gap-3 sm:grid-cols-3"><RelationshipNode title="Documents" detail={`${data.documents.length} recent records`} tone="slate" /><RelationshipNode title="Tasks" detail={`${data.tasks.filter((task) => task.status === "open").length} open · ${data.tasks.length} recent`} tone="slate" /><RelationshipNode title="Activity" detail={`${data.activities.length} recent events`} tone="slate" /></div><RelationshipNode title="Credit Transactions" detail={`${data.transactions.inboundCount} inbound · ${data.transactions.outboundCount} outbound`} tone="violet" /></motion.div>}
+      {error ? <div className="m-5 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{error}</div> : !data ? <div className="flex min-h-80 items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-brand-600" /></div> : <motion.div className="space-y-4 p-5" initial={reduceMotion ? false : "hidden"} animate="visible" variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.025, delayChildren: 0.06 } } }}><RelationshipNode title="People" detail={`${data.contacts.length} related contact${data.contacts.length === 1 ? "" : "s"}`} tone="violet" /><RelationshipNode title={`Financial Year ${financialYear}`} detail={data.financialYearRecord ? "Financial Year record available" : "No Financial Year record"} tone="blue" /><div className="ml-5 grid gap-3 border-l border-base pl-4 sm:grid-cols-2"><RelationshipNode title="Targets / Credits" detail={data.financialYearRecord ? "Open the target columns in this report for CAT/type values" : "No target or generated-credit record"} tone="blue" /><RelationshipNode title="Annual Return" detail={String(data.annualReturn?.status || "Not recorded")} tone="indigo" /><RelationshipNode title="Invoice Tracking" detail={`${data.invoiceCoverage.sale.doneCount}/12 sale · ${data.invoiceCoverage.purchase.doneCount}/12 purchase months`} tone="teal" /><RelationshipNode title="CPCB Upload" detail={`${data.uploads.count} records · ${quantity(data.uploads.quantity)} quantity`} tone="teal" /></div><RelationshipNode title="Linked Quotations" detail={`${data.quotations.length} linked · ${data.quotations.filter((quotation) => quotation.status === "Accepted").length} accepted`} tone="emerald" /><div className="ml-5 grid gap-3 border-l border-base pl-4 sm:grid-cols-2"><RelationshipNode title="Billing" detail={data.financial?.billCount ? `${data.financial.billCount} bills · ${formatCurrency(billingTotal)} billed` : "No billing record"} tone="amber" /><RelationshipNode title="Payments" detail={`${data.payments.length} records · ${formatCurrency(paid)} received · ${formatCurrency(data.financial?.outstanding || 0)} outstanding · ${formatCurrency(data.financial?.advance || 0)} unapplied advance`} tone="amber" /></div><details className="rounded-xl border border-base p-3 text-xs text-muted"><summary className="cursor-pointer font-semibold">All underlying bills ({data.financial?.billCount || 0})</summary>{data.financial?.bills.map(bill => <p key={bill.billingId} className="mt-2 break-all">{bill.invoiceNumber || bill.title} · {bill.billingId} · {formatCurrency(bill.billed)} billed · {formatCurrency(bill.paid)} allocated · {formatCurrency(bill.outstanding)} outstanding</p>)}</details><details className="rounded-xl border border-base p-3 text-xs text-muted"><summary className="cursor-pointer font-semibold">All underlying bills ({data.financial?.billCount || 0})</summary>{data.financial?.bills.map(bill => <p key={bill.billingId} className="mt-2 break-all">{bill.invoiceNumber || bill.title} · {bill.billingId} · {formatCurrency(bill.billed)} billed · {formatCurrency(bill.paid)} allocated · {formatCurrency(bill.outstanding)} outstanding</p>)}</details><div className="grid gap-3 sm:grid-cols-3"><RelationshipNode title="Documents" detail={`${data.documents.length} recent records`} tone="slate" /><RelationshipNode title="Tasks" detail={`${data.tasks.filter((task) => task.status === "open").length} open · ${data.tasks.length} recent`} tone="slate" /><RelationshipNode title="Activity" detail={`${data.activities.length} recent events`} tone="slate" /></div><RelationshipNode title="Credit Transactions" detail={`${data.transactions.inboundCount} inbound · ${data.transactions.outboundCount} outbound`} tone="violet" /></motion.div>}
     </motion.aside>
   </motion.div>;
 }

@@ -1,21 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { sendEmail } from "@/utils/email";
+import { sendEmail, smtpRecipientSchema, smtpSubjectSchema } from "@/utils/email";
 import { connectDB } from "@/lib/mongoose";
 import EmailLog from "@/models/EmailLog";
+import { z } from "zod";
+
+const emailRequestSchema = z.strictObject({
+  to: smtpRecipientSchema,
+  subject: smtpSubjectSchema,
+  message: z.string().optional(),
+  quotationHtml: z.string().optional(),
+  reminderHtml: z.string().optional(),
+  logType: z.enum(["quotation", "payment_reminder", "annual_return_draft", "custom", "tracker", ""]).optional(),
+  logClientId: z.string().optional(),
+  logClientName: z.string().optional(),
+  logFy: z.string().optional(),
+});
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await req.json();
+  const body = emailRequestSchema.safeParse(await req.json().catch(() => undefined));
+  if (!body.success) return NextResponse.json({ error: "Invalid email details" }, { status: 400 });
   const { to, subject, message, quotationHtml, reminderHtml,
-          logType, logClientId, logClientName, logFy } = body;
-
-  if (!to || !subject) {
-    return NextResponse.json({ error: "to and subject are required" }, { status: 400 });
-  }
+          logType, logClientId, logClientName, logFy } = body.data;
 
   let html: string;
 

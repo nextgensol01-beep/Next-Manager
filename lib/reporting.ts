@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { QUOTATION_STATUSES } from "@/lib/quotationRules";
+import type { TargetCoverage } from "./financial-year-coverage";
 
 export const REPORT_VIEW_IDS = [
   "accepted-targets",
@@ -228,6 +229,9 @@ export type ReportClientRow = {
   customFields?: Record<string, string | number | boolean | null>;
   financialYear: string;
   financialYearRecorded: boolean;
+  targetCoverage?: TargetCoverage;
+  unbilledAcceptedCount?: number;
+  overdueBills?: number | null;
   quotationCount: number;
   sentQuotationCount: number;
   acceptedQuotationCount: number;
@@ -257,9 +261,14 @@ export type ReportClientRow = {
   pendingAmount: number;
   paymentStatus: ReportPaymentStatus;
   billingCreated: boolean;
+  annualBillingCreated: boolean;
+  annualBillingInvoiceCreated: boolean;
+  billingCount: number;
+  advanceBalance: number;
   billingInvoiceCreated: boolean;
   annualReturnStatus: string;
   invoiceCount: number;
+  invoiceMonthsObserved?: { sale: number; purchase: number };
   invoiceSaleMonthsReceived: number;
   invoicePurchaseMonthsReceived: number;
   invoiceCoveragePercent: number;

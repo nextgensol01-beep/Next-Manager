@@ -14,38 +14,11 @@ import ExcelJS from "exceljs";
 import { CURRENT_FY, FINANCIAL_YEARS } from "@/lib/utils";
 import { REPORT_FILE_PREFIX, isReportType, type ReportType } from "@/lib/reports";
 import { buildInvoiceCoverageSummary, getCoveredInvoiceMonths, getFinancialYearMonths } from "@/lib/invoiceCoverage";
-import { finaliseReadableReportSheet } from "@/lib/server/excel-report-style";
+import { applyHeaderStyle, applyDataStyle, finaliseReadableReportSheet } from "@/lib/server/excel-report-style";
+import { allocateBillingPayments, paise, money } from "@/lib/billing-report";
 
-const HEADER_COLOR = "FF2D47E2";
 const INR_NUM_FMT = "\"INR\" #,##0.00";
 type CreditBreakupType = "RECYCLING" | "EOL";
-
-function applyHeaderStyle(row: ExcelJS.Row) {
-  row.eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_COLOR } };
-    cell.alignment = { horizontal: "center", vertical: "middle" };
-    cell.border = { bottom: { style: "thin", color: { argb: "FF1E30A8" } } };
-  });
-  row.height = 22;
-}
-
-function applyDataStyle(row: ExcelJS.Row, idx: number) {
-  row.eachCell({ includeEmpty: true }, (cell) => {
-    cell.fill = {
-      type: "pattern", pattern: "solid",
-      fgColor: { argb: idx % 2 === 0 ? "FFDBEAFE" : "FFFFFFFF" },
-    };
-    cell.border = {
-      top:    { style: "thin", color: { argb: "FFE2E8F0" } },
-      left:   { style: "thin", color: { argb: "FFE2E8F0" } },
-      bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
-      right:  { style: "thin", color: { argb: "FFE2E8F0" } },
-    };
-    cell.alignment = { vertical: "middle" };
-  });
-  row.height = 18;
-}
 
 function hasOwn(rec: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(rec, key);
@@ -438,18 +411,27 @@ export async function GET(req: NextRequest) {
       { header: "Total Billed",      key: "totalAmount",   width: 14 },
       { header: "Billing Payments",  key: "billingPaid",   width: 16 },
       { header: "Advance Payments",  key: "advancePaid",   width: 16 },
-      { header: "Total Received",    key: "totalReceived", width: 15 },
+      { header: "Allocated + Advance", key: "totalReceived", width: 23 },
       { header: "Pending",           key: "pending",       width: 13 },
       { header: "Status",            key: "status",        width: 18 },
     ];
     applyHeaderStyle(ws.getRow(1));
 
-    const clients = await Client.find().sort({ companyName: 1 }).lean();
+    const clients = (await Client.find().sort({ companyName: 1 }).lean()).map(client => ({ clientId: String(client.clientId || ""), companyName: String(client.companyName || ""), category: String(client.category || "") }));
     const clientIds = clients.map((client) => client.clientId);
     const [billings, payments] = await Promise.all([
-      Billing.find({ clientId: { $in: clientIds }, financialYear: fy }).lean() as Promise<Record<string, unknown>[]>,
-      Payment.find({ clientId: { $in: clientIds }, financialYear: fy }).lean() as Promise<Record<string, unknown>[]>,
+      Billing.find({ financialYear: fy }).lean() as Promise<Record<string, unknown>[]>,
+      Payment.find({ $or: [{ financialYear: fy }, { paymentType: "advance" }] }).lean() as Promise<Record<string, unknown>[]>,
     ]);
+    const knownBillingClients = new Set(clientIds);
+    for (const bill of billings) {
+      const clientId = String(bill.clientId || "");
+      if (!knownBillingClients.has(clientId)) { clients.push({ clientId, companyName: `${clientId} (client unavailable)`, category: "" }); knownBillingClients.add(clientId); }
+    }
+    const allocation = allocateBillingPayments(billings, payments);
+    const review = wb.addWorksheet("Payment Review");
+    review.columns = [{ header: "Payment ID", key: "paymentId", width: 28 }, { header: "Client ID", key: "clientId", width: 18 }, { header: "Billing ID", key: "billingId", width: 28 }, { header: "Amount", key: "amount", width: 18 }, { header: "Reason", key: "reason", width: 60 }];
+    allocation.issues.forEach(issue => review.addRow(issue));
     const billingMap = new Map<string, Record<string, unknown>[]>();
     billings.forEach((billing) => {
       const clientId = String(billing.clientId || "");
@@ -468,17 +450,14 @@ export async function GET(req: NextRequest) {
       const clientBillings = billingMap.get(client.clientId) || [];
       const clientPayments = paymentMap.get(client.clientId) || [];
       if (clientBillings.length === 0 && clientPayments.length === 0) continue;
-      const billingPaid = clientPayments.reduce<number>(
-        (sum, payment) => sum + (payment.paymentType === "advance" ? 0 : (Number(payment.amountPaid) || 0)),
-        0
-      );
+      const billingPaid = money(clientBillings.reduce((sum, bill) => sum + (allocation.paid.get(String(bill._id)) || 0), 0));
       const advancePaid = clientPayments.reduce<number>(
         (sum, payment) => sum + (payment.paymentType === "advance" ? (Number(payment.amountPaid) || 0) : 0),
         0
       );
       const totalAmount = clientBillings.reduce((sum, billing) => sum + (Number(billing.totalAmount) || 0), 0);
       const totalReceived = billingPaid + advancePaid;
-      const pending = Math.max(0, totalAmount - billingPaid);
+      const pending = money(clientBillings.reduce((sum, bill) => sum + Math.max(0, paise(bill.totalAmount) - (allocation.paid.get(String(bill._id)) || 0)), 0));
       const status  = totalAmount > 0
         ? (pending <= 0 ? "Paid" : billingPaid > 0 ? "Partial" : "Unpaid")
         : (advancePaid > 0 ? "Advance Only" : billingPaid > 0 ? "Received Without Billing" : "No Billing");

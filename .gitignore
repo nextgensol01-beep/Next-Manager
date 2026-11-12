@@ -1,80 +1,115 @@
-# deps
-/node_modules
+# Dependencies, caches, and build output
+node_modules/
 /.pnp
-.pnp.js
-.yarn/install-state.gz
+.pnp.*
+/.yarn/install-state.gz
+/.yarn/unplugged/
+/.cache/
+/.npm/
+/.eslintcache
+/.turbo/
+/.next/
+/out/
+/build
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
 
-# testing
-/coverage
-
-# generated test output and local design artifacts
+# Generated tests, local reports, and browser profiles
+/coverage/
+/playwright-report/
+/test-results/
+/blob-report/
 /.artifacts/
 /tmp/
 /outputs/
+browser-profile/
+browser-profiles/
+.browser-profile/
+chrome-profile/
+.chrome-profile/
+puppeteer_dev_chrome_profile-*/
+*.har
+*.har.gz
+
+# Local exports and backups
+/exports/
+/backups/
+/dumps/
+/*.csv
+/*.tsv
+/*.xls
+/*.xlsx
+/*.xlsm
+/*.pdf
+/*.zip
+/*.7z
+/*.rar
+/*.tar
+/*.tar.gz
+/*.tgz
+*.bson
+*.dump
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Archived local Inngest experiment
 /local-inngest/
 /.inngest/
-/inngest*.log
 /inngest.json
 /inngest.yaml
 /inngest.yml
 /inngest.toml
 /inngest.properties
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-*.bak
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-/*-dev-server.*.log
-
-# locally downloaded OCR language cache
-/*.traineddata
-/*.traineddata.gz
-
-# local env files
-.env*.local
-.env
-.env.inngest*
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-# scoped generated test/runtime artifacts
-/tmp/**/node_modules/
-/.artifacts/**/node_modules/
-/tmp/**/.next/
-/.artifacts/**/.next/
-/tmp/**/profile-*/
-/tmp/ignore-check-*/
-/.artifacts/email-memory/files/*MiB-client-*.bin
-
-# conventional generated test reports
-/playwright-report/
-/test-results/
-/blob-report/
-
-# generated local logs
-/*.log
-/tmp/**/*.log
-/.artifacts/**/*.log
-
-# root environment variants; keep example templates visible
-/.env.*
+# Environment files and credentials. Keep the root templates available in Git.
+.env*
 !/.env.example
 !/.env.*.example
 !/.env.sample
 !/.env.template
+.aws/
+.ssh/
+.git-credentials
+.netrc
+_netrc
+.npmrc
+client_secret*.json
+service-account*.json
+service_account*.json
+credentials.json
+token.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Logs and temporary editor or OS files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.bak
+*.orig
+*.swp
+*.swo
+*~
+
+# Locally downloaded OCR language cache
+/*.traineddata
+/*.traineddata.gz

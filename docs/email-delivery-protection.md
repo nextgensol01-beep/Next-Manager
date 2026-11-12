@@ -63,3 +63,9 @@ Commands:
 Tests do not connect to production MongoDB or send real OTPs/client mail. Atomic database fixtures exercise the implemented conditional operations; they do not substitute for deployment validation of MongoDB indexes and real Gmail credentials. No deployment, environment-secret replacement or production-data mutation is included in this implementation.
 
 Validation completed on 13 October 2026: server security regressions, Settings/authorization browser checks, the complete Email clients browser suite, workflow-message regressions, TypeScript and the final production build passed. Changed security files lint cleanly. The build retains three existing warnings in the tracker page and client-profile image rendering. Browser verification includes actual touch holds, formatted OTP paste, and light/dark/mobile/reduced-motion captures; server verification includes business restrictions, legacy campaigns and an expired worker racing a replacement worker's item claim.
+
+## Gmail drafts sent manually
+
+The campaign excludes clients with an unresolved Gmail draft for the same tracker, workflow, and email type. The send worker checks this again before creating a draft or sending from an approved preview. Use **Skipped** to open a pending draft in Gmail. After sending or discarding it there, choose **Sync from Gmail** in the campaign preview.
+
+Sync checks up to 16 drafts at a time using the connected mailbox's read permission. It records the send time when it can match a draft's unique message identifier and recipients in Gmail Sent. For older drafts or changed identifiers, the campaign shows **Needs review** and can suggest a matching sent message. An administrator can confirm the match, enter the actual send time, or confirm that a missing draft was discarded. Confirmed sends count for initial-email and reminder rules. A confirmed discard clears the hold for that draft.

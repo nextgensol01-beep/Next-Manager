@@ -16,6 +16,7 @@ import { invalidate, useCache } from "@/lib/useCache";
 import { parseDevice } from "@/lib/device";
 import { DeviceOsIcon } from "@/components/ui/DeviceBrandIcon";
 import ConfirmModal from "@/components/ui/ConfirmModal";
+import AccountSecurityControls from "./AccountSecurityControls";
 
 type ActiveSession = {
   id: string;
@@ -50,6 +51,8 @@ type ManagedUser = {
   lastLoginProvider?: "credentials" | "google" | null;
   lastLoginIp?: string | null;
   lastLoginUserAgent?: string | null;
+  googleRequestLocation?: string;
+  twoFactorEnabled?: boolean;
 };
 
 type ActionSheetAction = {
@@ -414,7 +417,7 @@ function SessionCard({
       className="flex-shrink-0 inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap"
       style={{ backgroundColor: "rgba(0,122,255,0.12)", color: "#007AFF" }}
     >
-      ● Active now
+      ● Current Device
     </span>
   ) : (
     <button
@@ -474,6 +477,7 @@ function SessionCard({
             </span>
           </div>
           <p className="text-[11px] text-muted truncate">{entry.userEmail || ""}</p>
+          <SessionDetails entry={entry} />
         </div>
 
         {/* Col 3: Location + time */}
@@ -543,6 +547,7 @@ function SessionCard({
 
         {/* Row 3: Email */}
         <p className="text-[12px] text-muted mt-0.5 truncate">{entry.userEmail || ""}</p>
+        <SessionDetails entry={entry} />
 
         {/* Row 4: Location + time */}
         <div className="flex items-center gap-3 mt-2">
@@ -560,6 +565,11 @@ function SessionCard({
       </div>
     </div>
   );
+}
+
+function SessionDetails({ entry }: { entry: ActiveSession }) {
+  const time = (value: string) => value ? new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) + " IST" : "Unknown";
+  return <details className="mt-1 text-[11px] text-faint"><summary className="cursor-pointer">Session details · IP {entry.ip || "Unknown"}</summary><p>Login: {time(entry.createdAt)}</p><p>Last activity: {time(entry.updatedAt)}</p><p>Expires: {time(entry.expires)}</p></details>;
 }
 
 function SettingsGroup({ label, children }: { label?: string; children: React.ReactNode }) {
@@ -733,6 +743,7 @@ export default function AccessPanel() {
   };
 
   const openResetPassword = (user: ManagedUser) => {
+    if (user.role === "admin") { window.dispatchEvent(new Event("account-security-password")); return; }
     setPasswordInput("");
     setPasswordModal({ open: true, user });
   };
@@ -871,6 +882,7 @@ export default function AccessPanel() {
 
   return (
     <div className="space-y-5">
+      <AccountSecurityControls onChanged={() => { if (isAdmin) refreshAll(); else void loadSessions(); }} />
 
       {/* Users section */}
       {!isAdmin ? (
@@ -918,6 +930,8 @@ export default function AccessPanel() {
                         <p className="text-xs text-muted mt-0.5 truncate">
                           {entry.loginId || entry.email || "—"} · {loginMethodLabel(entry.loginMethod)}
                         </p>
+                        <p className="text-xs text-faint mt-0.5">2FA {entry.twoFactorEnabled ? "ON" : "OFF"} · Managed by account owner</p>
+                        {entry.googleStatus === "pending" && <div className="mt-1 space-y-0.5 text-xs text-muted"><p>Requested {formatDate(entry.googleRequestedAt)}</p><p>{parseDevice(entry.lastLoginUserAgent).label}</p><p>IP {entry.lastLoginIp || "Unknown"} · {entry.googleRequestLocation || "Unknown"}</p></div>}
                         {entry.lastLoginAt && (
                           <p className="text-xs text-faint mt-0.5">
                             Last login {formatDate(entry.lastLoginAt)}
@@ -1028,6 +1042,7 @@ export default function AccessPanel() {
 
       {/* Active Sessions */}
       <SettingsGroup label="Active Sessions">
+        <div className="px-4 py-2"><button type="button" className="text-sm font-medium text-[#007AFF]" onClick={() => setConfirmState({ open: true, title: "Revoke all your other sessions?", description: "Your current device will stay signed in.", onConfirm: async () => { try { const response = await fetch("/api/sessions?all=1", { method: "DELETE" }); if (!response.ok) { toast.error("Could not revoke sessions"); return; } toast.success("Other sessions revoked"); await loadSessions(); } finally { setConfirmState(closedConfirm); } } })}>Revoke all my other sessions</button></div>
         {/* Header row — icon label + icon-only refresh button */}
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">

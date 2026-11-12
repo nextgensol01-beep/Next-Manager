@@ -1,15 +1,30 @@
 import nodemailer from "nodemailer8";
+import { z } from "zod";
 
-export interface EmailPayload {
-  to: string;
-  subject: string;
-  html: string;
-  attachments?: Array<{
-    filename: string;
-    content: Buffer | string;
-    contentType?: string;
-  }>;
-}
+const controlCharacters = /[\x00-\x1f\x7f]/;
+const mailboxSchema = z.email();
+const isMailbox = (value: string) => !controlCharacters.test(value) && mailboxSchema.safeParse(value.trim()).success;
+const mailbox = z.string().refine(isMailbox);
+export const smtpRecipientSchema = z.union([
+  z.string().refine(value => value.split(",").every(isMailbox)),
+  z.array(mailbox).min(1),
+]);
+export const smtpSubjectSchema = z.string().refine(value => !!value.trim() && !controlCharacters.test(value));
+
+const smtpPayloadSchema = z.strictObject({
+  to: smtpRecipientSchema,
+  subject: smtpSubjectSchema,
+  html: z.string(),
+  // Internal callers may supply bytes or literal text, never a path, URL or stream.
+  attachments: z.array(z.strictObject({
+    filename: z.string().refine(value => !!value.trim() && value !== "." && value !== ".." &&
+      !controlCharacters.test(value) && !/[\\/:]/.test(value)),
+    content: z.union([z.instanceof(Buffer), z.string()]),
+    contentType: z.string().regex(/^[\w!#$&^.+-]+\/[\w!#$&^.+-]+$/).optional(),
+  })).optional(),
+});
+
+type EmailPayload = z.infer<typeof smtpPayloadSchema>;
 
 // Replace {{placeholders}} in templates
 export function processTemplate(template: string, variables: Record<string, string>): string {
@@ -109,39 +124,33 @@ function createTransporter() {
   return nodemailer.createTransport({
     service: "gmail",
     auth: { user, pass: password },
+    disableFileAccess: true,
+    disableUrlAccess: true,
   });
 }
 
 export async function sendEmail(
   payload: EmailPayload
 ): Promise<{ success: boolean; message: string }> {
-  const transporter = createTransporter();
-
-  // Mock mode when env vars not set
-  if (!transporter) {
-    console.log("[MOCK EMAIL] Not sent — GMAIL_USER / GMAIL_APP_PASSWORD not set in .env.local", {
-      to: payload.to,
-      subject: payload.subject,
-    });
-    return {
-      success: false,
-      message: "Email not sent: GMAIL_USER and GMAIL_APP_PASSWORD are not configured in .env.local",
-    };
-  }
+  const parsed = smtpPayloadSchema.safeParse(payload);
+  if (!parsed.success) return { success: false, message: "Invalid email details" };
 
   try {
+    const transporter = createTransporter();
+    if (!transporter) return { success: false, message: "Email service is not configured" };
+
+    const { to, subject, html, attachments } = parsed.data;
     await transporter.sendMail({
       from: `"Nextgen Solutions" <${process.env.GMAIL_USER}>`,
-      to: payload.to,
-      subject: payload.subject,
-      html: payload.html,
-      attachments: payload.attachments,
+      to,
+      subject,
+      html,
+      attachments,
     });
 
     return { success: true, message: "Email sent successfully" };
   } catch (error) {
     console.error("Email send error:", error);
-    const msg = error instanceof Error ? error.message : "Failed to send email";
-    return { success: false, message: msg };
+    return { success: false, message: "Failed to send email" };
   }
 }

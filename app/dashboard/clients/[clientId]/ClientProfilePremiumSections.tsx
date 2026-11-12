@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import NextImage from "next/image";
 import { createPortal } from "react-dom";
 import {
   AnimatePresence,
@@ -1549,7 +1550,11 @@ function TargetScreenshotCard({
         aria-label={`Open ${document.documentName}`}
       >
         {canPreview ? (
-          <img
+          <NextImage
+            unoptimized
+            width={160}
+            height={100}
+            decoding="auto"
             src={`/api/documents/${document._id}/preview`}
             alt=""
             loading="lazy"

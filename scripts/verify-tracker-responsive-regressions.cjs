@@ -1,5 +1,5 @@
 /* Reuse the established tracker regressions without overwriting their old
- * baselines or evidence. Each child uses the same task-owned build/profile. */
+ * baselines or evidence. Each child uses the same task-owned output with disposable OS browser profiles. */
 const fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:child_process');
 const root=path.resolve(__dirname,'..'), task=path.resolve(process.argv[process.argv.indexOf('--task')+1]);
 if(path.dirname(task)!==path.join(root,'tmp')||!path.basename(task).startsWith('tracker-responsive-task-'))throw Error('Task output scope mismatch');
@@ -13,8 +13,6 @@ for(const [name,mode] of stages.filter(([name])=>!only||only.some(value=>name.in
  const fs=require('fs'),path=require('path'),Module=require('module'),puppeteer=require('puppeteer-core');
  const root=${JSON.stringify(root)},task=${JSON.stringify(task)},originalRead=fs.readFileSync;
  fs.readFileSync=function(file,...options){const value=originalRead.call(this,file,...options);if(typeof file==='string'&&file===path.join(root,'app/client-profile-premium.css')&&typeof value==='string')return value+'\\n'+originalRead(path.join(root,'components/client-trackers/tracker-responsive.css'),'utf8');return value;};
- const launch=puppeteer.launch.bind(puppeteer);puppeteer.launch=options=>launch({...options,userDataDir:path.join(task,'regression-profile')});
- const makeTemporary=fs.mkdtempSync;fs.mkdtempSync=function(prefix,...options){if(!path.basename(prefix).startsWith('profile-'))return makeTemporary(prefix,...options);const profile=path.join(task,'regression-profile');fs.mkdirSync(profile,{recursive:true});return profile;};
  const file=path.join(root,'scripts',${JSON.stringify(name)});
  let source=originalRead(file,'utf8').replace(/path.join\\(root,\\s*(['\"])tmp\\/[^'\"]*(?:tests|ui)\\1/g,()=> 'path.join('+JSON.stringify(task)+',"regression-output"');
  if(${JSON.stringify(name)}==='verify-tracker-create.cjs')source=source.replace("url.pathname==='/fixture.js'","url.pathname.endsWith('.js')").replace("fs.readFileSync(path.join(output,'fixture.js'))","fs.readFileSync(path.join(output,path.basename(url.pathname)))");

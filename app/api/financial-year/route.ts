@@ -6,7 +6,7 @@ import FinancialYear from "@/models/FinancialYear";
 import CreditTransaction from "@/models/CreditTransaction";
 import { recordActivityEvent } from "@/lib/server/activity-events";
 import type { ITargetEntry, IGeneratedEntry } from "@/models/FinancialYear";
-import { validateReviewedTargetImport } from "@/lib/server/financial-year-entry-validation";
+import { normaliseEntries, deriveFlat, validateReviewedTargetImport } from "@/lib/server/financial-year-entry-validation";
 import { targetTrackingProvenance } from "@/lib/financial-year-coverage";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -16,32 +16,6 @@ const g = (r: Record<string, unknown>, canonical: string, legacy: string): numbe
 
 const VALID_TYPES = new Set(["RECYCLING", "EOL"]);
 const CAT_KEYS = ["1", "2", "3", "4"] as const;
-
-function normaliseEntries(raw: unknown[]): ITargetEntry[] {
-  const entries = new Map<string, ITargetEntry>();
-
-  for (const item of raw) {
-    const entry = item as Partial<ITargetEntry>;
-    const categoryId = String(entry.categoryId ?? "");
-    const rawType = String(entry.type ?? "").toUpperCase();
-    const type = VALID_TYPES.has(rawType) ? rawType as ITargetEntry["type"] : null;
-    const value = Number(entry.value);
-
-    if (!(CAT_KEYS as readonly string[]).includes(categoryId) || !type || !Number.isFinite(value) || value <= 0) {
-      continue;
-    }
-
-    const key = `${categoryId}|${type}`;
-    const existing = entries.get(key);
-    entries.set(key, {
-      categoryId,
-      type,
-      value: (existing?.value ?? 0) + value,
-    });
-  }
-
-  return Array.from(entries.values());
-}
 
 function normaliseCreditType(type: unknown): "RECYCLING" | "EOL" {
   return String(type).toUpperCase() === "EOL" ? "EOL" : "RECYCLING";
@@ -62,18 +36,6 @@ function usageEntriesFromTotals(
     }
   }
   return entries;
-}
-
-/** Sum entries per category across ALL types → flat cat1…cat4 fields */
-function deriveFlat(entries: ITargetEntry[], prefix: string): Record<string, number> {
-  const flat: Record<string, number> = {
-    [`${prefix}1`]: 0, [`${prefix}2`]: 0, [`${prefix}3`]: 0, [`${prefix}4`]: 0,
-  };
-  for (const e of entries) {
-    const k = `${prefix}${e.categoryId}`;
-    flat[k] = (flat[k] ?? 0) + e.value;
-  }
-  return flat;
 }
 
 /** Migrate legacy flat cat1Generated…cat4Generated to generated[] — defaults RECYCLING */
