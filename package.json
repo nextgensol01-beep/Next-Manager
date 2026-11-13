@@ -78,6 +78,10 @@
     "templates:build": "node scripts/inline-templates.cjs",
     "templates:check": "node scripts/inline-templates.cjs --check"
   },
+  "allowScripts": {
+    "tesseract.js": false,
+    "unrs-resolver@1.11.1": true
+  },
   "dependencies": {
     "@sparticuz/chromium": "^149.0.0",
     "@techstark/opencv-js": "^5.0.0-release.1",

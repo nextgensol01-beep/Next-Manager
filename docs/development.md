@@ -37,6 +37,8 @@ Edit email source HTML, then run `npm run templates:build` and `npm run template
 
 Update supported compatible groups, preserve npm/lockfile, and run their relevant auth/mail/financial/export/browser/build checks. Never run `npm audit fix --force`. Registry package counts are not exploit counts. Track development/build-only exposure separately from production paths and inspect actual callers.
 
+The npm `allowScripts` entries permit the pinned `unrs-resolver` native-binding check for ESLint and skip the Tesseract sponsorship message. Review the resolver's install script again when its locked version changes.
+
 The current scoped `next -> postcss` override uses the app's patched PostCSS 8 version to replace Next 15's vulnerable exact 8.4.31 pin. Retest CSS/build output when updating Next or removing that override. The existing UUID override is a compatibility package, not a dead direct import; audit its transitive consumers before changing it. MongoDB is explicitly pinned to the same 6.20.0 driver used by Mongoose to avoid duplicate nominal types. The `nodemailer8` alias now resolves to Nodemailer 10 with bundled types. Keep the alias separate from NextAuth's optional `nodemailer` peer.
 
 ## Performance and documentation

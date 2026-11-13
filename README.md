@@ -95,7 +95,9 @@ Start with [architecture](docs/architecture.md), [authentication](docs/authentic
 
 ## Deployment
 
-Vercel uses `npm ci` from `vercel.json`. Select the directory containing `package.json` as the project root (`.` for this repository; `align` only when inside a parent repository). Set production environment variables and the canonical origin in Vercel. Preserve Chromium tracing and verify deployed function/runtime duration compatibility. `.gitignore` keeps local environment files, credentials, business exports, and generated output out of Git while allowing the root environment templates. `.vercelignore` excludes those local files and the environment templates from Vercel CLI source uploads.
+Vercel runs `npm ci` and `npm run build` through `scripts/vercel-npm.cjs`, which removes the unsupported `npm_config_cache_dir` setting from those commands. Select the directory containing `package.json` as the project root (`.` for this repository or `align` when inside a parent repository). Set production environment variables and the canonical origin in Vercel. Preserve Chromium tracing and verify deployed function/runtime duration compatibility. `.gitignore` keeps local environment files, credentials, business exports, and generated output out of Git while allowing the root environment templates. `.vercelignore` excludes those local files and the environment templates from Vercel CLI source uploads.
+
+For quotation PDFs, deploy a revision that uses `/api/quotation/pdf` and Chromium. A compile error in `utils/pdfGenerator.ts` means the deployment source still contains the retired jsPDF helper. Check the deployment's Git commit and project root against this checkout.
 
 Verify billing indexes and complete the approved operator migration before enabling billing on a new database or rolling out the read-side change to an existing environment. [Billing schema maintenance](docs/billing-schema-maintenance.md)
 

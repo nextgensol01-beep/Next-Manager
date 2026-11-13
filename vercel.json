@@ -1,3 +1,4 @@
 {
-  "installCommand": "npm ci"
+  "installCommand": "node scripts/vercel-npm.cjs install",
+  "buildCommand": "node scripts/vercel-npm.cjs build"
 }
